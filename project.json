@@ -9,7 +9,7 @@
 	"c-sources": ["./lib/stb.c3l/native/*"],
   "cflags": "-fPIE",
   "version": "0.1.0",
-  "sources": [ "src/**" ],
+  "sources": [ "src/**", "test/main.c3" ],
   "output": "build",
   "targets": {
     "ui": {

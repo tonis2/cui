@@ -1,0 +1,17 @@
+{ 
+  "provides" : "cui",
+  "targets" : {
+    "macos-x64" : {
+      "linked-libs" : ["vulkan", "glfw", "vk"],
+      "dependencies" : ["glfw", "vk", "stb"]
+    },
+    "linux-x64" : {
+      "linked-libs" : ["vulkan", "glfw", "vk"],
+      "dependencies" : ["glfw", "vk", "stb"]
+    },
+    "windows-x64" : {
+      "linked-libs" : ["vulkan", "glfw", "vk"],
+      "dependencies" : ["glfw", "vk", "stb"]
+    }
+  }
+}

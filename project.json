@@ -1,0 +1,21 @@
+{
+
+  "langrev": "1",
+  "warnings": [ "no-unused" ],
+  "dependency-search-paths": [ "lib" ],
+  "dependencies": ["glfw", "vk", "stb"],
+  "linked-libraries": ["vulkan", "glfw"],
+  "features": ["GLFW_VK"],
+	"c-sources": ["./lib/stb.c3l/native/*"],
+  "cflags": "-fPIE",
+  "version": "0.1.0",
+  "sources": [ "src/**" ],
+  "output": "build",
+  "targets": {
+    "ui": {
+      "type": "executable"
+    }
+  },
+  "cpu": "generic",
+  "opt": "O0"
+}

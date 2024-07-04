@@ -12,8 +12,7 @@
 
 layout(binding = 1) uniform sampler2D materialSamplers[];
 
-layout(location = 0) in vec2 widget_size;
-layout(location = 1) in vec2 tex_pos;
+layout(location = 0) in vec2 tex_pos;
 
 layout(location = 0) out vec4 outColor;
 
@@ -29,12 +28,13 @@ float roundedBoxSDF(vec2 center, vec2 size, vec4 radius) {
 void main() {
     CanvasBuffer canvas_item = canvas_buffer[draw_index];
     float border_size = canvas_item.border_width / 100.0;
+    vec2 widget_size = vec2(0.5, 0.5) - vec2(border_size);
 
     float distance = 0.0;
-
+    
     distance = roundedBoxSDF(tex_pos - border_size - widget_size, widget_size, canvas_item.border_radius / 10.0);
 
-    vec4 fillColor = vec4(0.5, 0.5, 0.5, 1.0);
+    vec4 fillColor = vec4(0.5, 0.5, 0.5, 0.0);
     vec4 color = fillColor;
 
     if (distance < 0) {

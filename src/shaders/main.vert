@@ -22,9 +22,6 @@ void main() {
     CanvasBuffer canvas_item = canvas_buffer[draw_index];
     vec2 vertex = vertices[gl_VertexIndex];
 
-    float border_size = canvas_item.border_width / 100.0;
-    float aspect =  resolution.x / resolution.y;
-
     vec2 corner = canvas_item.corner / resolution;
     vec2 size = canvas_item.size / resolution;
 

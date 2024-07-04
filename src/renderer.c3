@@ -34,7 +34,10 @@ struct UniformBuffer {
 struct Renderer {
 	Camera camera;
 	Vec2f window_size;
+    Extent2D extent;
+
 	List(<String>) images;
+    List(<Drawing>) canvas;
 
 	GLFWwindow window;
     EventHandler events;
@@ -93,7 +96,9 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
 
     Renderer renderer = {
         .frame = 0,
-        .camera = camera::new(.eye = {0.0, 0.0, 1.0}, .aspect = window_size.x / window_size.y, .min_zoom = 0.1, .max_zoom = 10)
+        .camera = camera::new(.eye = {0.0, 0.0, 1.0}, .aspect = window_size.x / window_size.y, .min_zoom = 0.1, .max_zoom = 10),
+        .canvas = canvas,
+        .window_size = window_size
     };
 
 	defer {
@@ -258,6 +263,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
 
 	vk::Format depth_format = vk::findDepthFormat(.device = physical_device, .features = vk::FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     SurfaceFormatKHR format = SurfaceFormatKHR {.format = vk::FORMAT_B8G8R8A8_UNORM, .colorSpace = vk::COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    renderer.extent = {.width = (uint)window_size.x, .height = (uint)window_size.y };
 
     // Create swapchain
     uint min_images = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
@@ -300,8 +306,8 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
     }
 
     // Create command pool
-    CommandPool command_pool = device.createCommandPool(.queue = queue_family.graphics)!;
-    CommandBufferList command_buffers = device.createCommandBuffers(command_pool, swapchain_info.minImageCount)!;
+    renderer.command_pool = device.createCommandPool(.queue = queue_family.graphics)!;
+    renderer.command_buffers = device.createCommandBuffers(renderer.command_pool, swapchain_info.minImageCount)!;
 
     // Create allocator of 50MB - DEVICE_ONLY memory
     renderer.device_allocation = vk::Allocation {
@@ -426,6 +432,12 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
 
     Clock time = clock::now();
 
+    renderer.instance = instance;
+	renderer.debug_messenger = debug_messenger;
+	renderer.physical_device = physical_device;
+	renderer.queue_family = queue_family;
+	renderer.device = device;
+
 	return renderer;
 }
 
@@ -461,4 +473,154 @@ fn void Renderer.free(&self) {
 
     self.device.free();
     self.instance.free();
+}
+
+
+// void bool Renderer.windowOpen(self) {
+//     return !glfw::windowShouldClose(self.window);
+// }
+
+macro void! Renderer.@draw(self; @body(EventHandler events))
+{
+    // Run window loop
+    while (!glfw::windowShouldClose(self.window)) {
+        // Update keyboard/mouse events
+        self.events.update();
+    
+
+        Fence frame_fence = self.frame_fences[self.frame];
+        Semaphore wait_semaphore = self.wait_semaphores[self.frame];
+        Semaphore signal_semaphore = self.signal_semaphores[self.frame];
+
+        frame_fence.wait(self.device)!;
+        frame_fence.reset(self.device)!;
+
+        uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
+
+        RenderingInfo rendering_info = vk::renderingInfoBuilder()
+        .setLayerCount(1)
+        .setRenderArea({
+            .offset = Offset2D{ .x = 0, .y = 0 },
+            .extent = self.extent,
+        })
+        .setColorAttachments({
+            vk::renderingAttachmentInfoBuilder()
+            .setImageView(self.swapchain_views[next_image])
+            .setImageLayout(vk::IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+            .setStoreOp(vk::ATTACHMENT_STORE_OP_STORE)
+            .setLoadOp(vk::ATTACHMENT_LOAD_OP_CLEAR)
+            .setClearValue({
+                .color = { .float32 = { 0.0, 0.0, 0.0, 1.0 }}
+            })
+        })
+        .setDepthAttachment(&&vk::renderingAttachmentInfoBuilder()
+            .setImageView(self.depth_texture.imageView)
+            .setImageLayout(vk::IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+            .setStoreOp(vk::ATTACHMENT_STORE_OP_STORE)
+            .setLoadOp(vk::ATTACHMENT_LOAD_OP_CLEAR)
+            .setClearValue({
+            .depthStencil = { 1.0f, 0 }
+        }));
+
+        CommandBuffer command_buffer = self.command_buffers[next_image];
+        vk::resetCommandBuffer(command_buffer, 0)!;
+        vk::beginCommandBuffer(command_buffer, &&vk::commandBufferBeginInfoBuilder())!;
+
+        ImageMemoryBarrier image_memory_start = vk::imageMemoryBarrierBuilder()
+        .setDstAccessMask(vk::ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+        .setOldLayout(vk::IMAGE_LAYOUT_UNDEFINED)
+        .setNewLayout(vk::IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        .setImage(self.swapchain_images[next_image])
+        .setSubresourceRange({
+            .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        });
+
+        vk::cmdPipelineBarrier(
+            command_buffer,
+            vk::PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            vk::PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0,
+            0,
+            null,
+            0,
+            null,
+            1,
+            &image_memory_start
+        );
+
+        vk::cmdBeginRenderingKHR(command_buffer, &rendering_info);
+
+        vk::cmdSetViewport(command_buffer, 0, 1, &&vk::Viewport{ .width = self.window_size.x, .height = self.window_size.y, .minDepth = 0.0, .maxDepth = 1.0, .y = 0, .x = 0 });
+        vk::cmdSetScissor(command_buffer, 0, 1, &&vk::Rect2D { .extent = self.extent, .offset = { .x = 0, .y = 0 }});
+
+        vk::cmdBindPipeline(command_buffer, vk::PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
+        vk::cmdPushDescriptorSetKHR(command_buffer, vk::PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, self.descriptor_writes.len, &self.descriptor_writes[0]);
+
+        @body(self.events);
+
+        // Update canvas buffer
+        self.canvas_buffer.upload(self.canvas.entries, self.canvas.byte_size(), self.device);
+        
+        PushConstantData constant_data = {
+            .draw_index = 0,
+            .canvas = self.canvas_buffer.address,
+        };
+
+        // Draw scene
+        foreach (uint index, item: self.canvas) {
+            constant_data.draw_index = index;
+            vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, vk::SHADER_STAGE_VERTEX_BIT | vk::SHADER_STAGE_FRAGMENT_BIT, 0, PushConstantData.sizeof, &constant_data);    
+            vk::cmdDraw(command_buffer, 6, 1, 0, 0);
+        }
+
+        vk::cmdEndRenderingKHR(command_buffer);
+
+        ImageMemoryBarrier image_memory_end = vk::imageMemoryBarrierBuilder()
+        .setSrcAccessMask(vk::ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+        .setOldLayout(vk::IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        .setNewLayout(vk::IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        .setImage(self.swapchain_images[next_image])
+        .setSubresourceRange({
+            .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        });
+
+        vk::cmdPipelineBarrier(
+            command_buffer,
+            vk::PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            vk::PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0,
+            null,
+            0,
+            null,
+            1,
+            &image_memory_end
+        );
+
+        SubmitInfo submit_info = vk::submitInfoBuilder()
+        .setWaitSemaphores({ wait_semaphore })
+        .setCommandBuffers({ command_buffer })
+        .setSignalSemaphores({ signal_semaphore })
+        .setWaitDstStageMask({ vk::PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT });
+
+        vk::endCommandBuffer(command_buffer)!;
+        vk::queueSubmit(self.queue_family.graphics_handle, 1, &submit_info, frame_fence)!;
+
+        PresentInfoKHR present_info = vk::presentInfoKHRBuilder()
+        .setWaitSemaphores({ signal_semaphore })
+        .setSwapchains({ self.swapchain })
+        .setImageIndices({ next_image });
+
+        vk::queuePresentKHR(self.queue_family.graphics_handle, &present_info)!;
+
+        self.frame = (self.frame + 1) % 2;
+	}
 }

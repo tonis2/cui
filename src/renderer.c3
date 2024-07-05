@@ -13,7 +13,7 @@ import std::time;
 char[*] vertex_shader_data = $embed("./shaders/vertex.spv");
 char[*] fragment_shader_data = $embed("./shaders/fragment.spv");
 
-const ENABLE_VALIDATION_LAYERS = true;
+// const ENABLE_VALIDATION_LAYERS = true;
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
 
@@ -37,7 +37,6 @@ struct Renderer {
     Extent2D extent;
 
 	List(<String>) images;
-    List(<Drawing>) canvas;
 
 	GLFWwindow window;
     EventHandler events;
@@ -74,6 +73,8 @@ struct Renderer {
     vk::ImageList swapchain_images;
 
     uint frame;
+
+    bool enable_debug;
 }
 
 fault RendererErrors
@@ -82,7 +83,7 @@ fault RendererErrors
     FAILED_FINDING_GPU
 }
 
-fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[] images) {
+fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_debug = false) {
 
 	ZStringList validations;
 	ZStringList extensions;
@@ -97,8 +98,8 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
     Renderer renderer = {
         .frame = 0,
         .camera = camera::new(.eye = {0.0, 0.0, 1.0}, .aspect = window_size.x / window_size.y, .min_zoom = 0.1, .max_zoom = 10),
-        .canvas = canvas,
-        .window_size = window_size
+        .window_size = window_size,
+        .enable_debug = enable_debug
     };
 
 	defer {
@@ -139,7 +140,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
     extensions.add_all(&glfw_extensions);
     glfw_extensions.free();
 
-    if (ENABLE_VALIDATION_LAYERS) {
+    if (enable_debug) {
      extensions.add_array({"VK_EXT_debug_utils"});
     }
 
@@ -167,7 +168,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
         .setPfnUserCallback((PFN_vkDebugUtilsMessengerCallbackEXT)&vk::debugCallback);
 
     // Debug enabled
-    if (ENABLE_VALIDATION_LAYERS) {
+    if (enable_debug) {
       vk::checkValidationLayersSupport(validations)!;
       instanceInfo.enabledLayerCount = (uint)validations.len();
       instanceInfo.ppEnabledLayerNames = (char*)validations.entries;
@@ -176,7 +177,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
     vk::createInstance(&instanceInfo, null, &instance)!;
     vk::loadExtensions(instance);
 
-    if (ENABLE_VALIDATION_LAYERS) {
+    if (enable_debug) {
      renderer.debug_messenger = debug_info.build(instance)!;
     }
 
@@ -341,12 +342,12 @@ fn Renderer! new(Vec2f window_size = {800, 600}, List(<Drawing>) canvas, String[
     renderer.canvas_buffer = vk::bufferCreateInfoBuilder()
         .setUsage(vk::BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
         .setSharingMode(vk::SHARING_MODE_EXCLUSIVE)
-        .setSize(canvas.byte_size())
+        .setSize(Drawing.sizeof * 1000)
         .bind(&renderer.local_allocation)!;
 
     // Upload data to buffers
     renderer.uniform_buffer.upload(&uniform_data, UniformBuffer.sizeof, device);
-    renderer.canvas_buffer.upload(canvas.entries, canvas.byte_size(), device);
+    // renderer.canvas_buffer.upload(canvas.entries, canvas.byte_size(), device);
 
     // Create vulkan pipeline stuff
     renderer.descriptor_writes = {
@@ -447,7 +448,7 @@ fn void Renderer.free(&self) {
 
 
     self.device.waitIdle();
-    if (ENABLE_VALIDATION_LAYERS) self.debug_messenger.free(self.instance);
+    if (self.enable_debug) self.debug_messenger.free(self.instance);
 
     self.device_allocation.free();
     self.local_allocation.free();
@@ -480,14 +481,13 @@ fn void Renderer.free(&self) {
 //     return !glfw::windowShouldClose(self.window);
 // }
 
-macro void! Renderer.@draw(self; @body(EventHandler events))
+macro void! Renderer.@on_frame(self, List(<Drawing>) canvas; @body(EventHandler events))
 {
     // Run window loop
     while (!glfw::windowShouldClose(self.window)) {
         // Update keyboard/mouse events
         self.events.update();
     
-
         Fence frame_fence = self.frame_fences[self.frame];
         Semaphore wait_semaphore = self.wait_semaphores[self.frame];
         Semaphore signal_semaphore = self.signal_semaphores[self.frame];
@@ -563,7 +563,7 @@ macro void! Renderer.@draw(self; @body(EventHandler events))
         @body(self.events);
 
         // Update canvas buffer
-        self.canvas_buffer.upload(self.canvas.entries, self.canvas.byte_size(), self.device);
+        self.canvas_buffer.upload(canvas.entries, canvas.byte_size(), self.device);
         
         PushConstantData constant_data = {
             .draw_index = 0,
@@ -571,7 +571,7 @@ macro void! Renderer.@draw(self; @body(EventHandler events))
         };
 
         // Draw scene
-        foreach (uint index, item: self.canvas) {
+        foreach (uint index, item: canvas) {
             constant_data.draw_index = index;
             vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, vk::SHADER_STAGE_VERTEX_BIT | vk::SHADER_STAGE_FRAGMENT_BIT, 0, PushConstantData.sizeof, &constant_data);    
             vk::cmdDraw(command_buffer, 6, 1, 0, 0);

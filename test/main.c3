@@ -22,8 +22,8 @@ fn void! main(String[] args)
 	List(<Drawing>) canvas;
 	defer canvas.free();
 
-	Matrix4f transform = camera::matrixRotation(Vec3f{1.0, 0.0, 0.0}, 0)
-    .transpose();
+	// Matrix4f transform = camera::matrixRotation(Vec3f{1.0, 0.0, 0.0}, 0)
+    // .transpose();
 
     for (uint i = 0; i < 6; i += 2) {
         Vec2f box_size = {window_size.x / 3.3, window_size.y / 2};
@@ -38,7 +38,7 @@ fn void! main(String[] args)
             .border_radius = {1.0, 1.0, 1.0, 1.0},
             .color = {0.1, 0.5, 0.4, 1.0},
             .texture_id = i + 1,
-            .transform = transform
+            .transform = MATRIX4F_IDENTITY
         });
 
         float corner_offset = padding + i * (box_size.x / 2 + padding);
@@ -47,15 +47,26 @@ fn void! main(String[] args)
             .size = {box_size.x, box_size.y}, 
             .corner = {offset, box_size.y / 3},
             .texture_id = i,
-            .transform = transform
+            .transform = MATRIX4F_IDENTITY
         });
     }
 
 	Renderer renderer = cui::new(.window_size = window_size, .images = images)!;
 	defer catch renderer.free();
 
+    double x_rotation = 0;
+    double y_rotation = 0;
 	renderer.@on_frame(canvas; EventHandler events) {
-	
-	}!;
+        x_rotation += events.mouse_x_delta * 0.005;
+        y_rotation += events.mouse_y_delta * 0.005;
+
+        foreach (index, &item: canvas) {
+            if (index % 2 == 0) {
+                item.transform = MATRIX4F_IDENTITY.rotate_y((float)x_rotation * 1.5).rotate_x((float)y_rotation * 1.5);
+            } else {
+                item.transform = MATRIX4F_IDENTITY.rotate_y((float)x_rotation).rotate_x((float)y_rotation);
+            }
+        }
+	}!; 
 	
 }

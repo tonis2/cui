@@ -16,7 +16,6 @@ String[] images = {
 
 fn void! main(String[] args)
 {
-
 	Vec2f window_size = {900.0, 700.0};
 
 	List(<Drawing>) canvas;

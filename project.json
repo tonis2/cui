@@ -9,11 +9,16 @@
 	"c-sources": ["./lib/stb.c3l/native/*"],
   "cflags": "-fPIE",
   "version": "0.1.0",
-  "sources": [ "src/**", "test/main.c3" ],
+  "sources": [ "src/**"],
   "output": "build",
   "targets": {
     "ui": {
-      "type": "executable"
+      "type": "executable",
+      "sources-add": ["test/main.c3"]
+    },
+    "widget": {
+      "type": "executable",
+      "sources-add":[ "test/widgets.c3"]
     }
   },
   "cpu": "generic",

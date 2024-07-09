@@ -191,7 +191,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
       bool supports_extensions = pdevice.checkExtensionSupport(device_extensions)!;
       QueuePropertiesList queue_properties = pdevice.getQueueProperties()!;
 
-      queue.graphics = queue_properties.find(fn (usz index, QueueFamilyProperties props) => (usz)props.queueFlags & vk::QUEUE_GRAPHICS_BIT != 0);
+      queue.graphics = queue_properties.find(fn (usz index, QueueFamilyProperties props) => (QueueFlagBits)props.queueFlags & vk::QUEUE_GRAPHICS_BIT != 0);
       if (renderer.surface.checkSurfaceSupport(queue.graphics, pdevice)!) queue.present = queue.graphics;
 
       if (queue.is_ready() && supports_extensions) {

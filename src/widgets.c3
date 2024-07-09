@@ -5,7 +5,7 @@ import std::math;
 
 distinct Color = Vec4f;
 
-const Color WHITE = {1.0, 1.0, 1.0, 1.0} // 255;
+const Color WHITE = {1.0, 1.0, 1.0, 1.0}; // 255;
 const Color BLACK = {0.0, 0.0, 0.0, 1.0};
 const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 

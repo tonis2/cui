@@ -52,6 +52,7 @@ fn void! main(String[] args)
 
     double x_rotation = -0.8;
     double y_rotation = -0.8;
+    
 	renderer.@on_frame(canvas; EventHandler events) {
         x_rotation += events.mouse_x_delta * 0.005;
         y_rotation += events.mouse_y_delta * 0.005;

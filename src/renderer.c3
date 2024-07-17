@@ -83,6 +83,7 @@ fault RendererErrors
     FAILED_FINDING_GPU
 }
 
+
 fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_debug = false) {
 
 	ZStringList validations;
@@ -134,11 +135,13 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
 
     validations.add_array({"VK_LAYER_KHRONOS_validation"});
     device_extensions.add_array({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
+    extensions.add_array({"VK_KHR_surface"});
+
 
     // SETUP extensions
-    ZStringList glfw_extensions = glfw::getRequiredExtensions();
-    extensions.add_all(&glfw_extensions);
-    glfw_extensions.free();
+    // ZStringList glfw_extensions = glfw::getRequiredExtensions();
+    // extensions.add_all(&glfw_extensions);
+    // glfw_extensions.free();
 
     if (enable_debug) {
      extensions.add_array({"VK_EXT_debug_utils"});
@@ -176,6 +179,9 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
 
     vk::createInstance(&instanceInfo, null, &instance)!;
     vk::loadExtensions(instance);
+
+     // Create surface
+  
 
     if (enable_debug) {
      renderer.debug_messenger = debug_info.build(instance)!;
@@ -273,7 +279,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
       .setImageUsage(vk::IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
       .setImageSharingMode(vk::SHARING_MODE_EXCLUSIVE)
       .setCompositeAlpha(vk::COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
-      .setPresentMode(vk::PRESENT_MODE_MAILBOX_KHR)
+      .setPresentMode(vk::PRESENT_MODE_FIFO_KHR)
       .setPreTransform(capabilities.currentTransform)
       .setImageColorSpace(format.colorSpace)
       .setImageFormat(format.format)

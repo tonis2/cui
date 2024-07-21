@@ -4,10 +4,10 @@ import std::collections::list;
 import std::math;
 
 import vk;
-import glfw;
 import stb;
 import camera;
 import std::time;
+import rgfw;
 
 // Load shaders
 char[*] vertex_shader_data = $embed("./shaders/vertex.spv");
@@ -38,8 +38,7 @@ struct Renderer {
 
 	List(<String>) images;
 
-	GLFWwindow window;
-    EventHandler events;
+	rgfw::Window window;
 
 	Instance instance;
 	DebugUtilsMessengerEXT debug_messenger;
@@ -115,29 +114,28 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
         window_size
     };
 
-	// Init GLFW window
-	glfw::init();
-    glfw::windowHint(glfw::GLFW_CLIENT_API, glfw::GLFW_NO_API);
-    glfw::windowHint(glfw::GLFW_RESIZABLE, glfw::GLFW_FALSE);
-    glfw::windowHint(glfw::CONTEXT_VERSION_MAJOR, 4);
-    glfw::windowHint(glfw::CONTEXT_VERSION_MINOR, 1);
-
-    GLFWwindow window = glfw::createWindow((uint)window_size.x, (uint)window_size.y, "TEST", null, null);
-
-    if (window == null)
-    {
-        return RendererErrors.FAILED_CREATING_WINDOW?;
-    }
-
-    renderer.window = window;
-	renderer.events = { .window = window };
-    renderer.events.init();
+    rgfw::Window win = rgfw::createWindow("Vulkan Example", Rect {0, 0, (int)window_size.x, (int)window_size.y }, rgfw::CENTER);
+    // if (win == null) {
+    //     return RendererErrors.FAILED_CREATING_WINDOW?;
+    // }
 
     validations.add_array({"VK_LAYER_KHRONOS_validation"});
     device_extensions.add_array({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
     extensions.add_array({"VK_KHR_surface"});
 
+    if (env::OS_TYPE == MACOS) {
+        extensions.add_array({"VK_MVK_macos_surface", "VK_KHR_portability_enumeration"});
+        device_extensions.push("VK_KHR_portability_subset");
+    }
 
+    if (env::OS_TYPE == WIN32) {
+        extensions.add_array({"VK_KHR_win32_surface"});
+    }
+
+    if (env::OS_TYPE == LINUX) {
+        io::printfn("create linux surface");
+        extensions.add_array({"VK_KHR_xlib_surface"});
+    }
     // SETUP extensions
     // ZStringList glfw_extensions = glfw::getRequiredExtensions();
     // extensions.add_all(&glfw_extensions);
@@ -147,10 +145,9 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
      extensions.add_array({"VK_EXT_debug_utils"});
     }
 
-    if (env::os_is_darwin()) {
-      extensions.push("VK_KHR_portability_enumeration");
-      device_extensions.push("VK_KHR_portability_subset");
-    }
+    // if (env::os_is_darwin()) {
+
+    // }
 
     vk::checkExtensionSupport(extensions)!;
 
@@ -180,14 +177,37 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
     vk::createInstance(&instanceInfo, null, &instance)!;
     vk::loadExtensions(instance);
 
-     // Create surface
-  
+    // Create surface
+    $switch(env::OS_TYPE) 
+        $case LINUX: {
+            XlibSurfaceCreateInfoKHR createInfo = { vk::STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, null, 0, &win.src.display, (ulong)win.src.window};
+            vk::createXlibSurfaceKHR(instance, &createInfo, null, &renderer.surface)!;
+        }
+        $case MACOS: {
+            MacOSSurfaceCreateInfoMVK createInfo = { 
+                vk::STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK, 
+                null, 
+                0, 
+                win.src.window
+            };
+            vk::createMacOSSurfaceMVK(instance, &macos, NULL, &renderer.surface)!;
+        }
+        $case WIN32: {
+            Win32SurfaceCreateInfoKHR createInfo = {
+                vk::STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+                null,
+                0,
+                win.src.window,
+                win.src.hdc
+            };
+            vk::createWin32SurfaceKHR(instance, &createInfo, null, &renderer.surface)!;
+        }
+        $default: {}
+    $endswitch
 
     if (enable_debug) {
      renderer.debug_messenger = debug_info.build(instance)!;
     }
-
-    renderer.surface = glfw::createWindowSurface(instance, window, null)!;
 
     bool found_device = false;
     // Macro to find a valid device
@@ -452,7 +472,6 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
 fn void Renderer.free(&self) {
 	self.images.free();
 
-
     self.device.waitIdle();
     if (self.enable_debug) self.debug_messenger.free(self.instance);
 
@@ -487,12 +506,12 @@ fn void Renderer.free(&self) {
 //     return !glfw::windowShouldClose(self.window);
 // }
 
-macro void! Renderer.@on_frame(self, List(<Drawing>) canvas; @body(EventHandler events))
+macro void! Renderer.@on_frame(self, List(<Drawing>) canvas; @body())
 {
     // Run window loop
     while (!glfw::windowShouldClose(self.window)) {
         // Update keyboard/mouse events
-        self.events.update();
+
     
         Fence frame_fence = self.frame_fences[self.frame];
         Semaphore wait_semaphore = self.wait_semaphores[self.frame];
@@ -566,7 +585,7 @@ macro void! Renderer.@on_frame(self, List(<Drawing>) canvas; @body(EventHandler 
         vk::cmdBindPipeline(command_buffer, vk::PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
         vk::cmdPushDescriptorSetKHR(command_buffer, vk::PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, self.descriptor_writes.len, &self.descriptor_writes[0]);
 
-        @body(self.events);
+        @body();
 
         // Update canvas buffer
         self.canvas_buffer.upload(canvas.entries, canvas.byte_size(), self.device);

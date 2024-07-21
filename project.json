@@ -3,15 +3,15 @@
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
-  "dependencies": ["glfw", "vk", "stb", "rgfw"],
+  "dependencies": ["glfw", "vk", "stb", "xlib"],
   "features": ["GLFW_VK"],
   "version": "0.1.0",
-  "sources": [ "src/**"],
+  "cflags": "-g",
   "output": "build",
   "targets": {
     "ui": {
       "type": "executable",
-      "sources-add": ["test/main.c3"]
+      "sources-add": ["test/main.c3", "src/**"]
     },
     "widget": {
       "type": "executable",

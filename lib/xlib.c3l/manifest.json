@@ -1,0 +1,12 @@
+{ 
+  "provides" : "xlib",
+  "targets" : {
+    "macos-x64" : {
+      "linked-libs" : ["X11"]
+    },
+    "linux-x64" : {
+      "linked-libs" : ["X11"]
+    },
+    "windows-x64" : {}
+  }
+}

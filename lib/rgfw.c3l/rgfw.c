@@ -28,6 +28,7 @@
 #define RGFW_PRINT_ERRORS
 #define RGFW_NO_API
 #define RGFW_NO_MONITOR
+#define RGFW_ALLOC_DROPFILES
 
 /*
 	(MAKE SURE RGFW_IMPLEMENTATION is in exactly one header or you use -D RGFW_IMPLEMENTATION)

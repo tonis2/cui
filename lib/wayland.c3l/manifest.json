@@ -1,0 +1,12 @@
+{ 
+  "provides" : "wayland",
+  "targets" : {
+    "macos-x64" : {
+      "linked-libs" : ["wayland-client"]
+    },
+    "linux-x64" : {
+      "linked-libs" : ["wayland-client"]
+    },
+    "windows-x64" : {}
+  }
+}

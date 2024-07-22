@@ -122,16 +122,8 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
     glfw::windowHint(glfw::CONTEXT_VERSION_MAJOR, 4);
     glfw::windowHint(glfw::CONTEXT_VERSION_MINOR, 1);
 
-    GLFWwindow window = glfw::createWindow((uint)window_size.x, (uint)window_size.y, "TEST", null, null);
+ 
 
-    if (window == null)
-    {
-        return RendererErrors.FAILED_CREATING_WINDOW?;
-    }
-
-    renderer.window = window;
-	renderer.events = { .window = window };
-    renderer.events.init();
 
     validations.add_array({"VK_LAYER_KHRONOS_validation"});
     device_extensions.add_array({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
@@ -181,31 +173,42 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
     vk::loadExtensions(instance);
 
      // Create surface
-  
 
     if (enable_debug) {
      renderer.debug_messenger = debug_info.build(instance)!;
     }
 
+    bool found_device = false;
+
+    DeviceList devices = instance.getDevices()!;
+
+    // Create window later, so vulkan initiation delays wont throw error while waiting
+    GLFWwindow window = glfw::createWindow((uint)window_size.x, (uint)window_size.y, "TEST", null, null);
+
+    if (window == null)
+    {
+        return RendererErrors.FAILED_CREATING_WINDOW?;
+    }
+
     renderer.surface = glfw::createWindowSurface(instance, window, null)!;
 
-    bool found_device = false;
-    // Macro to find a valid device
-    instance.@requestDevice(;PhysicalDevice pdevice) {
-      QueueFamily queue;
-      // Check for device extension support
-      bool supports_extensions = pdevice.checkExtensionSupport(device_extensions)!;
-      QueuePropertiesList queue_properties = pdevice.getQueueProperties()!;
+    foreach (entry: devices) {
+        QueueFamily queue;
+        // Check for device extension support
+        bool supports_extensions = entry.checkExtensionSupport(device_extensions)!;
+        QueuePropertiesList queue_properties = entry.getQueueProperties()!;
 
-      queue.graphics = queue_properties.find(fn (usz index, QueueFamilyProperties props) => (QueueFlagBits)props.queueFlags & vk::QUEUE_GRAPHICS_BIT != 0);
-      if (renderer.surface.checkSurfaceSupport(queue.graphics, pdevice)!) queue.present = queue.graphics;
+        queue.graphics = queue_properties.find(fn (usz index, QueueFamilyProperties props) => (QueueFlagBits)props.queueFlags & vk::QUEUE_GRAPHICS_BIT != 0);
+        if (renderer.surface.checkSurfaceSupport(queue.graphics, entry)!) queue.present = queue.graphics;
 
-      if (queue.is_ready() && supports_extensions) {
-         physical_device = pdevice;
-         queue_family = queue;
-         found_device = true;
-      }
-    }!;
+        if (queue.is_ready() && supports_extensions) {
+            physical_device = entry;
+            queue_family = queue;
+            found_device = true;
+        }
+    }
+    // physical_device = devices[2];
+    devices.free();
 
     if (!found_device) {
       io::printfn("Did not found suitable device!");
@@ -444,6 +447,12 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
 	renderer.physical_device = physical_device;
 	renderer.queue_family = queue_family;
 	renderer.device = device;
+
+
+
+    renderer.window = window;
+	renderer.events = { .window = window };
+    renderer.events.init();
 
 	return renderer;
 }

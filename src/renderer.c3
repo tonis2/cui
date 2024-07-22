@@ -122,9 +122,6 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
     glfw::windowHint(glfw::CONTEXT_VERSION_MAJOR, 4);
     glfw::windowHint(glfw::CONTEXT_VERSION_MINOR, 1);
 
- 
-
-
     validations.add_array({"VK_LAYER_KHRONOS_validation"});
     device_extensions.add_array({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
     // extensions.add_array({"VK_KHR_surface"});
@@ -207,7 +204,7 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
             found_device = true;
         }
     }
-    // physical_device = devices[2];
+
     devices.free();
 
     if (!found_device) {

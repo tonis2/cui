@@ -135,13 +135,13 @@ fn Renderer! new(Vec2f window_size = {800, 600}, String[] images, bool enable_de
 
     validations.add_array({"VK_LAYER_KHRONOS_validation"});
     device_extensions.add_array({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
-    extensions.add_array({"VK_KHR_surface"});
+    // extensions.add_array({"VK_KHR_surface"});
 
 
     // SETUP extensions
-    // ZStringList glfw_extensions = glfw::getRequiredExtensions();
-    // extensions.add_all(&glfw_extensions);
-    // glfw_extensions.free();
+    ZStringList glfw_extensions = glfw::getRequiredExtensions();
+    extensions.add_all(&glfw_extensions);
+    glfw_extensions.free();
 
     if (enable_debug) {
      extensions.add_array({"VK_EXT_debug_utils"});

@@ -3,7 +3,7 @@
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
-  "dependencies": ["glfw", "vk", "stb", "rgfw"],
+  "dependencies": ["glfw", "vk", "stb"],
   "features": ["GLFW_VK"],
   "version": "0.1.0",
   "sources": [ "src/**"],

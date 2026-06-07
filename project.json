@@ -3,19 +3,15 @@
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
-  "dependencies": ["glfw", "vk", "stb"],
-  "features": ["GLFW_VK"],
+  "dependencies": ["vk", "c3w", "image"],
+  "features": [],
   "version": "0.1.0",
-  "sources": [ "src/**"],
+  "sources": [ "src/**", "test/main.c3" ],
   "output": "build",
   "targets": {
     "ui": {
       "type": "executable",
-      "sources-add": ["test/main.c3"]
-    },
-    "widget": {
-      "type": "executable",
-      "sources-add":[ "test/widgets.c3"]
+      "linked-libraries": ["vulkan"]
     }
   },
   "cpu": "generic",

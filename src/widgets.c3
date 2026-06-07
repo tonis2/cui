@@ -3,7 +3,7 @@ import std::io;
 import std::collections::list;
 import std::math;
 
-distinct Color = Vec4f;
+typedef Color = Vec4;
 
 const Color WHITE = {1.0, 1.0, 1.0, 1.0}; // 255;
 const Color BLACK = {0.0, 0.0, 0.0, 1.0};
@@ -11,16 +11,16 @@ const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 
 interface Widget
 {
-    // fn Vec2f layout(Vec2f constraint);
+    // fn Vec2 layout(Vec2 constraint);
     fn Widget build(BuildContext context) @optional;
-    fn void paint(Vec2f corner, Vec2f size, CanvasContext* canvas) @optional;
+    fn void paint(Vec2 corner, Vec2 size, CanvasContext* canvas) @optional;
 }
 
 struct CanvasContext {
-    Vec2f size;
-    List(<Widget>) widgets;
-    List(<BuildContext>) context;
-    List(<Drawing>) drawings;
+    Vec2 size;
+    List{Widget} widgets;
+    List{BuildContext} context;
+    List{Drawing} drawings;
     Widget body;
 }
 
@@ -46,10 +46,10 @@ fn void CanvasContext.update(&self)
     }
 }
 
-fn List(<Widget>) widgets(Widget[] items)
+fn List{Widget} widgets(Widget[] items)
 {
-    List(<Widget>) response;
-    response.init_wrapping_array(items);
+    List{Widget} response;
+    response.init_wrapping_array(mem, items);
     return response;
 }
 
@@ -57,30 +57,30 @@ struct BuildContext {
     usz id;
     usz parent_id;
     bool dirty;
-    Vec2f constraints;
-    Vec2f corner;
+    Vec2 constraints;
+    Vec2 corner;
 }
 
 // struct Container {
-//     Vec2f size;
-//     Vec4f color;
+//     Vec2 size;
+//     Vec4 color;
 // }
 
 struct Rectangle (Widget) {
     usz id;
     float width;
     float height;
-    Vec2f pos;
+    Vec2 pos;
     Color color;
 }
 
-fn void Rectangle.paint(&self, Vec2f corner, Vec2f size, CanvasContext* canvas) @dynamic
+fn void Rectangle.paint(&self, Vec2 corner, Vec2 size, CanvasContext* canvas) @dynamic
 {   
     canvas.draw(
-        Drawing {
+        {
             .corner = self.pos,
             .size = {self.width, self.height},
-            .color = (Vec4f)self.color,
+            .color = (Vec4)self.color,
             .transform = MATRIX4F_IDENTITY,
         }
     );
@@ -93,18 +93,18 @@ fn void Rectangle.paint(&self, Vec2f corner, Vec2f size, CanvasContext* canvas) 
 
 
 struct Column (Widget) {
-    List(<Widget>) children;
+    List{Widget} children;
     float width;
     float height;
-    Vec2f pos;
+    Vec2 pos;
 }
 
-fn void Column.paint(&self, Vec2f corner, Vec2f size, CanvasContext* canvas) @dynamic
+fn void Column.paint(&self, Vec2 corner, Vec2 size, CanvasContext* canvas) @dynamic
 {
     // return Drawing {
     //     .corner = self.pos,
     //     .size = {self.width, self.height},
-    //     .color = (Vec4f)self.color,
+    //     .color = (Vec4)self.color,
     //     .transform = MATRIX4F_IDENTITY,
     // };
 }

@@ -9,12 +9,12 @@ fn float radians(float value) {
 struct UniformData {
     Matrix4f projection;
     Matrix4f view;
-    Vec3f eye;
+    Vec3 eye;
 }
 
 struct Camera {
-    Vec3f target;
-    Vec3f eye;
+    Vec3 target;
+    Vec3 eye;
     Matrix4f perspective;
     Matrix4f view;    
     float pitch;
@@ -22,8 +22,8 @@ struct Camera {
     float zoom_value;
 }
 
-fn Camera new(Vec3f target = {0.0, 0.0, 0.0}, Vec3f eye = {0.0, 0.0, 0.0}, float aspect = 0.8, float view = 45, float min_zoom = 0.1, float max_zoom = 500) {
-    return Camera {
+fn Camera new(Vec3 target = {0.0, 0.0, 0.0}, Vec3 eye = {0.0, 0.0, 0.0}, float aspect = 0.8, float view = 45, float min_zoom = 0.1, float max_zoom = 500) {
+    return {
         target,
         eye,
         perspective(radians(view), aspect, min_zoom, max_zoom),
@@ -41,7 +41,7 @@ fn void Camera.rotate (Camera* self, float x_offset, float y_offset) {
     if (self.pitch > 89.0) self.pitch = 89.0;
     if (self.pitch < -89.0) self.pitch = -89.0;
 
-    self.eye = Vec3f { math::cos(radians(self.yaw)) * math::cos(radians(self.pitch)),
+    self.eye = { math::cos(radians(self.yaw)) * math::cos(radians(self.pitch)),
                        math::sin(radians(self.pitch)),
                        math::sin(radians(self.yaw)) * math::cos(radians(self.pitch))};
 
@@ -62,20 +62,20 @@ fn void Camera.zoom(Camera* self, float value) {
 }
 
 fn UniformData Camera.matrix(Camera self) {
-    return UniformData {
+    return {
         self.perspective.transpose(),
         self.view.transpose(),
         self.eye,
     };
 }
 
-fn Matrix4f matrix_look_at(Vec3f eye, Vec3f target, Vec3f up)
+fn Matrix4f matrix_look_at(Vec3 eye, Vec3 target, Vec3 up)
 {
-	Vec3f vz = (eye - target).normalize();
-	Vec3f vx = up.cross(vz).normalize();
-	Vec3f vy = vz.cross(vx);
+	Vec3 vz = (eye - target).normalize();
+	Vec3 vx = up.cross(vz).normalize();
+	Vec3 vy = vz.cross(vx);
 
-	return Matrix4f {
+	return {
 		vx[0], vx[1], vx[2], - vx.dot(eye),
 		vy[0], vy[1], vy[2], - vy.dot(eye),
 		vz[0], vz[1], vz[2], - vz.dot(eye),
@@ -116,9 +116,9 @@ fn Matrix4f ortho(float left, float right, float bottom, float top, float near, 
 }
 
 
-fn Matrix4f matrixRotation(Vec3f axis, float angle)
+fn Matrix4f matrixRotation(Vec3 axis, float angle)
 {
-    Vec3f norm_axis = axis.normalize();
+    Vec3 norm_axis = axis.normalize();
 
     float sin = math::sin(radians(angle));
     float cos = math::cos(radians(angle));

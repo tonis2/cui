@@ -3,6 +3,7 @@ import std::io;
 import std::collections::list;
 import std::math;
 
+const Matrix4f MATRIX4F_IDENTITY = { .m = { [0] = 1, [5] = 1, [10] = 1, [15] = 1 } };
 
 struct Drawing {
     uint type;
@@ -10,11 +11,11 @@ struct Drawing {
 
     float border_width;
 
-    Vec2f size;
-    Vec2f corner;
+    Vec2 size;
+    Vec2 corner;
 
-    Vec4f border_radius;
-    Vec4f color;
-    Vec4f border_color;
+    Vec4 border_radius;
+    Vec4 color;
+    Vec4 border_color;
     Matrix4f transform;
 }

@@ -3,134 +3,127 @@ import std::math;
 import std::io;
 import std::collections;
 import vk;
-import std::encoding::json;
-import stb;
+import image;
 
-def DescriptorImages = List(<DescriptorImageInfo>);
+alias DescriptorImages = List{DescriptorImageInfo};
 
-fault TextureError
-{
-    FILE_NOT_FOUND,
-}
+faultdef FILE_NOT_FOUND;
 
-fn void! DescriptorImages.loadPath(&self, String path, vk::Allocation* allocator, QueueFamily queue) {
+fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
     vk::Device device = allocator.device;
-    vk::PhysicalDevice pdevice = allocator.pdevice; 
 
-    Format image_format = vk::FORMAT_R8G8B8A8_UNORM;
-    DescriptorImageInfo texture = { .imageLayout = vk::IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    Format image_format = FORMAT_R8G8B8A8_UNORM;
+    DescriptorImageInfo texture = { .imageLayout = IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 
-    stb::Image! image_data = stb::loadImage(path, stb::Channel.STBI_RGB_ALPHA);
-
-    defer image_data.free()!!;
-
-    if (catch err = image_data) {
-        io::printfn("Failed loading image");
-        return TextureError.FILE_NOT_FOUND?;
+    image::Image img;
+    if (path.ends_with(".png")) {
+        img = image::png::load_file(path)!;
+    } else if (path.ends_with(".jpg") || path.ends_with(".jpeg")) {
+        img = image::jpeg::load_file(path)!;
+    } else {
+        io::printfn("Unsupported image format: %s", path);
+        return FILE_NOT_FOUND~;
     }
+    defer img.free();
 
-    vk::Image texture_image = vk::imageCreateInfoBuilder()
-        .setImageType(vk::IMAGE_TYPE_2D)
-        .setExtent({.width = image_data.width, .height = image_data.height, .depth = 1 })
+    char[] rgba = img.to_rgba();
+    defer alloc::free(mem, rgba);
+    sz data_size = (sz)img.width * img.height * 4;
+
+    vk::Image texture_image = vk::imageCreateInfo()
+        .setImageType(IMAGE_TYPE_2D)
+        .setExtent({.width = img.width, .height = img.height, .depth = 1 })
         .setMipLevels(1)
         .setArrayLayers(1)
-        .setSamples(vk::SAMPLE_COUNT_1_BIT)
-        .setUsage(vk::IMAGE_USAGE_TRANSFER_DST_BIT | vk::IMAGE_USAGE_SAMPLED_BIT)
-        .setInitialLayout(vk::IMAGE_LAYOUT_UNDEFINED)
-        .setTiling(vk::IMAGE_TILING_OPTIMAL)
+        .setSamples(SAMPLE_COUNT_1_BIT)
+        .setUsage(IMAGE_USAGE_TRANSFER_DST_BIT | IMAGE_USAGE_SAMPLED_BIT)
+        .setInitialLayout(IMAGE_LAYOUT_UNDEFINED)
+        .setTiling(IMAGE_TILING_OPTIMAL)
         .setFormat(image_format)
         .build(device)!;
-        texture_image.bind(allocator)!;
 
-    MemoryBlock stage_image = device.staging_buffer(.size = (usz)image_data.width * image_data.height * 4, .data = image_data.pixels, .pdevice = pdevice)!;
-    defer stage_image.free(device);
+    vk::create_image_buffer(texture_image, allocator, MEMORY_PROPERTY_DEVICE_LOCAL_BIT)!;
 
-    vk::ImageMemoryBarrier2 transfer_barrier = {
-        .sType = vk::STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = vk::PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        .dstStageMask = vk::PIPELINE_STAGE_TRANSFER_BIT,
-        .srcAccessMask = 0,
-        .dstAccessMask = vk::ACCESS_2_TRANSFER_WRITE_BIT,
-        .image = texture_image,
-        .oldLayout = vk::IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = vk::IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .subresourceRange = {
-            .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-    }};
+    vk::Memory stage_image = vk::new_buffer(
+        allocator,
+        usage: BUFFER_USAGE_TRANSFER_SRC_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        data: rgba.ptr,
+        data_size: data_size,
+    )!;
+    defer stage_image.free();
 
-    vk::ImageMemoryBarrier2 finalize_barrier = {
-        .sType = vk::STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = vk::PIPELINE_STAGE_TRANSFER_BIT,
-        .dstStageMask = vk::PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        .srcAccessMask = vk::ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstAccessMask = vk::ACCESS_2_SHADER_READ_BIT,
-        .image = texture_image,
-        .oldLayout = vk::IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout = vk::IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .subresourceRange = {
-            .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        }
-    };
+    device.@single_time_command(queue; CommandBuffer command_buffer) {
 
-    device.@single_time_command(.queue = queue.graphics_handle, .queue_index = queue.graphics; CommandBuffer command_buffer) {
-        
-        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfoBuilder()
-        .setImageMemoryBarriers({ transfer_barrier }));
+        vk::ImageMemoryBarrier2 transfer_barrier = {
+            .sType = STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .image = texture_image,
+            .srcStageMask = PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            .dstStageMask = PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+            .srcAccessMask = (vk::AccessFlags2)0,
+            .dstAccessMask = ACCESS_2_TRANSFER_WRITE_BIT,
+            .oldLayout = IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .subresourceRange = {
+                .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfo().setImageMemoryBarriers({ transfer_barrier }));
 
         BufferImageCopy bufferCopyRegion = {
             .bufferOffset = 0,
             .bufferRowLength = 0,
             .bufferImageHeight = 0,
             .imageSubresource = {
-                .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+                .aspectMask = IMAGE_ASPECT_COLOR_BIT,
                 .mipLevel = 0,
                 .baseArrayLayer = 0,
                 .layerCount = 1,
             },
             .imageOffset = {0, 0, 0},
-            .imageExtent = {.width = image_data.width, .height = image_data.height, .depth = 1 }
+            .imageExtent = {.width = img.width, .height = img.height, .depth = 1 }
         };
 
         vk::cmdCopyBufferToImage(
             command_buffer,
             stage_image.buffer,
             texture_image,
-            vk::IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1,
             &bufferCopyRegion
         );
 
-        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfoBuilder()
-        .setImageMemoryBarriers({ finalize_barrier }));
+        vk::ImageMemoryBarrier2 finalize_barrier = vk::transferBarrier(
+            texture_image,
+            IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfo().setImageMemoryBarriers({ finalize_barrier }));
     }!;
 
-    texture.sampler = vk::samplerCreateInfoBuilder()
-                        .setMagFilter(vk::FILTER_NEAREST)
-                        .setMinFilter(vk::FILTER_NEAREST)
-                        .setAddressModeU(vk::SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                        .setAddressModeV(vk::SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                        .setAddressModeW(vk::SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+    texture.sampler = vk::samplerCreateInfo()
+                        .setMagFilter(FILTER_NEAREST)
+                        .setMinFilter(FILTER_NEAREST)
+                        .setAddressModeU(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                        .setAddressModeV(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                        .setAddressModeW(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                         .setMipLodBias(0.0)
                         .setMinLod(0.0)
                         .setMaxLod(1.0)
                         .setMaxAnisotropy(1.0)
                         .setAnisotropyEnable(vk::FALSE)
-                        .setBorderColor(vk::BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+                        .setBorderColor(BORDER_COLOR_FLOAT_OPAQUE_WHITE)
                         .build(device)!;
 
-    texture.imageView = vk::imageViewCreateInfoBuilder()
-                    .setViewType(vk::IMAGE_VIEW_TYPE_2D)
+    texture.imageView = vk::imageViewCreateInfo()
+                    .setViewType(IMAGE_VIEW_TYPE_2D)
                     .setFormat(image_format)
                     .setSubresourceRange({
-                        .aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+                        .aspectMask = IMAGE_ASPECT_COLOR_BIT,
                         .baseMipLevel = 0,
                         .baseArrayLayer = 0,
                         .layerCount = 1,
@@ -142,45 +135,44 @@ fn void! DescriptorImages.loadPath(&self, String path, vk::Allocation* allocator
     self.push(texture);
 }
 
-fn void! DescriptorImageInfo.createDepthTexture(&self, vk::Allocation* allocator, QueueFamily queue, Vec2f size, vk::Format format) {
+fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, Vec2 size, vk::Format format) {
     vk::Device device = allocator.device;
-    vk::PhysicalDevice pdevice = allocator.pdevice; 
 
-    self.imageLayout = vk::IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    self.imageLayout = IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    vk::Image depth_image = vk::imageCreateInfoBuilder()
-    .setImageType(vk::IMAGE_TYPE_2D)
+    vk::Image depth_image = vk::imageCreateInfo()
+    .setImageType(IMAGE_TYPE_2D)
     .setExtent({.width = (uint)size.x, .height = (uint)size.y, .depth = 1 })
     .setMipLevels(1)
     .setArrayLayers(1)
-    .setSamples(vk::SAMPLE_COUNT_1_BIT)
-    .setUsage(vk::IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | vk::IMAGE_USAGE_SAMPLED_BIT)
-    .setInitialLayout(vk::IMAGE_LAYOUT_UNDEFINED)
-    .setTiling(vk::IMAGE_TILING_OPTIMAL)
+    .setSamples(SAMPLE_COUNT_1_BIT)
+    .setUsage(IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | IMAGE_USAGE_SAMPLED_BIT)
+    .setInitialLayout(IMAGE_LAYOUT_UNDEFINED)
+    .setTiling(IMAGE_TILING_OPTIMAL)
     .setFormat(format)
     .build(device)!;
 
-    depth_image.bind(allocator)!;
+    vk::create_image_buffer(depth_image, allocator, MEMORY_PROPERTY_DEVICE_LOCAL_BIT)!;
 
-    self.sampler = vk::samplerCreateInfoBuilder()
-    .setMagFilter(vk::FILTER_LINEAR)
-    .setMinFilter(vk::FILTER_LINEAR)
-    .setAddressModeU(vk::SAMPLER_ADDRESS_MODE_REPEAT)
-    .setAddressModeV(vk::SAMPLER_ADDRESS_MODE_REPEAT)
-    .setAddressModeW(vk::SAMPLER_ADDRESS_MODE_REPEAT)
+    self.sampler = vk::samplerCreateInfo()
+    .setMagFilter(FILTER_LINEAR)
+    .setMinFilter(FILTER_LINEAR)
+    .setAddressModeU(SAMPLER_ADDRESS_MODE_REPEAT)
+    .setAddressModeV(SAMPLER_ADDRESS_MODE_REPEAT)
+    .setAddressModeW(SAMPLER_ADDRESS_MODE_REPEAT)
     .setMipLodBias(0.0)
     .setMinLod(0.0)
     .setMaxLod(1.0)
     .setMaxAnisotropy(1.0)
     .setAnisotropyEnable(vk::FALSE)
-    .setBorderColor(vk::BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+    .setBorderColor(BORDER_COLOR_FLOAT_OPAQUE_WHITE)
     .build(device)!;
 
-    self.imageView = vk::imageViewCreateInfoBuilder()
-    .setViewType(vk::IMAGE_VIEW_TYPE_2D)
+    self.imageView = vk::imageViewCreateInfo()
+    .setViewType(IMAGE_VIEW_TYPE_2D)
     .setFormat(format)
     .setSubresourceRange({
-        .aspectMask = vk::IMAGE_ASPECT_DEPTH_BIT,
+        .aspectMask = IMAGE_ASPECT_DEPTH_BIT,
         .baseMipLevel = 0,
         .baseArrayLayer = 0,
         .layerCount = 1,
@@ -189,26 +181,26 @@ fn void! DescriptorImageInfo.createDepthTexture(&self, vk::Allocation* allocator
     .setImage(depth_image)
     .build(device)!;
 
-    device.@single_time_command(.queue = queue.graphics_handle, .queue_index = queue.graphics; CommandBuffer command_buffer) {
-        ImageMemoryBarrier imageMemoryBarrier = vk::imageMemoryBarrierBuilder()
+    device.@single_time_command(queue; CommandBuffer command_buffer) {
+        ImageMemoryBarrier imageMemoryBarrier = vk::imageMemoryBarrier()
         .setImage(depth_image)
         .setSubresourceRange({
-            .aspectMask = vk::IMAGE_ASPECT_DEPTH_BIT,
+            .aspectMask = IMAGE_ASPECT_DEPTH_BIT,
             .baseMipLevel = 0,
             .baseArrayLayer = 0,
             .layerCount = 1,
             .levelCount = 1,
         })
-        .setSrcAccessMask(0)
-        .setDstAccessMask(vk::ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
-        .setOldLayout(vk::IMAGE_LAYOUT_UNDEFINED)
-        .setNewLayout(vk::IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        .setSrcAccessMask((AccessFlags)0)
+        .setDstAccessMask(ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+        .setOldLayout(IMAGE_LAYOUT_UNDEFINED)
+        .setNewLayout(IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
         vk::cmdPipelineBarrier(
             command_buffer,
-            vk::PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | vk::PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-            vk::PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | vk::PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-            0,
+            PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            (DependencyFlags)0,
             0,
             null,
             0,
@@ -220,7 +212,8 @@ fn void! DescriptorImageInfo.createDepthTexture(&self, vk::Allocation* allocator
 }
 
 struct RenderState {
-    Shader shader;
+    char[] vertex_spirv;
+    char[] fragment_spirv;
 
     DescriptorSetLayout descriptor_layout;
     PipelineLayout pipeline_layout;
@@ -241,20 +234,33 @@ struct RenderState {
 }
 
 fn void RenderState.free(self, Device device) {
-    self.shader.free(device);
     self.descriptor_layout.free(device);
     self.pipeline_layout.free(device);
     self.pipeline.free(device);
 }
 
-fn RenderState! RenderState.build(&self, Device device) {
+fn RenderState? RenderState.build(&self, Device device) {
 
-    PipelineVertexInputStateCreateInfo vertex_info = vk::pipelineVertexInputStateCreateInfoBuilder().setVertexBindingDescriptionCount(0);
+    ShaderModule vert_module = vk::loadShaderModule(device, self.vertex_spirv)!;
+    ShaderModule frag_module = vk::loadShaderModule(device, self.fragment_spirv)!;
 
-    PipelineInputAssemblyStateCreateInfo assembly_state = vk::pipelineInputAssemblyStateCreateInfoBuilder()
+    PipelineShaderStageCreateInfo[2] shader_stages = {
+        vk::pipelineShaderStageCreateInfo()
+            .setStage(SHADER_STAGE_VERTEX_BIT)
+            .setMod(vert_module)
+            .setName("main"),
+        vk::pipelineShaderStageCreateInfo()
+            .setStage(SHADER_STAGE_FRAGMENT_BIT)
+            .setMod(frag_module)
+            .setName("main"),
+    };
+
+    PipelineVertexInputStateCreateInfo vertex_info = vk::pipelineVertexInputStateCreateInfo().setVertexBindingDescriptionCount(0);
+
+    PipelineInputAssemblyStateCreateInfo assembly_state = vk::pipelineInputAssemblyStateCreateInfo()
     .setTopology(self.topology);
 
-    PipelineRasterizationStateCreateInfo rasterization_state = vk::pipelineRasterizationStateCreateInfoBuilder()
+    PipelineRasterizationStateCreateInfo rasterization_state = vk::pipelineRasterizationStateCreateInfo()
     .setDepthClampEnable(vk::FALSE)
     .setRasterizerDiscardEnable(vk::FALSE)
     .setDepthBiasEnable(vk::FALSE)
@@ -264,79 +270,42 @@ fn RenderState! RenderState.build(&self, Device device) {
     .setFrontFace(self.front_face);
 
     PipelineViewportStateCreateInfo view_port_state = {
-        .sType = vk::STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .sType = STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .scissorCount = 1,
     };
 
-    PipelineMultisampleStateCreateInfo multi_sample_state = vk::pipelineMultisampleStateCreateInfoBuilder()
+    PipelineMultisampleStateCreateInfo multi_sample_state = vk::pipelineMultisampleStateCreateInfo()
     .setSampleShadingEnable(vk::FALSE)
-    .setRasterizationSamples(vk::SAMPLE_COUNT_1_BIT)
+    .setRasterizationSamples(SAMPLE_COUNT_1_BIT)
     .setMinSampleShading(1.0)
     .setAlphaToCoverageEnable(vk::FALSE)
     .setAlphaToOneEnable(vk::FALSE);
 
-    PipelineColorBlendStateCreateInfo color_blend_state = vk::pipelineColorBlendStateCreateInfoBuilder()
+    PipelineColorBlendStateCreateInfo color_blend_state = vk::pipelineColorBlendStateCreateInfo()
     .setBlendConstants({ 0.0, 0.0, 0.0, 0.0 })
-    .setLogicOp(vk::LOGIC_OP_COPY)
+    .setLogicOp(LOGIC_OP_COPY)
     .setAttachments(self.blend_attachments);
 
-    PipelineDynamicStateCreateInfo dynamic_states = vk::pipelineDynamicStateCreateInfoBuilder()
+    PipelineDynamicStateCreateInfo dynamic_states = vk::pipelineDynamicStateCreateInfo()
     .setDynamicStates(self.dynamic_states);
 
-    PipelineRenderingCreateInfo rendering_info = vk::pipelineRenderingCreateInfoBuilder()
+    PipelineRenderingCreateInfo rendering_info = vk::pipelineRenderingCreateInfo()
     .setColorAttachmentFormats(self.color_attachments)
     .setDepthAttachmentFormat(self.depth_format);
 
-    PipelineDepthStencilStateCreateInfo depth_state = vk::pipelineDepthStencilStateCreateInfoBuilder()
+    PipelineDepthStencilStateCreateInfo depth_state = vk::pipelineDepthStencilStateCreateInfo()
     .setDepthTestEnable((uint)self.enable_depth)
     .setDepthWriteEnable((uint)self.enable_depth)
-    .setDepthCompareOp(vk::COMPARE_OP_LESS_OR_EQUAL)
-    .setBack({.compareOp = vk::COMPARE_OP_ALWAYS});
-    // DescriptorSetLayoutCreateInfo descriptorLayoutInfo = vk::descriptorSetLayoutCreateInfoBuilder()
-    //                         .setFlags(vk::DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
+    .setDepthCompareOp(COMPARE_OP_LESS_OR_EQUAL)
+    .setBack({.compareOp = COMPARE_OP_ALWAYS});
 
-    // foreach (descriptor: self.descriptors) {
-    //     WriteDescriptorSet data = vk::writeDescriptorSetBuilder()
-    //         .setDstBinding(descriptor.binding)
-    //         .setDescriptorType(descriptor.type);
-
-    //     DescriptorSetLayoutBinding binding = {
-    //         .binding = descriptor.binding,
-    //         .descriptorType = descriptor.type,
-    //         .stageFlags = descriptor.stage
-    //     };
-
-    //     if (descriptor.type == vk::DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-    //         data.setBufferInfo({
-    //             {
-    //                 .buffer = descriptor.buffer.buffer,
-    //                 .offset = 0,
-    //                 .range = descriptor.buffer.size,
-    //             },
-    //         });
-    //         binding.descriptorCount = 1;
-    //     }
-
-    //     if (descriptor.type == vk::DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-    //         data.setImageInfo(descriptor.textures.array_view());
-    //         binding.descriptorCount = (uint)descriptor.textures.len();
-    //     }
-
-    //     self.descriptor_layout_bindings.push(binding);
-    //     self.descriptor_data.push(data);
-    // }
-
-    // self.descriptor_layout = descriptorLayoutInfo
-    // .setBindings(self.descriptor_layout_bindings.array_view())
-    // .build(device)!;
-
-    self.pipeline_layout = vk::pipelineLayoutCreateInfoBuilder()
+    self.pipeline_layout = vk::pipelineLayoutCreateInfo()
     .setPushConstantRanges(self.push_constants)
     .setSetLayouts({ self.descriptor_layout }).build(device)!;
 
-    GraphicsPipelineCreateInfo pipeline_info = vk::graphicsPipelineCreateInfoBuilder()
-    .setStages(&self.shader.stages)
+    GraphicsPipelineCreateInfo pipeline_info = vk::graphicsPipelineCreateInfo()
+    .setStages(shader_stages[..])
     .setLayout(self.pipeline_layout)
     .setVertexInputState(&vertex_info)
     .setDynamicState(&dynamic_states)
@@ -350,6 +319,8 @@ fn RenderState! RenderState.build(&self, Device device) {
 
     self.pipeline = pipeline_info.build(device)!;
 
+    vert_module.free(device);
+    frag_module.free(device);
+
     return *self;
 }
-

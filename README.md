@@ -75,6 +75,43 @@ painter.rect_shadow(pos, size, blur, color, border_radius);  // soft shadow / gl
 The `Dial` widget in `test/layout.c3` combines them into a gauge — face,
 tick marks, progress arc, needle — in ~30 lines of paint code.
 
+### Interactivity
+
+Input flows through `Ui.process_input` (the reference renderer calls it every
+frame before your `@on_frame` body; embedding engines call it themselves).
+Widgets receive events through optional interface methods — the same
+interface as layout/paint, so any widget can opt in:
+
+```c3
+fn bool on_mouse(Element* elem, MouseEvent event) @optional;  // press/release/move/scroll
+fn void on_hover(Element* elem, bool entered) @optional;
+fn bool on_key(Element* elem, KeyEvent event) @optional;
+fn void update(Element* elem, float dt) @optional;            // every frame
+```
+
+Semantics:
+
+- **Hit testing + bubbling** — the deepest element under the pointer gets
+  `on_mouse` first; returning `true` consumes the event. Positions arrive in
+  element-local coordinates. (Transform-palette matrices are not applied to
+  hit tests.)
+- **Capture** — consuming a PRESS routes all mouse events to that element
+  until the button releases, so drags keep working outside its bounds.
+- **Focus** — left-clicking an element whose widget implements `on_key`
+  focuses it (or call `Element.request_focus()`); key press/release edges
+  are delivered there and bubble up.
+- **Context** — every widget can read `elem.ui.input` (an `Input` struct):
+  mouse position, button/key state with per-frame edges, scroll delta, typed
+  UTF-8 text, `time`/`dt`. Don't read it from `paint()` — paint output is
+  cached; react in event callbacks or `update()`, then `request_paint()`.
+- **Cursor** — set `Element.cursor` (e.g. `Cursor.POINTING_HAND`) and the
+  deepest hovered element with a preference wins; the renderer applies it to
+  the OS pointer.
+
+`Button` in `cui::widgets` is the worked example (hover/press styles,
+`on_click` function pointer + `void* ctx`). The `Dial` in `test/layout.c3`
+shows drag with capture, scroll, and arrow-key focus handling.
+
 ### Running the example
 
 Install C3 from https://c3-lang.org/
@@ -101,7 +138,9 @@ c3c run layout    # Column / Row / Padding layout widgets (test/layout.c3)
 ```
 
 In the `ui` example, drag with the left mouse button to rotate the cards.
-Escape quits.
+In the `layout` example, drag/scroll the dial (or click it and use the arrow
+keys), and try the two buttons under the shelf. Escape or the close button
+quits.
 
 ### Embedding in a Vulkan engine
 
@@ -109,8 +148,12 @@ The engine owns the device, swapchain, and frame loop; cui produces a
 `Canvas` the engine renders with one pipeline and one instanced draw call.
 `src/vulkan/renderer.c3` is the worked example of every step below.
 
-**Per frame** — build/mutate the widget tree, call `ui.flush()`, then consume
-`ui.canvas` while recording your command buffer.
+**Per frame** — fill a `cui::InputFrame` from your engine's input (pointer in
+UI coordinates, button level-states, scroll, typed text, held keys as
+`cui::Key` X11 codes) and call `ui.process_input(frame, dt)`; apply
+`ui.cursor` to the OS pointer if it changed. Then build/mutate the widget
+tree, call `ui.flush()`, and consume `ui.canvas` while recording your command
+buffer.
 
 **Pipeline** — create one `VkShaderModule` from `cui::shader_spirv` (a single
 module with entry points `cui::SHADER_VERTEX_ENTRY` and

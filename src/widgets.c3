@@ -182,6 +182,68 @@ fn Vec2 Padding.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
+// Button: a clickable rect with hover and press styles. The worked example of
+// the Widget event callbacks — on_hover/on_mouse mutate state and
+// request_paint; on_click fires when a left press is released inside.
+
+alias OnClick = fn void(void* ctx);
+
+struct Button (Widget) {
+    Vec2 size;
+    RectStyle style;
+    RectStyle hover_style;      // used while hovered, if its color alpha > 0
+    RectStyle press_style;      // used while held, if its color alpha > 0
+    OnClick on_click;           // optional; receives ctx
+    void* ctx;
+    bool hovered;
+    bool held;
+}
+
+fn Vec2 Button.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+    elem.cursor = Cursor.POINTING_HAND;
+    return self.size.constrain(constraints);
+}
+
+fn void Button.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+    RectStyle style = self.style;
+    if (self.held && ((Vec4)self.press_style.color).w > 0) {
+        style = self.press_style;
+    } else if (self.hovered && ((Vec4)self.hover_style.color).w > 0) {
+        style = self.hover_style;
+    }
+    painter.rect({0, 0}, elem.size, style);
+}
+
+fn void Button.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+    self.hovered = entered;
+    elem.request_paint();
+}
+
+fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+    switch (event.kind) {
+        case PRESS:
+            if (event.button != MouseButton.LEFT) return false;
+            self.held = true;
+            elem.request_paint();
+            return true;        // consuming the press captures the pointer
+        case RELEASE:
+            if (event.button != MouseButton.LEFT || !self.held) return false;
+            self.held = false;
+            elem.request_paint();
+            bool inside = event.pos.x >= 0 && event.pos.y >= 0
+                && event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+            if (inside && self.on_click) self.on_click(self.ctx);
+            return true;
+        default:
+            return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Stack: absolute container. Children are positioned by Element.set_offset and
 // sized by their own layout under loose constraints.
 

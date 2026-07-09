@@ -1,15 +1,20 @@
 module cui;
-import std::io;
 import std::collections::list;
 import std::math;
 
 const Matrix4f MATRIX4F_IDENTITY = { .m = { [0] = 1, [5] = 1, [10] = 1, [15] = 1 } };
 
-struct Drawing {
-    uint type;
-    int texture_id;
+// SDF primitive kinds, dispatched in the fragment shader.
+const uint DRAWING_RECT = 0;
 
+// One GPU-side primitive. Field order and sizes must match struct Drawing in
+// shader.slang (scalar layout): keep 4-byte fields in groups of four so the
+// Vec2/Vec4 members land on the same offsets on both sides.
+struct Drawing {
+    uint kind;
+    int texture;            // 0 = none, else renderer image index + 1
     float border_width;
+    uint transform_id;      // index into Canvas.transforms
 
     Vec2 size;
     Vec2 corner;
@@ -17,5 +22,27 @@ struct Drawing {
     Vec4 border_radius;
     Vec4 color;
     Vec4 border_color;
-    Matrix4f transform;
+}
+
+// Everything the renderer consumes per frame: the retained display list and
+// the transform palette. Slot 0 of the palette is always identity; elements
+// without their own transform inherit whatever slot their ancestor uses.
+struct Canvas {
+    List{Drawing} drawings;
+    List{Matrix4f} transforms;
+    bool drawings_dirty;
+    bool transforms_dirty;
+}
+
+fn void Canvas.init(&self)
+{
+    self.transforms.push(MATRIX4F_IDENTITY);
+    self.drawings_dirty = true;
+    self.transforms_dirty = true;
+}
+
+fn void Canvas.free(&self)
+{
+    self.drawings.free();
+    self.transforms.free();
 }

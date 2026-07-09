@@ -32,6 +32,41 @@ bitstruct DirtyFlags : char {
     bool paint;
 }
 
+typedef Color = Vec4;
+
+const Color WHITE = {1.0, 1.0, 1.0, 1.0};
+const Color BLACK = {0.0, 0.0, 0.0, 1.0};
+const Color BLUE = {0.5, 0.5, 0.5, 1.0};
+
+// A widget is behavior attached to an Element. All methods are optional:
+//
+//   layout   given constraints, return own size; lay out children through
+//            elem.layout_child / elem.place_child. Omitted: children get loose
+//            constraints and keep their offsets, size fills the constraints.
+//   paint    emit primitives in element-local coordinates. Omitted: the
+//            element draws nothing itself (pure container).
+//   unmount  free whatever the widget allocated; called when its element
+//            leaves the tree. The widget struct itself stays caller-owned.
+//
+// The built-in implementations (Rectangle, Column, Row, Stack, Padding) live
+// in module cui::widgets; apps write their own against this interface.
+interface Widget
+{
+    fn Vec2 layout(Element* elem, Constraints constraints) @optional;
+    fn void paint(Element* elem, Painter* painter) @optional;
+    fn void unmount() @optional;
+}
+
+// Clamps a wanted size into the given constraints; the usual last step of a
+// layout implementation.
+fn Vec2 clamp_size(Vec2 size, Constraints c)
+{
+    return {
+        math::max(c.min.x, math::min(size.x, c.max.x)),
+        math::max(c.min.y, math::min(size.y, c.max.y)),
+    };
+}
+
 struct Element {
     Ui* ui;
     Widget widget;
@@ -52,6 +87,7 @@ struct Element {
 
     uint transform_slot;
 
+    bool owns_widget;           // widget is a heap copy made by @node; freed on release
     DirtyFlags dirty;
 }
 
@@ -93,18 +129,69 @@ fn void Ui.free(&self)
 // ---------------------------------------------------------------------------
 // Tree building
 
-// Attaches a widget to the tree (as root when parent is null). The widget
-// struct is owned by the caller and must outlive the element.
-fn Element* Ui.mount(&self, Widget widget, Element* parent = null)
+// Declarative building: create an element for a widget together with its
+// children, Flutter-style. Pass the widget as a VALUE (a struct literal — the
+// element heap-copies and owns it) or as a POINTER (borrowed; the caller owns
+// the struct and can mutate it, but must keep it alive). Children are
+// elements built by nested @node calls. Attach the finished tree with
+// Ui.build, or graft it onto a live element with Element.append.
+//
+//   ui.build(ui.@node((Column){ .gap = 8.0 },
+//       ui.@node((Rectangle){ .size = {100, 40} }),
+//       ui.@node((Rectangle){ .size = {100, 40} })));
+macro Element* Ui.@node(&self, widget, ...)
+{
+    $if @kindof(widget) == POINTER:
+        return self.attach_node(widget, false, ...$vaarg);
+    $else
+        var $Type = $Typeof(widget);
+        $Type* copy = mem::new($Type);
+        *copy = widget;
+        return self.attach_node(copy, true, ...$vaarg);
+    $endif
+}
+
+// Installs a built tree as the UI root, releasing any previous root.
+fn void Ui.build(&self, Element* root)
+{
+    if (self.root && self.root != root) self.release(self.root);
+    root.parent = null;
+    self.root = root;
+    self.layout_pending = true;
+    self.paint_pending = true;
+}
+
+// Grafts a built subtree under a live element.
+fn void Element.append(&self, Element* child)
+{
+    child.parent = self;
+    self.children.push(child);
+    self.request_layout();
+}
+
+fn Element* Ui.attach_node(&self, Widget widget, bool owned, Element*... children)
 {
     Element* element = self.alloc_element();
     element.ui = self;
     element.widget = widget;
-    element.parent = parent;
+    element.owns_widget = owned;
     element.transform_slot = NO_TRANSFORM;
     element.dirty = { .layout = true, .paint = true };
+    foreach (child : children) {
+        child.parent = element;
+        element.children.push(child);
+    }
+    return element;
+}
+
+// Attaches a widget to the tree (as root when parent is null). The widget
+// struct is owned by the caller and must outlive the element.
+fn Element* Ui.mount(&self, Widget widget, Element* parent = null)
+{
+    Element* element = self.attach_node(widget, false);
 
     if (parent) {
+        element.parent = parent;
         parent.children.push(element);
         parent.request_layout();
     } else {
@@ -139,6 +226,7 @@ fn void Ui.release(&self, Element* element)
 {
     foreach (child : element.children) self.release(child);
     if (&element.widget.unmount) element.widget.unmount();
+    if (element.owns_widget) mem::free(((any)element.widget).ptr);
     if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
     element.children.free();
     element.local_drawings.free();

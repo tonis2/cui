@@ -64,6 +64,30 @@ fn void Camera.zoom(Camera* self, float value) {
     self.view.m23 += value;
 }
 
+// View matrix for UI rendering: the camera's view with a compensating scale
+// baked in. The raw perspective maps the unit z=0 plane to f/aspect (x) and
+// f (y) in clip space instead of exactly 2.0, so drawings land at ~94% / ~121%
+// of their pixel coordinates. Scaling by 2/P[0][0] and 2/P[1][1] cancels that:
+// canvas coordinates become pixel-exact while model transforms keep their
+// perspective depth (w still varies once a transform rotates off the plane).
+// The scale is composed innermost (applied before the camera transform),
+// which in this storage means scaling the view's first two columns.
+fn Matrix4f Camera.ui_view(&self)
+{
+    float sx = 2.0f / self.perspective.m00;     // = 2 * aspect / f
+    float sy = 2.0f / self.perspective.m11;     // = 2 / f
+    Matrix4f v = self.view;
+    v.m00 *= sx;
+    v.m01 *= sx;
+    v.m02 *= sx;
+    v.m03 *= sx;
+    v.m10 *= sy;
+    v.m11 *= sy;
+    v.m12 *= sy;
+    v.m13 *= sy;
+    return v;
+}
+
 fn UniformData Camera.matrix(Camera self) {
     return {
         self.perspective.transpose(),

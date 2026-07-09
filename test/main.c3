@@ -30,7 +30,7 @@ fn void main(String[] args)
     Element* root = ui.mount(&stack);
 
     for (uint i = 0; i < 6; i += 2) {
-        Vec2 box_size = {window_size.x / 3.3, window_size.y / 2};
+        Vec2 box_size = {window_size.x / 3.5, window_size.y / 2};
         float padding = 20.0;
         float offset = padding + i * (box_size.x / 2 + padding);
 

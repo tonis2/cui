@@ -143,13 +143,27 @@ struct Ui {
                                 // this to decide whether to block for input.
 }
 
+// The active UI: the one the contextless helpers (get_widget / find /
+// request_paint) query. new_ui sets it, so a callback that carries no context —
+// a button's on_click, say — can still reach the tree without a handle threaded
+// in. One UI is active at a time (the most recently created); call make_active
+// to switch if you drive more than one.
+Ui* active_ui @private;
+
 // Heap-allocated so Element.ui stays valid; released with Ui.free().
 fn Ui* new_ui(Vec2 size)
 {
     Ui* ui = mem::new(Ui);
     ui.size = size;
     ui.canvas.init();
+    active_ui = ui;
     return ui;
+}
+
+// Route the contextless get_widget / find / request_paint helpers at this UI.
+fn void Ui.make_active(&self)
+{
+    active_ui = self;
 }
 
 fn void Ui.free(&self)
@@ -198,6 +212,44 @@ macro Element* Ui.@node(&self, widget, ...)
 macro Element.widget_as(&self, $Type)
 {
     return ($Type*)((any)self.widget).ptr;
+}
+
+// Query the retained tree by widget type: the first element whose widget is
+// exactly $Type, or null. The top-down analog of Flutter's
+// findAncestorStateOfType. The returned Element* is a stable handle, so it
+// stays valid across frames — hold it, or just re-query each time.
+macro Element* Ui.find(&self, $Type)
+{
+    return self.root ? find_by_type(self.root, $Type) : null;
+}
+
+fn Element* find_by_type(Element* elem, typeid type) @private
+{
+    if (((any)elem.widget).type == type) return elem;
+    foreach (child : elem.children) {
+        Element* hit = find_by_type(child, type);
+        if (hit) return hit;
+    }
+    return null;
+}
+
+// Contextless twins of Element.widget_as / Element.request_paint, resolved
+// against the active UI (see active_ui). A callback that took no context can
+// locate the widget it drives — get_widget(Dial) hands back a Dial* to mutate —
+// and invalidate it — request_paint(Dial) — straight from the tree, the way a
+// Flutter callback reaches other widgets through its BuildContext. Both act on
+// the first $Type in the tree, so they fit singletons (one Dial, one settings
+// panel); keep an explicit Element* handle when several of a kind coexist.
+macro get_widget($Type)
+{
+    Element* elem = active_ui.find($Type);
+    return elem ? elem.widget_as($Type) : null;
+}
+
+macro request_paint($Type)
+{
+    Element* elem = active_ui.find($Type);
+    if (elem) elem.request_paint();
 }
 
 // Installs a built tree as the UI root, releasing any previous root.

@@ -147,25 +147,24 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.circle(center, 7.0f, { .color = { 0.95, 0.60, 0.20, 1.0 } });
 }
 
-// Button callbacks drive the dial through a context (C3 has no closures). The
-// context is just the dial's Element* — a stable handle to its tree node, like
-// a Flutter GlobalKey. widget_as(Dial) recovers the widget to mutate, and
-// request_paint() invalidates it; no wrapper struct to thread through. Button
-// is generic over the context type — Button{Element} — so the callback stays
-// fully typed.
-fn void reset_dial(Element* elem)
+// Button callbacks carry no context at all (C3 has no closures, and they don't
+// need one): get_widget queries the active UI's tree for the single Dial and
+// hands back a Dial* to mutate; request_paint(Dial) invalidates it. So the
+// buttons below set no .ctx — the callbacks reach what they need through the
+// tree, the way a Flutter callback reaches other widgets through its context.
+fn void reset_dial()
 {
-	Dial* dial = elem.widget_as(Dial);
+	Dial* dial = cui::get_widget(Dial);
 	dial.value = 0.0;
-	elem.request_paint();
+	cui::request_paint(Dial);
 	io::printfn("[layout] reset clicked -> %.2f", dial.value);
 }
 
-fn void bump_dial(Element* elem)
+fn void bump_dial()
 {
-	Dial* dial = elem.widget_as(Dial);
+	Dial* dial = cui::get_widget(Dial);
 	dial.value = math::clamp(dial.value + 0.1f, 0.0f, 1.0f);
-	elem.request_paint();
+	cui::request_paint(Dial);
 	io::printfn("[layout] bump clicked -> %.2f", dial.value);
 }
 
@@ -220,11 +219,6 @@ fn void main(String[] args)
 		);
 	}
 
-	// The dial is an ordinary owned value node like everything else here; its
-	// Element* is the handle the buttons reach it through (see reset_dial /
-	// bump_dial) — a stable pointer to its tree node, like a Flutter GlobalKey.
-	Element* dial_element = ui.@node((Dial){ .size = { 260.0, 300.0 }, .value = 0.72 });
-
 	// Element.cursor gives any element a pointer shape declaratively — no
 	// widget code involved.
 	Element* teal_card = ui.@node(
@@ -240,23 +234,21 @@ fn void main(String[] args)
 	Element* buttons = ui.@node(
 		(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER },
 		ui.@node(
-			(Button{Element}) {
+			(Button) {
 				.size = { 130.0, 40.0 },
 				.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.on_click = &reset_dial,
-				.ctx = dial_element,
 			}
 		),
 		ui.@node(
-			(Button{Element}) {
+			(Button) {
 				.size = { 130.0, 40.0 },
 				.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.on_click = &bump_dial,
-				.ctx = dial_element,
 			}
 		)
 	);
@@ -279,7 +271,7 @@ fn void main(String[] args)
 				ui.@node(
 					(Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN },
 					teal_card,
-					dial_element,
+					ui.@node((Dial){ .size = { 260.0, 300.0 }, .value = 0.72 }),
 					ui.@node(
 						(Rectangle) {
 							.size = { 260.0, 270.0 },

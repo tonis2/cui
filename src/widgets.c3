@@ -204,26 +204,27 @@ fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Button: a clickable rect with hover and press styles, generic over its
-// callback context — the context type is part of the widget type, so the
-// callback receives it fully typed, no casts:
+// Button: a clickable rect with hover and press styles. on_click is a plain
+// contextless callback — the button carries no per-instance state to thread
+// through. A callback that needs to touch app state finds it through the tree
+// with the ambient cui::get_widget query, the way a Flutter callback reaches
+// other widgets through its BuildContext:
 //
-//     fn void save_clicked(AppState* app) { ... }
-//     ui.@node((Button{AppState}){ .on_click = &save_clicked, .ctx = &app, ... });
+//     fn void reset_clicked() { cui::get_widget(Dial).value = 0; cui::request_paint(Dial); }
+//     ui.@node((Button){ .on_click = &reset_clicked, ... });
 //
 // Also the worked example of the Widget event callbacks: on_hover/on_mouse
 // mutate state and request_paint; on_click fires when a left press is
 // released inside.
 
-alias OnClick <Ctx> = fn void(Ctx* ctx);
+alias OnClick = fn void();
 
-struct Button (Widget) <Ctx> {
+struct Button (Widget) {
     Vec2 size;
     RectStyle style;
     RectStyle hover_style;      // used while hovered, if its color alpha > 0
     RectStyle press_style;      // used while held, if its color alpha > 0
-    OnClick{Ctx} on_click;      // optional; receives ctx
-    Ctx* ctx;
+    OnClick on_click;           // optional; called on click-release inside
     bool hovered;
     bool held;
 }
@@ -265,7 +266,7 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
             elem.request_paint();
             bool inside = event.pos.x >= 0 && event.pos.y >= 0
                 && event.pos.x < elem.size.x && event.pos.y < elem.size.y;
-            if (inside && self.on_click) self.on_click(self.ctx);
+            if (inside && self.on_click) self.on_click();
             return true;
         default:
             return false;

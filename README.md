@@ -108,13 +108,25 @@ Semantics:
   deepest hovered element with a preference wins; the renderer applies it to
   the OS pointer.
 
-`Button` in `cui::widgets` is the worked example (hover/press styles). It is
-generic over its callback context, so the callback is fully typed — no casts:
+`Button` in `cui::widgets` is the worked example (hover/press styles). Its
+`on_click` is a plain contextless callback; a callback that needs to reach
+another widget queries the tree for it instead of carrying a handle:
 
 ```c3
-fn void save_clicked(AppState* app) { ... }
-ui.@node((Button{AppState}){ .size = {130, 40}, .on_click = &save_clicked, .ctx = &app });
+fn void reset_clicked() {
+    cui::get_widget(Dial).value = 0;   // find the widget by type…
+    cui::request_paint(Dial);          // …and invalidate it
+}
+ui.@node((Button){ .size = {130, 40}, .on_click = &reset_clicked });
 ```
+
+`cui::get_widget($Type)` returns a pointer to the first widget of that type in
+the *active* UI (the one `new_ui` created; `Ui.make_active` switches it) — CUI's
+answer to Flutter's `findAncestorStateOfType`, and to "how does a callback with
+no context reach the rest of the tree." For a stable handle you can also keep
+the `Element*` that `@node` returns and read it back with `Element.widget_as`
+(`ui.find($Type)` is the explicit, non-ambient form). Type-based lookup fits
+singletons; hold an explicit handle when several widgets of a kind coexist.
 
 The `Dial` in `test/layout.c3` shows drag with capture, scroll, and
 arrow-key focus handling.

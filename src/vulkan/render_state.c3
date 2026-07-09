@@ -1,4 +1,4 @@
-module cui;
+module cui::vulkan;
 import std::math;
 import std::io;
 import std::collections;

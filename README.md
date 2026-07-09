@@ -5,6 +5,19 @@ tree with cached layout and paint; every drawing is an SDF primitive rendered
 in a single instanced draw call. Transform animations write one matrix into a
 GPU palette and re-run neither layout nor paint.
 
+The library is split so it can be embedded in an existing Vulkan engine:
+
+- `cui` — the core: element tree, widgets, and the `Canvas` output
+  (drawings + transform palette). No Vulkan or windowing dependencies.
+  Also exports the compiled shader (`cui::shader_spirv`) and the GPU binding
+  contract (`cui::ShaderUniforms`, `cui::ShaderPushConstants`) — see
+  `src/shader.c3`.
+- `cui::camera` — projection/view helpers producing the matrices the shader
+  expects. Pure math.
+- `cui::vulkan` — a standalone reference renderer (window, swapchain, frame
+  loop) used by the example. Engines with their own device skip it and follow
+  the embedding steps below.
+
 ### Running the example
 
 Install C3 from https://c3-lang.org/
@@ -30,3 +43,44 @@ c3c run ui
 ```
 
 Drag with the left mouse button to rotate the cards. Escape quits.
+
+### Embedding in a Vulkan engine
+
+The engine owns the device, swapchain, and frame loop; cui produces a
+`Canvas` the engine renders with one pipeline and one instanced draw call.
+`src/vulkan/renderer.c3` is the worked example of every step below.
+
+**Per frame** — build/mutate the widget tree, call `ui.flush()`, then consume
+`ui.canvas` while recording your command buffer.
+
+**Pipeline** — create one `VkShaderModule` from `cui::shader_spirv` (a single
+module with entry points `cui::SHADER_VERTEX_ENTRY` and
+`cui::SHADER_FRAGMENT_ENTRY`). No vertex input state (the quad comes from
+`SV_VertexID`), triangle list, culling off, standard alpha blending
+(`src_alpha` / `one_minus_src_alpha`), depth test optional.
+
+**Descriptor set 0** —
+- binding 0: uniform buffer holding a `cui::ShaderUniforms`
+  (vertex + fragment stages). Upload `projection` and `view` **transposed**;
+  `cui::camera` produces matrices in the expected convention. `resolution` is
+  the drawable size in pixels — drawing coordinates are pixels.
+- binding 1: array of combined image samplers, one per UI texture.
+  `Drawing.texture` / `RectStyle.texture` are 1-based indices into this array
+  (0 means untextured).
+
+**Buffers** — two buffers created with
+`BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT`: the drawing list and the transform
+palette. Each frame, if `canvas.drawings_dirty`, upload
+`canvas.drawings.entries` (`Drawing` is a plain struct, scalar layout) and
+clear the flag; likewise `canvas.transforms_dirty` / `canvas.transforms`
+(raw `Matrix4f` bytes, **not** transposed). Grow the buffers when the counts
+outgrow them — a clean frame uploads nothing.
+
+**Draw** — push a `cui::ShaderPushConstants` (16 bytes, both buffer device
+addresses, vertex + fragment stages), then
+`vkCmdDraw(cmd, 6, canvas.drawings.len, 0, 0)`.
+
+**Device features** — `bufferDeviceAddress`, `shaderDrawParameters` and
+`scalarBlockLayout` must be enabled. The reference renderer queries the
+`PhysicalDeviceVulkan11/12/13Features` chain and passes it back at device
+creation, which enables everything the driver supports.

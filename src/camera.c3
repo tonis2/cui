@@ -1,4 +1,7 @@
-module camera;
+// Projection/view math for the cui shader's uniform block. Vulkan-free, so
+// embedding engines can reuse it to produce the exact matrices the shader
+// expects (upload transposed — see cui::ShaderUniforms in shader.c3).
+module cui::camera;
 import std::math;
 import std::io;
 

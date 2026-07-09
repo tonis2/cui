@@ -1,14 +1,16 @@
-module cui;
+// Reference backend: standalone window + swapchain renderer for cui. Engines
+// with their own device and frame loop implement the same steps against the
+// exports in src/shader.c3 instead (see "Embedding in a Vulkan engine" in
+// README.md); this file doubles as the worked example.
+module cui::vulkan;
 import std::io;
 import std::collections::list;
 import std::math;
 
+import cui;
 import vk;
 import c3w;
-import camera;
-
-// Single Slang module holding both entry points (vertexMain / fragmentMain).
-char[*] shader_data = $embed("./shaders/shader.spv");
+import cui::camera;
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
@@ -18,17 +20,6 @@ const APP_NAME = "UI EXAMPLE";
 // the next power of two (see ensure_buffer_capacity).
 const INITIAL_DRAWINGS = 64;
 const INITIAL_TRANSFORMS = 16;
-
-struct PushConstantData {
-    vk::DeviceAddress drawings;
-    vk::DeviceAddress transforms;
-}
-
-struct UniformBuffer {
-    Matrix4f perspective;
-    Matrix4f view;
-    Vec2 resolution;
-}
 
 // Yielded to the @on_frame body each frame.
 struct FrameInput {
@@ -105,7 +96,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
     // Slang's cbuffer matrix layout expects column-major bytes relative to
     // Matrix4f's row-major storage, so matrices are uploaded transposed
     // (verified against the SPIR-V: clip w collapses to 0 otherwise).
-    UniformBuffer uniform_data = {
+    ShaderUniforms uniform_data = {
         renderer.camera.perspective.transpose(),
         renderer.camera.view.transpose(),
         window_size
@@ -282,7 +273,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         usage: BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
         data: &uniform_data,
-        data_size: UniformBuffer::size,
+        data_size: ShaderUniforms::size,
     )!;
 
     // Retained display list + transform palette; re-uploaded only when the
@@ -325,8 +316,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
     renderer.pipeline = (RenderState) {
         .descriptor_layout = renderer.descriptor_layout,
         .shaders = {
-            { .spirv = shader_data[..], .entry = "vertexMain", .stage = SHADER_STAGE_VERTEX_BIT },
-            { .spirv = shader_data[..], .entry = "fragmentMain", .stage = SHADER_STAGE_FRAGMENT_BIT },
+            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
+            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_FRAGMENT_ENTRY, .stage = SHADER_STAGE_FRAGMENT_BIT },
         },
         .cull_mode = CULL_MODE_NONE,
         .front_face = FRONT_FACE_COUNTER_CLOCKWISE,
@@ -335,7 +326,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         .push_constants = {
             {
                 .offset = 0,
-                .size = PushConstantData::size,
+                .size = ShaderPushConstants::size,
                 .stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
             },
         },
@@ -538,7 +529,7 @@ macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
         vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
 
         DescriptorBufferInfo[1] uniform_info = {
-            { .buffer = self.uniform_buffer.buffer, .offset = 0, .range = UniformBuffer::size },
+            { .buffer = self.uniform_buffer.buffer, .offset = 0, .range = ShaderUniforms::size },
         };
         WriteDescriptorSet[2] descriptor_writes = {
             vk::writeDescriptorSet()
@@ -575,11 +566,11 @@ macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
             canvas.transforms_dirty = false;
         }
 
-        PushConstantData constant_data = {
+        ShaderPushConstants constant_data = {
             .drawings = self.canvas_buffer.address,
             .transforms = self.transform_buffer.address,
         };
-        vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, PushConstantData::size, &constant_data);
+        vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
 
         // The whole canvas in one instanced draw; the vertex shader indexes
         // drawings by SV_InstanceID.

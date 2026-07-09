@@ -16,7 +16,7 @@ fn void main(String[] args)
 {
     Vec2 window_size = {900.0, 700.0};
 
-    Renderer renderer = cui::new(window_size: window_size, images: images)!!;
+    Renderer renderer = cui::vulkan::new(window_size: window_size, images: images)!!;
     defer catch renderer.free();
 
     Ui* ui = cui::new_ui(window_size);

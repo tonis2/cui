@@ -40,20 +40,33 @@ const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 
 // A widget is behavior attached to an Element. All methods are optional:
 //
-//   layout   given constraints, return own size; lay out children through
-//            elem.layout_child / elem.place_child. Omitted: children get loose
-//            constraints and keep their offsets, size fills the constraints.
-//   paint    emit primitives in element-local coordinates. Omitted: the
-//            element draws nothing itself (pure container).
-//   unmount  free whatever the widget allocated; called when its element
-//            leaves the tree. The widget struct itself stays caller-owned.
+//   layout    given constraints, return own size; lay out children through
+//             elem.layout_child / elem.place_child. Omitted: children get loose
+//             constraints and keep their offsets, size fills the constraints.
+//   paint     emit primitives in element-local coordinates. Omitted: the
+//             element draws nothing itself (pure container).
+//   on_mouse  press/release/move/scroll, hit-tested and bubbling: the deepest
+//             element under the pointer gets it first; return true to consume.
+//             Consuming a PRESS captures the mouse until that button releases.
+//   on_hover  pointer entered (true) / left (false) this element.
+//   on_key    key press/release edges, delivered to the focused element (left
+//             click focuses; see Element.request_focus), bubbling like on_mouse.
+//   update    called every frame with the frame's dt — for animations and
+//             polling ui.input; mutate state then request_paint().
+//   unmount   free whatever the widget allocated; called when its element
+//             leaves the tree. The widget struct itself stays caller-owned.
 //
-// The built-in implementations (Rectangle, Column, Row, Stack, Padding) live
-// in module cui::widgets; apps write their own against this interface.
+// The built-in implementations (Rectangle, Column, Row, Stack, Padding,
+// Button) live in module cui::widgets; apps write their own against this
+// interface.
 interface Widget
 {
     fn Vec2 layout(Element* elem, Constraints constraints) @optional;
     fn void paint(Element* elem, Painter* painter) @optional;
+    fn bool on_mouse(Element* elem, MouseEvent event) @optional;
+    fn void on_hover(Element* elem, bool entered) @optional;
+    fn bool on_key(Element* elem, KeyEvent event) @optional;
+    fn void update(Element* elem, float dt) @optional;
     fn void unmount() @optional;
 }
 
@@ -85,6 +98,10 @@ struct Element {
     Vec2 size;
     Vec2 offset;                // relative to parent; set by the parent's layout
                                 // (or by the user under an absolute container)
+    Vec2 absolute;              // origin in UI coordinates, stored by the last
+                                // emit pass; hit testing reads it
+    Cursor cursor;              // preferred pointer shape while hovered
+                                // (DEFAULT = defer to ancestors)
 
     // Paint cache, in element-local coordinates. Emitting shifts copies by the
     // absolute origin, so a moved-but-clean element never re-paints.
@@ -102,6 +119,15 @@ struct Ui {
     Element* root;
     Canvas canvas;
     Vec2 size;                  // root constraints, usually the window size
+
+    // Interactivity state, maintained by Ui.process_input (input.c3).
+    Input input;                // per-frame queryable state — the "context"
+    Cursor cursor;              // effective pointer shape, for the embedder
+    Element* hovered;
+    Element* captured;          // consumer of an in-flight press, if any
+    MouseButton capture_button;
+    Element* focused;           // receiver of key events
+    List{Key} held_keys;
 
     // Elements are recycled through a free-list so Element* stays stable for
     // the lifetime of the Ui; all_elements exists only for final cleanup.
@@ -129,6 +155,7 @@ fn void Ui.free(&self)
     self.all_elements.free();
     self.free_elements.free();
     self.free_transform_slots.free();
+    self.held_keys.free();
     self.canvas.free();
     mem::free(self);
 }
@@ -235,6 +262,11 @@ fn void Ui.release(&self, Element* element)
     if (&element.widget.unmount) element.widget.unmount();
     if (element.owns_widget) mem::free(((any)element.widget).ptr);
     if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
+    // Elements get recycled — a stale interactivity pointer would silently
+    // retarget whatever reuses this slot.
+    if (self.hovered == element) self.hovered = null;
+    if (self.captured == element) self.captured = null;
+    if (self.focused == element) self.focused = null;
     element.children.free();
     element.local_drawings.free();
     *element = {};
@@ -277,6 +309,13 @@ fn void Element.set_offset(&self, Vec2 offset)
 {
     self.offset = offset;
     self.ui.paint_pending = true;
+}
+
+// Directs key events to this element (a left click on an element whose widget
+// implements on_key does the same automatically).
+fn void Element.request_focus(&self)
+{
+    self.ui.focused = self;
 }
 
 // Animation path: writes one matrix into the palette. The first call allocates
@@ -375,6 +414,7 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot)
 {
     Vec2 absolute = origin + element.offset;
+    element.absolute = absolute;       // hit testing reads this
     uint slot = element.transform_slot != NO_TRANSFORM ? element.transform_slot : inherited_slot;
 
     if (element.dirty.paint) {

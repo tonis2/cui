@@ -6,6 +6,7 @@ module cui::vulkan;
 import std::io;
 import std::collections::list;
 import std::math;
+import std::time;
 
 import cui;
 import vk;
@@ -21,10 +22,15 @@ const APP_NAME = "UI EXAMPLE";
 const INITIAL_DRAWINGS = 64;
 const INITIAL_TRANSFORMS = 16;
 
-// Yielded to the @on_frame body each frame.
+// Yielded to the @on_frame body each frame. The full input state lives on
+// ui.input (fed by this renderer before the body runs); the delta fields are
+// a convenience that reports pointer movement only while LEFT is held,
+// preserving the examples' drag-to-rotate behavior.
 struct FrameInput {
     float mouse_x_delta;
     float mouse_y_delta;
+    Vec2 mouse;             // pointer in UI coordinates (top-left origin)
+    float dt;               // seconds since last frame
     c3w::EventMap events;
 }
 
@@ -34,7 +40,9 @@ struct Renderer {
     Extent2D extent;
 
 	c3w::Window window;
-    Vec2 prev_mouse;
+    Clock frame_clock;
+    cui::Cursor applied_cursor;
+    List{cui::Key} key_scratch;
 
 	Instance instance;
 	DebugUtilsMessengerEXT debug_messenger;
@@ -322,6 +330,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false) {
 	renderer.device = device;
 
     renderer.window = window;
+    renderer.frame_clock = clock::now();
 
 	return renderer;
 }
@@ -450,6 +459,7 @@ fn void Renderer.free(&self) {
 
     self.device.free();
     self.instance.free();
+    self.key_scratch.free();
     self.window.free();
 }
 
@@ -476,8 +486,42 @@ fn void? Renderer.ensure_buffer_capacity(&self, vk::Memory* buffer, sz needed)
     )!;
 }
 
-macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
+// c3w's EventMap mixes keyboard keys and mouse buttons; buttons feed
+// InputFrame.buttons, everything else becomes a cui::Key.
+fn bool is_mouse_key(c3w::EventKey key)
 {
+    switch (key) {
+        case LEFT_MOUSE:
+        case RIGHT_MOUSE:
+        case MIDDLE_MOUSE:
+        case MOUSE_SCROLL_UP:
+        case MOUSE_SCROLL_DOWN:
+        case MOUSE_4:
+        case MOUSE_5:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
+{
+    switch (cursor) {
+        case DEFAULT:
+        case ARROW:         return ARROW;
+        case POINTING_HAND: return POINTING_HAND;
+        case IBEAM:         return IBEAM;
+        case CROSSHAIR:     return CROSSHAIR;
+        case OPEN_HAND:     return OPEN_HAND;
+        case CLOSED_HAND:   return CLOSED_HAND;
+        case RESIZE_H:      return RESIZE_H;
+        case RESIZE_V:      return RESIZE_V;
+    }
+}
+
+macro void? Renderer.@on_frame(self, Ui* ui; @body(FrameInput input))
+{
+    Canvas* canvas = &ui.canvas;
     bool running = true;
 
     while (running) {
@@ -486,17 +530,41 @@ macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
         if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
 
         c3w::EventMap event_map = self.window.getEvent();
+        if (event_map.is_pressed(ESCAPE) || self.window.should_close()) running = false;
 
-        float dx = 0;
-        float dy = 0;
-        if (event_map.is_pressed(LEFT_MOUSE)) {
-            Vec2 mouse_pos = self.window.getMousePos();
-            dx = mouse_pos.x - self.prev_mouse.x;
-            dy = mouse_pos.y - self.prev_mouse.y;
-            self.prev_mouse = mouse_pos;
+        float dt = (float)self.frame_clock.mark().to_sec();
+
+        // c3w reports the pointer in Cocoa window coordinates (bottom-left
+        // origin, points); cui works top-left.
+        Vec2 raw_mouse = self.window.getMousePos();
+        Vec2 mouse = { raw_mouse.x, self.window_size.y - raw_mouse.y };
+
+        self.key_scratch.clear();
+        event_map.@each(; c3w::EventKey key, bool held) {
+            if (held && !is_mouse_key(key)) self.key_scratch.push((cui::Key)key.code);
+        };
+
+        // Feed the frame's input; the Ui updates ui.input, dispatches the
+        // widget events, and runs update() hooks — before the app body runs.
+        ui.process_input({
+            .mouse = mouse,
+            .buttons = {
+                event_map.is_pressed(LEFT_MOUSE),
+                event_map.is_pressed(RIGHT_MOUSE),
+                event_map.is_pressed(MIDDLE_MOUSE),
+            },
+            .scroll = self.window.get_scroll(),
+            .text = self.window.get_text(),
+            .keys_down = self.key_scratch.array_view(),
+        }, dt);
+
+        if (ui.cursor != self.applied_cursor) {
+            self.applied_cursor = ui.cursor;
+            self.window.set_cursor(cursor_shape(ui.cursor));
         }
 
-        if (event_map.is_pressed(ESCAPE)) running = false;
+        float dx = ui.input.down[0] ? ui.input.mouse_delta.x : 0;
+        float dy = ui.input.down[0] ? ui.input.mouse_delta.y : 0;
 
         Fence frame_fence = self.frame_fences[self.frame];
         Semaphore wait_semaphore = self.wait_semaphores[self.frame];
@@ -586,7 +654,14 @@ macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
         };
         vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
 
-        @body((FrameInput){ .mouse_x_delta = dx, .mouse_y_delta = dy, .events = event_map });
+        @body((FrameInput){
+            .mouse_x_delta = dx,
+            .mouse_y_delta = dy,
+            .mouse = ui.input.mouse,
+            .dt = dt,
+            .events = event_map,
+        });
+        ui.flush();
 
         // Re-upload only what changed since the last frame, growing the
         // buffers to whatever the UI actually produced.

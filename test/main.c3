@@ -62,10 +62,12 @@ fn void main(String[] args)
 	double x_rotation = -0.15;
 	double y_rotation = -0.15;
 
-	renderer.@on_frame(&ui.canvas ; FrameInput input)
+	renderer.@on_frame(ui ; FrameInput input)
 	{
+		// Deltas are in UI coordinates (y down) — subtract so dragging up
+		// still tilts the cards up.
 		x_rotation += input.mouse_x_delta * 0.005;
-		y_rotation += input.mouse_y_delta * 0.005;
+		y_rotation -= input.mouse_y_delta * 0.005;
 
 		// Transform-only animation: no layout or paint runs for this, each
 		// card is a single matrix write into the palette.
@@ -75,7 +77,5 @@ fn void main(String[] args)
 			element.set_transform(matrix::IDENTITY4.rotate_y((float)(x_rotation * rate))
 				.rotate_x((float)(y_rotation * rate)));
 		}
-
-		ui.flush();
 	}!!;
 }

@@ -16,6 +16,26 @@ import cui::camera;
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
 
+// dt is clamped to this so a stall — or waking from an on-demand sleep after
+// minutes idle — can't hand animations one enormous step. Also the usual
+// spiral-of-death guard.
+const float MAX_FRAME_DT = 0.1;
+
+// How the reference frame loop paces itself:
+//   CONTINUOUS  redraw every frame, poll input, run at the display's refresh
+//               rate (FIFO present) forever. Lowest latency; a core stays busy.
+//               Right when something is always animating.
+//   ON_DEMAND   after a frame, if nothing scheduled another (ui.frame_requested
+//               is clear), block for input — the thread sleeps at 0% CPU until
+//               the user does something. Right for mostly-static desktop UIs.
+//               A running animation keeps scheduling frames, so it still plays
+//               smoothly; the loop only sleeps once everything settles.
+enum LoopMode
+{
+    CONTINUOUS,
+    ON_DEMAND,
+}
+
 // Initial GPU buffer capacities. Buffers are sized by what the UI actually
 // draws: whenever an upload outgrows its buffer, the buffer is reallocated at
 // the next power of two (see ensure_buffer_capacity).
@@ -43,6 +63,7 @@ struct Renderer {
     Clock frame_clock;
     cui::Cursor applied_cursor;
     List{cui::Key} key_scratch;
+    LoopMode loop_mode;
 
 	Instance instance;
 	DebugUtilsMessengerEXT debug_messenger;
@@ -83,7 +104,7 @@ struct Renderer {
 }
 
 
-fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false) {
+fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopMode loop_mode = CONTINUOUS) {
 
 	ZStringList validations;
 	ZStringList extensions;
@@ -93,7 +114,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false) {
         .frame = 0,
         .camera = camera::new(eye: {0.0, 0.0, 1.0}, aspect: window_size.x / window_size.y, min_zoom: 0.1, max_zoom: 10),
         .window_size = window_size,
-        .enable_debug = enable_debug
+        .enable_debug = enable_debug,
+        .loop_mode = loop_mode,
     };
 
 	defer {
@@ -524,15 +546,30 @@ macro void? Renderer.@on_frame(self, Ui* ui; @body(FrameInput input))
     Canvas* canvas = &ui.canvas;
     bool running = true;
 
+    // ON_DEMAND only: true once a frame settled with nothing scheduled, so the
+    // next getEvent blocks until input instead of spinning. Starts false — the
+    // first frame always renders.
+    bool wait_for_events = false;
+
     while (running) {
         // First frame, or textures were added since: (re)build the pipeline
         // so the sampler-array binding matches the texture count.
         if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
 
-        c3w::EventMap event_map = self.window.getEvent();
+        // In ON_DEMAND mode this call parks the thread until an event arrives
+        // when wait_for_events is set; otherwise it polls and returns at once.
+        c3w::EventMap event_map = self.window.getEvent(wait_for_events);
         if (event_map.is_pressed(ESCAPE) || self.window.should_close()) running = false;
 
-        float dt = (float)self.frame_clock.mark().to_sec();
+        // Anything this frame schedules (input handlers, the app body, an
+        // animation) re-sets frame_requested; we read it after the frame to
+        // decide whether to sleep next. Clear it first so it reflects only
+        // this frame's activity.
+        ui.frame_requested = false;
+
+        // Clamped so a long idle sleep (or a stall) doesn't advance animations
+        // by the whole elapsed wall-clock in one step.
+        float dt = math::min((float)self.frame_clock.mark().to_sec(), MAX_FRAME_DT);
 
         // c3w reports the pointer in Cocoa window coordinates (bottom-left
         // origin, points); cui works top-left.
@@ -739,5 +776,11 @@ macro void? Renderer.@on_frame(self, Ui* ui; @body(FrameInput input))
         vk::queuePresentKHR(self.graphics_queue.handle, &present_info)!;
 
         self.frame = (self.frame + 1) % 2;
+
+        // Decide whether to sleep before the next frame: only in ON_DEMAND mode,
+        // and only if nothing this frame scheduled another. A live animation
+        // keeps re-scheduling (set_transform / request_paint each frame), so it
+        // never sleeps mid-animation — it settles first, then blocks for input.
+        wait_for_events = self.loop_mode == LoopMode.ON_DEMAND && !ui.frame_requested;
 	}
 }

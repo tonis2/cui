@@ -54,6 +54,27 @@ ui.@node((Rectangle){ .size = {260, 300}, .style = { .texture = portrait } });
 `test/layout.c3` is a full declarative example; `test/main.c3` uses app-owned
 widgets so it can animate their elements every frame.
 
+### Custom widgets and the Painter
+
+A widget's `paint` receives a `Painter` and draws SDF primitives in
+element-local coordinates. All units are pixels; angles are radians with
+0 = +x, increasing clockwise on screen (y points down); corner radii run
+`{top-left, top-right, bottom-right, bottom-left}` and clamp to what the
+shape can fit; borders draw inside the shape's edge. Everything is
+antialiased over a 1px band.
+
+```c3
+painter.rect(pos, size, (RectStyle){ .color = ..., .border_radius = {8, 8, 8, 8} });
+painter.circle(center, radius, (CircleStyle){ .texture = avatar });   // round images work
+painter.ellipse(center, radii, style);
+painter.line(from, to, thickness, color);                  // rounded caps
+painter.arc(center, radius, start, sweep, thickness, color); // sweep >= 2π = full ring
+painter.rect_shadow(pos, size, blur, color, border_radius);  // soft shadow / glow
+```
+
+The `Dial` widget in `test/layout.c3` combines them into a gauge — face,
+tick marks, progress arc, needle — in ~30 lines of paint code.
+
 ### Running the example
 
 Install C3 from https://c3-lang.org/

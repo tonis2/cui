@@ -179,7 +179,7 @@ fn void main(String[] args)
 	// should behave. (main.c3 leaves the default CONTINUOUS: its cards animate
 	// every frame.) Dragging the dial still streams mouse events, so it stays
 	// smooth; the loop only parks once everything settles.
-	Renderer renderer = cui::vulkan::new(window_size: window_size, loop_mode: cui::vulkan::LoopMode.ON_DEMAND)!!;
+	Renderer renderer = cui::vulkan::new(window_size: window_size, loop_mode: ON_DEMAND)!!;
 	defer catch renderer.free();
 
 	// Images are uploaded to the renderer, which hands back the Texture
@@ -196,8 +196,8 @@ fn void main(String[] args)
 		(Row) {
 			.size = { content_width, 130.0 },
 			.gap = 16.0,
-			.main_align = MainAlign.CENTER,
-			.cross_align = CrossAlign.END,
+			.main_align = CENTER,
+			.cross_align = END,
 		}
 	);
 
@@ -238,7 +238,7 @@ fn void main(String[] args)
 
 	// Two unlabeled buttons (no text rendering yet): reset and +10%.
 	Element* buttons = ui.@node(
-		(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = MainAlign.CENTER },
+		(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER },
 		ui.@node(
 			(Button{Element}) {
 				.size = { 130.0, 40.0 },
@@ -269,7 +269,7 @@ fn void main(String[] args)
 		ui.@node(
 			(Padding) { .insets = widgets::insets_all(24.0) },
 			ui.@node(
-				(Column) { .gap = 24.0, .main_align = MainAlign.CENTER, .cross_align = CrossAlign.CENTER, },
+				(Column) { .gap = 24.0, .main_align = CENTER, .cross_align = CENTER, },
 				ui.@node(
 					(Rectangle) {
 						.size = { content_width, 96.0 },
@@ -277,7 +277,7 @@ fn void main(String[] args)
 					}
 				),
 				ui.@node(
-					(Row) { .size = { content_width, 0 }, .main_align = MainAlign.SPACE_BETWEEN },
+					(Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN },
 					teal_card,
 					dial_element,
 					ui.@node(

@@ -182,19 +182,48 @@ fn Vec2 Padding.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Button: a clickable rect with hover and press styles. The worked example of
-// the Widget event callbacks — on_hover/on_mouse mutate state and
-// request_paint; on_click fires when a left press is released inside.
+// Stack: absolute container. Children are positioned by Element.set_offset and
+// sized by their own layout under loose constraints.
 
-alias OnClick = fn void(void* ctx);
+struct Stack (Widget) {
+    Vec2 size;      // zero on an axis = fill the available space
+}
 
-struct Button (Widget) {
+fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+    Vec2 own = {
+        self.size.x > 0 ? self.size.x : constraints.max.x,
+        self.size.y > 0 ? self.size.y : constraints.max.y,
+    };
+    own = cui::clamp_size(own, constraints);
+
+    for (sz i = 0; i < elem.children.len(); i++) {
+        elem.layout_child(i, { .min = {0, 0}, .max = own });
+    }
+    return own;
+}
+
+// ---------------------------------------------------------------------------
+// Button: a clickable rect with hover and press styles, generic over its
+// callback context — the context type is part of the widget type, so the
+// callback receives it fully typed, no casts:
+//
+//     fn void save_clicked(AppState* app) { ... }
+//     ui.@node((Button{AppState}){ .on_click = &save_clicked, .ctx = &app, ... });
+//
+// Also the worked example of the Widget event callbacks: on_hover/on_mouse
+// mutate state and request_paint; on_click fires when a left press is
+// released inside.
+
+alias OnClick <Ctx> = fn void(Ctx* ctx);
+
+struct Button (Widget) <Ctx> {
     Vec2 size;
     RectStyle style;
     RectStyle hover_style;      // used while hovered, if its color alpha > 0
     RectStyle press_style;      // used while held, if its color alpha > 0
-    OnClick on_click;           // optional; receives ctx
-    void* ctx;
+    OnClick{Ctx} on_click;      // optional; receives ctx
+    Ctx* ctx;
     bool hovered;
     bool held;
 }
@@ -241,26 +270,4 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
         default:
             return false;
     }
-}
-
-// ---------------------------------------------------------------------------
-// Stack: absolute container. Children are positioned by Element.set_offset and
-// sized by their own layout under loose constraints.
-
-struct Stack (Widget) {
-    Vec2 size;      // zero on an axis = fill the available space
-}
-
-fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-    Vec2 own = {
-        self.size.x > 0 ? self.size.x : constraints.max.x,
-        self.size.y > 0 ? self.size.y : constraints.max.y,
-    };
-    own = cui::clamp_size(own, constraints);
-
-    for (sz i = 0; i < elem.children.len(); i++) {
-        elem.layout_child(i, { .min = {0, 0}, .max = own });
-    }
-    return own;
 }

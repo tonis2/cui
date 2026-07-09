@@ -147,25 +147,25 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.circle(center, 7.0f, { .color = { 0.95, 0.60, 0.20, 1.0 } });
 }
 
-// Button callbacks drive the dial through a context pointer (C3 has no
-// closures). The element is needed to invalidate the dial's paint.
+// Button callbacks drive the dial through a context (C3 has no closures).
+// Button is generic over the context type — Button{DialHandle} — so the
+// callbacks receive it fully typed, no casts. The element is needed to
+// invalidate the dial's paint.
 struct DialHandle
 {
 	Dial* dial;
 	Element* element;
 }
 
-fn void reset_dial(void* ctx)
+fn void reset_dial(DialHandle* handle)
 {
-	DialHandle* handle = ctx;
 	handle.dial.value = 0.0;
 	handle.element.request_paint();
 	io::printfn("[layout] reset clicked -> %.2f", handle.dial.value);
 }
 
-fn void bump_dial(void* ctx)
+fn void bump_dial(DialHandle* handle)
 {
-	DialHandle* handle = ctx;
 	handle.dial.value = math::clamp(handle.dial.value + 0.1f, 0.0f, 1.0f);
 	handle.element.request_paint();
 	io::printfn("[layout] bump clicked -> %.2f", handle.dial.value);
@@ -240,7 +240,7 @@ fn void main(String[] args)
 	Element* buttons = ui.@node(
 		(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = MainAlign.CENTER },
 		ui.@node(
-			(Button) {
+			(Button{DialHandle}) {
 				.size = { 130.0, 40.0 },
 				.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
@@ -250,7 +250,7 @@ fn void main(String[] args)
 			}
 		),
 		ui.@node(
-			(Button) {
+			(Button{DialHandle}) {
 				.size = { 130.0, 40.0 },
 				.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },

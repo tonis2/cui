@@ -108,9 +108,16 @@ Semantics:
   deepest hovered element with a preference wins; the renderer applies it to
   the OS pointer.
 
-`Button` in `cui::widgets` is the worked example (hover/press styles,
-`on_click` function pointer + `void* ctx`). The `Dial` in `test/layout.c3`
-shows drag with capture, scroll, and arrow-key focus handling.
+`Button` in `cui::widgets` is the worked example (hover/press styles). It is
+generic over its callback context, so the callback is fully typed — no casts:
+
+```c3
+fn void save_clicked(AppState* app) { ... }
+ui.@node((Button{AppState}){ .size = {130, 40}, .on_click = &save_clicked, .ctx = &app });
+```
+
+The `Dial` in `test/layout.c3` shows drag with capture, scroll, and
+arrow-key focus handling.
 
 ### Running the example
 

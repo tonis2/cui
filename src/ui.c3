@@ -292,7 +292,7 @@ fn void Element.set_transform(&self, Matrix4f transform)
 fn uint Ui.alloc_transform_slot(&self)
 {
     if (try slot = self.free_transform_slots.pop()) return slot;
-    self.canvas.transforms.push(MATRIX4F_IDENTITY);
+    self.canvas.transforms.push(matrix::IDENTITY4);
     return (uint)self.canvas.transforms.len() - 1;
 }
 

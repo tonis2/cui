@@ -24,7 +24,7 @@ The library is split so it can be embedded in an existing Vulkan engine:
 
 ### Building UI
 
-Trees are declared Flutter-style with `Ui.@node` and installed with
+Trees are declared with `Ui.@node` and installed with
 `Ui.build`:
 
 ```c3

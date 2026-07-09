@@ -189,6 +189,17 @@ macro Element* Ui.@node(&self, widget, ...)
     $endif
 }
 
+// The inverse of @node: recover the concrete widget behind an element as a
+// typed pointer. An Element* is a stable handle to a tree node (it survives
+// relayout and repaint), so holding one is CUI's equivalent of a Flutter
+// GlobalKey — a callback that keeps it can read and mutate that widget's own
+// state, then request_paint(), without a wrapper struct. Unchecked: the caller
+// asserts $Type, the same assertion it made when it built the node.
+macro Element.widget_as(&self, $Type)
+{
+    return ($Type*)((any)self.widget).ptr;
+}
+
 // Installs a built tree as the UI root, releasing any previous root.
 fn void Ui.build(&self, Element* root)
 {

@@ -119,6 +119,36 @@ ui.@node((Button{AppState}){ .size = {130, 40}, .on_click = &save_clicked, .ctx 
 The `Dial` in `test/layout.c3` shows drag with capture, scroll, and
 arrow-key focus handling.
 
+### Frame loop: continuous vs. on-demand
+
+The reference renderer runs one of two loop modes, picked at `cui::vulkan::new`:
+
+- `CONTINUOUS` (default) redraws every frame and polls input, running at the
+  display's refresh rate forever. Lowest latency, but a CPU core stays busy —
+  right when something is always animating (the `ui` example rotates its cards
+  every frame).
+- `ON_DEMAND` sleeps when idle: once a frame settles with nothing scheduled,
+  the loop blocks for input and the thread parks at ~0% CPU until the user does
+  something. Right for mostly-static desktop UIs — the `layout` example uses it.
+
+  ```c3
+  cui::vulkan::new(window_size: size, loop_mode: cui::vulkan::LoopMode.ON_DEMAND)
+  ```
+
+Animation still plays smoothly under `ON_DEMAND` because it rides the same
+scheduling as everything else: any invalidation (`request_paint`,
+`request_layout`, `set_transform`, mount/unmount, …) sets `ui.frame_requested`,
+and the loop only sleeps after a frame produces no new request. A running
+animation re-schedules every frame — the way a Flutter `Ticker` re-arms itself —
+so it keeps drawing and the loop parks only once it finishes. The one gap:
+waking for a *non-input* reason (a timer firing, a background thread calling
+`request_paint` while asleep) needs the platform to post a wake event;
+input-driven UIs don't hit this.
+
+Embedding engines own their own loop, so this is a reference-renderer feature —
+but `ui.frame_requested` is the reusable primitive if you build the same
+idle-sleep against your own frame loop.
+
 ### Running the example
 
 Install C3 from https://c3-lang.org/

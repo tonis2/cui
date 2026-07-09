@@ -137,6 +137,10 @@ struct Ui {
 
     bool layout_pending;
     bool paint_pending;
+    bool frame_requested;       // "schedule a frame": set by every invalidation
+                                // below. A render loop that sleeps when idle
+                                // (see cui::vulkan LoopMode) reads and clears
+                                // this to decide whether to block for input.
 }
 
 // Heap-allocated so Element.ui stays valid; released with Ui.free().
@@ -193,6 +197,7 @@ fn void Ui.build(&self, Element* root)
     self.root = root;
     self.layout_pending = true;
     self.paint_pending = true;
+    self.frame_requested = true;
 }
 
 // Grafts a built subtree under a live element.
@@ -233,6 +238,7 @@ fn Element* Ui.mount(&self, Widget widget, Element* parent = null)
         self.layout_pending = true;
         self.paint_pending = true;
     }
+    self.frame_requested = true;
     return element;
 }
 
@@ -254,6 +260,7 @@ fn void Ui.unmount(&self, Element* element)
     }
     self.release(element);
     self.paint_pending = true;
+    self.frame_requested = true;
 }
 
 fn void Ui.release(&self, Element* element)
@@ -284,6 +291,16 @@ fn Element* Ui.alloc_element(&self)
 // ---------------------------------------------------------------------------
 // Invalidation — the only way anything gets recomputed.
 
+// Schedules a frame. An on-demand render loop (one that sleeps when nothing is
+// happening) wakes and draws when this is set. Every invalidation below calls
+// it, so ordinary state changes schedule a frame for free; a continuous
+// animation keeps calling it each frame itself — the analog of a Flutter Ticker
+// re-scheduling — and simply stops when it's done, letting the loop sleep.
+fn void Ui.request_frame(&self)
+{
+    self.frame_requested = true;
+}
+
 // Size or child structure changed: re-layout from here, repaint here. Ancestors
 // are marked so the layout walk descends to this element; their own cached
 // sizes still short-circuit if nothing about them changes.
@@ -294,6 +311,7 @@ fn void Element.request_layout(&self)
     for (Element* p = self.parent; p != null && !p.dirty.layout; p = p.parent) p.dirty.layout = true;
     self.ui.layout_pending = true;
     self.ui.paint_pending = true;
+    self.ui.frame_requested = true;
 }
 
 // Appearance changed but not size: only this element's paint() re-runs.
@@ -301,6 +319,7 @@ fn void Element.request_paint(&self)
 {
     self.dirty.paint = true;
     self.ui.paint_pending = true;
+    self.ui.frame_requested = true;
 }
 
 // Manual placement under an absolute container (Stack). Cheap: the subtree's
@@ -309,6 +328,7 @@ fn void Element.set_offset(&self, Vec2 offset)
 {
     self.offset = offset;
     self.ui.paint_pending = true;
+    self.ui.frame_requested = true;
 }
 
 // Directs key events to this element (a left click on an element whose widget
@@ -333,6 +353,7 @@ fn void Element.set_transform(&self, Matrix4f transform)
     // Matrix4f's row-major storage (see shader.slang PushData).
     ui.canvas.transforms[self.transform_slot] = transform;
     ui.canvas.transforms_dirty = true;
+    ui.frame_requested = true;
 }
 
 fn uint Ui.alloc_transform_slot(&self)

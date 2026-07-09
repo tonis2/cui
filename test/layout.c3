@@ -21,14 +21,14 @@ struct TileSpec
 // A custom widget painting with the Painter primitives directly — circle,
 // line, arc and rect_shadow — the way app-defined widgets are meant to.
 // A gauge: shadowed face, tick marks, a track + value arc, and a needle.
-//
+// 
 // Also the worked example of the event callbacks: drag or scroll on it to
 // set the value, click to focus it, then nudge with the arrow keys.
 struct Dial (Widget)
 {
 	Vec2 size;
-	float value;    // 0..1
-	bool dragging;  // between PRESS and RELEASE on this widget
+	float value; // 0..1
+	bool dragging; // between PRESS and RELEASE on this widget
 }
 
 // The gauge spans 3/4 of a turn, opening at the bottom. Angles: 0 = +x,
@@ -69,7 +69,7 @@ fn bool Dial.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT) return false;
 			self.dragging = true;
 			self.drag(elem, event.pos);
-			return true;    // consuming the press captures the drag
+			return true; // consuming the press captures the drag
 		case MOVE:
 			// Only drag between our own PRESS and RELEASE — a button held
 			// down elsewhere must not steer the dial as the pointer passes.
@@ -95,7 +95,7 @@ fn bool Dial.on_key(&self, Element* elem, KeyEvent event) @dynamic
 	if (!event.down) return false;
 	switch (event.key)
 	{
-		case Key.LEFT_ARROW:  self.value = math::clamp(self.value - 0.05f, 0.0f, 1.0f);
+		case Key.LEFT_ARROW: self.value = math::clamp(self.value - 0.05f, 0.0f, 1.0f);
 		case Key.RIGHT_ARROW: self.value = math::clamp(self.value + 0.05f, 0.0f, 1.0f);
 		default: return false;
 	}
@@ -176,7 +176,12 @@ fn void main(String[] args)
 	Vec2 window_size    = { 900.0, 700.0 };
 	float content_width = window_size.x - 48.0f; // window minus 2 x 24 padding
 
-	Renderer renderer = cui::vulkan::new(window_size: window_size)!!;
+	// ON_DEMAND: this UI only changes when the user interacts, so the loop
+	// sleeps at 0% CPU when idle and wakes on input — the way a desktop app
+	// should behave. (main.c3 leaves the default CONTINUOUS: its cards animate
+	// every frame.) Dragging the dial still streams mouse events, so it stays
+	// smooth; the loop only parks once everything settles.
+	Renderer renderer = cui::vulkan::new(window_size: window_size, loop_mode: cui::vulkan::LoopMode.ON_DEMAND)!!;
 	defer catch renderer.free();
 
 	// Images are uploaded to the renderer, which hands back the Texture
@@ -219,21 +224,20 @@ fn void main(String[] args)
 
 	// The dial is app-owned (mounted by pointer) so the button callbacks can
 	// reach it; interact with it directly too — drag, scroll, arrow keys.
-	Dial dial               = { .size = { 260.0, 300.0 }, .value = 0.72 };
-	Element* dial_element   = ui.@node(&dial);
-	DialHandle dial_handle  = { .dial = &dial, .element = dial_element };
+	Dial dial              = { .size = { 260.0, 300.0 }, .value = 0.72 };
+	Element* dial_element  = ui.@node(&dial);
+	DialHandle dial_handle = { .dial = &dial, .element = dial_element };
 
 	// Element.cursor gives any element a pointer shape declaratively — no
 	// widget code involved.
 	Element* teal_card = ui.@node(
 		(Rectangle) {
 			.size = { 260.0, 240.0 },
-			.style = {
-				.color = { 0.16, 0.45, 0.42, 1.0 },
-				.border_radius = { 16.0, 16.0, 16.0, 16.0 }
-			},
+			.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
 		}
 	);
+
+
 	teal_card.cursor = Cursor.POINTING_HAND;
 
 	// Two unlabeled buttons (no text rendering yet): reset and +10%.

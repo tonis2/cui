@@ -7,16 +7,21 @@ import vk;
 import c3w;
 import camera;
 
-// Load shaders
-char[*] vertex_shader_data = $embed("./shaders/vertex.spv");
-char[*] fragment_shader_data = $embed("./shaders/fragment.spv");
+// Single Slang module holding both entry points (vertexMain / fragmentMain).
+char[*] shader_data = $embed("./shaders/shader.spv");
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
 
+// Initial GPU buffer capacities. Buffers are sized by what the UI actually
+// draws: whenever an upload outgrows its buffer, the buffer is reallocated at
+// the next power of two (see ensure_buffer_capacity).
+const INITIAL_DRAWINGS = 64;
+const INITIAL_TRANSFORMS = 16;
+
 struct PushConstantData {
-    uint draw_index;
-    vk::DeviceAddress canvas;
+    vk::DeviceAddress drawings;
+    vk::DeviceAddress transforms;
 }
 
 struct UniformBuffer {
@@ -49,6 +54,7 @@ struct Renderer {
 	Device device;
 
 	vk::Memory canvas_buffer;
+	vk::Memory transform_buffer;
 	vk::Memory uniform_buffer;
 
 	vk::MemoryAllocator allocator;
@@ -96,6 +102,9 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
 		device_extensions.free();
 	}
 
+    // Slang's cbuffer matrix layout expects column-major bytes relative to
+    // Matrix4f's row-major storage, so matrices are uploaded transposed
+    // (verified against the SPIR-V: clip w collapses to 0 otherwise).
     UniformBuffer uniform_data = {
         renderer.camera.perspective.transpose(),
         renderer.camera.view.transpose(),
@@ -116,7 +125,6 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
     $switch (env::OS_TYPE):
         $case MACOS:
             extensions.push_all({"VK_EXT_metal_surface", "VK_KHR_portability_enumeration"});
-            device_extensions.push("VK_KHR_portability_subset");
         $case WIN32:
             extensions.push_all({"VK_KHR_win32_surface"});
         $case LINUX:
@@ -167,33 +175,22 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
     PhysicalDevice physical_device = selection.device;
     vk::DeviceQueue graphics_queue = { .index = selection.graphics_queue_index };
 
-	// Enable required device features (descriptor indexing, buffer device address,
-	// dynamic rendering, synchronization2).
-	PhysicalDeviceDescriptorIndexingFeatures device_indexing_feature = {
-		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+	// Feature pNext chain: query first (driver fills in support bits, including
+	// shaderDrawParameters, buffer device address, dynamic rendering and
+	// synchronization2), then hand the same chain to device creation so exactly
+	// what the device supports gets enabled.
+	PhysicalDeviceVulkan13Features v13_features = { .sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+	PhysicalDeviceVulkan12Features v12_features = {
+		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		.pNext = &v13_features,
 	};
-
-	PhysicalDeviceBufferDeviceAddressFeatures buffer_device_feature = {
-		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-		.pNext = &device_indexing_feature,
-		.bufferDeviceAddress = vk::TRUE,
-		.bufferDeviceAddressCaptureReplay = vk::TRUE
+	PhysicalDeviceVulkan11Features v11_features = {
+		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+		.pNext = &v12_features,
 	};
-
-	PhysicalDeviceDynamicRenderingFeatures dynamic_rendering_feature = {
-		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-		.pNext = &buffer_device_feature
-	};
-
-	PhysicalDeviceSynchronization2Features syncronisation2_feature = {
-		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
-		.pNext = &dynamic_rendering_feature,
-		.synchronization2 = vk::TRUE
-	};
-
 	PhysicalDeviceFeatures2 device_features = {
 		.sType = STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-		.pNext = &syncronisation2_feature,
+		.pNext = &v11_features,
 	};
 
 	vk::getPhysicalDeviceFeatures2(physical_device, &device_features);
@@ -272,7 +269,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         .device = device,
         .pdevice = physical_device,
         .queue = graphics_queue,
-        .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT | MEMORY_ALLOCATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT,
+        .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
     }.init()!;
 
     // Create texture images on GPU
@@ -288,13 +285,22 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         data_size: UniformBuffer::size,
     )!;
 
-    // Canvas buffer carrying a shader device address; filled per-frame.
+    // Retained display list + transform palette; re-uploaded only when the
+    // widget layer marks them dirty.
     renderer.canvas_buffer = vk::new_buffer(
         &renderer.allocator,
         usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
         data: null,
-        data_size: Drawing::size * 1000,
+        data_size: Drawing::size * INITIAL_DRAWINGS,
+    )!;
+
+    renderer.transform_buffer = vk::new_buffer(
+        &renderer.allocator,
+        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+        data: null,
+        data_size: Matrix4f::size * INITIAL_TRANSFORMS,
     )!;
 
     // Descriptor writes are rebuilt per-frame in @on_frame so the pBufferInfo /
@@ -318,8 +324,10 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
 
     renderer.pipeline = (RenderState) {
         .descriptor_layout = renderer.descriptor_layout,
-        .vertex_spirv = vertex_shader_data[..],
-        .fragment_spirv = fragment_shader_data[..],
+        .shaders = {
+            { .spirv = shader_data[..], .entry = "vertexMain", .stage = SHADER_STAGE_VERTEX_BIT },
+            { .spirv = shader_data[..], .entry = "fragmentMain", .stage = SHADER_STAGE_FRAGMENT_BIT },
+        },
         .cull_mode = CULL_MODE_NONE,
         .front_face = FRONT_FACE_COUNTER_CLOCKWISE,
         .topology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -358,10 +366,15 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
     }.build(device)!;
 
 
+    // Acquire semaphores and fences are per frame slot; render-finished
+    // semaphores are per swapchain image so one is never re-signaled while a
+    // presentation of the same image may still wait on it.
     for (uint i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         renderer.wait_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
-        renderer.signal_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
         renderer.frame_fences.push(vk::fenceCreateInfo().setFlags(FENCE_CREATE_SIGNALED_BIT).build(device))!;
+    }
+    for (uint i = 0; i < swapchain_info.minImageCount; ++i) {
+        renderer.signal_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
     }
 
     renderer.instance = instance;
@@ -383,6 +396,7 @@ fn void Renderer.free(&self) {
 
     self.uniform_buffer.free();
     self.canvas_buffer.free();
+    self.transform_buffer.free();
     self.textures.free();
     self.allocator.free();
 
@@ -410,7 +424,29 @@ fn void Renderer.free(&self) {
 }
 
 
-macro void? Renderer.@on_frame(self, List{Drawing} canvas; @body(FrameInput input))
+// Grows a device-address buffer to fit `needed` bytes, doubling so growth is
+// rare. The GPU is idled first: frames in flight may still read the old
+// buffer. Callers re-push the new address every frame, so nothing else needs
+// to know the buffer moved.
+fn void? Renderer.ensure_buffer_capacity(&self, vk::Memory* buffer, sz needed)
+{
+    if (needed <= buffer.size) return;
+
+    sz new_size = buffer.size > 0 ? buffer.size : 1024;
+    while (new_size < needed) new_size *= 2;
+
+    self.device.waitIdle();
+    buffer.free();
+    *buffer = vk::new_buffer(
+        &self.allocator,
+        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+        data: null,
+        data_size: new_size,
+    )!;
+}
+
+macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
 {
     bool running = true;
 
@@ -430,12 +466,12 @@ macro void? Renderer.@on_frame(self, List{Drawing} canvas; @body(FrameInput inpu
 
         Fence frame_fence = self.frame_fences[self.frame];
         Semaphore wait_semaphore = self.wait_semaphores[self.frame];
-        Semaphore signal_semaphore = self.signal_semaphores[self.frame];
 
         frame_fence.wait(self.device)!;
         frame_fence.reset(self.device)!;
 
         uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
+        Semaphore signal_semaphore = self.signal_semaphores[next_image];
 
         RenderingInfo rendering_info = vk::renderingInfo()
         .setLayerCount(1)
@@ -518,20 +554,36 @@ macro void? Renderer.@on_frame(self, List{Drawing} canvas; @body(FrameInput inpu
 
         @body((FrameInput){ .mouse_x_delta = dx, .mouse_y_delta = dy, .events = event_map });
 
-        // Update canvas buffer
-        self.canvas_buffer.upload(canvas.entries, canvas.byte_size());
+        // Re-upload only what changed since the last frame, growing the
+        // buffers to whatever the UI actually produced.
+        sz draw_count = canvas.drawings.len();
+
+        if (canvas.drawings_dirty) {
+            if (draw_count > 0) {
+                self.ensure_buffer_capacity(&self.canvas_buffer, Drawing::size * draw_count)!;
+                self.canvas_buffer.upload(canvas.drawings.entries, Drawing::size * draw_count);
+            }
+            canvas.drawings_dirty = false;
+        }
+
+        if (canvas.transforms_dirty) {
+            sz transform_count = canvas.transforms.len();
+            if (transform_count > 0) {
+                self.ensure_buffer_capacity(&self.transform_buffer, Matrix4f::size * transform_count)!;
+                self.transform_buffer.upload(canvas.transforms.entries, Matrix4f::size * transform_count);
+            }
+            canvas.transforms_dirty = false;
+        }
 
         PushConstantData constant_data = {
-            .draw_index = 0,
-            .canvas = self.canvas_buffer.address,
+            .drawings = self.canvas_buffer.address,
+            .transforms = self.transform_buffer.address,
         };
+        vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, PushConstantData::size, &constant_data);
 
-        // Draw scene
-        foreach (uint index, item: canvas) {
-            constant_data.draw_index = index;
-            vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, PushConstantData::size, &constant_data);
-            vk::cmdDraw(command_buffer, 6, 1, 0, 0);
-        }
+        // The whole canvas in one instanced draw; the vertex shader indexes
+        // drawings by SV_InstanceID.
+        if (draw_count > 0) vk::cmdDraw(command_buffer, 6, (uint)draw_count, 0, 0);
 
         vk::cmdEndRenderingKHR(command_buffer);
 

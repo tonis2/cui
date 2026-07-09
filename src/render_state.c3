@@ -211,9 +211,16 @@ fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allo
     }!;
 }
 
+// One pipeline stage; several stages may share the same spirv blob when it is
+// a single Slang module with multiple entry points.
+struct ShaderStageConfig {
+    char[] spirv;
+    ZString entry;
+    ShaderStageFlagBits stage;
+}
+
 struct RenderState {
-    char[] vertex_spirv;
-    char[] fragment_spirv;
+    ShaderStageConfig[] shaders;
 
     DescriptorSetLayout descriptor_layout;
     PipelineLayout pipeline_layout;
@@ -241,19 +248,17 @@ fn void RenderState.free(self, Device device) {
 
 fn RenderState? RenderState.build(&self, Device device) {
 
-    ShaderModule vert_module = vk::loadShaderModule(device, self.vertex_spirv)!;
-    ShaderModule frag_module = vk::loadShaderModule(device, self.fragment_spirv)!;
+    ShaderModule[8] modules;
+    PipelineShaderStageCreateInfo[8] shader_stages;
+    usz stage_count = self.shaders.len;
 
-    PipelineShaderStageCreateInfo[2] shader_stages = {
-        vk::pipelineShaderStageCreateInfo()
-            .setStage(SHADER_STAGE_VERTEX_BIT)
-            .setMod(vert_module)
-            .setName("main"),
-        vk::pipelineShaderStageCreateInfo()
-            .setStage(SHADER_STAGE_FRAGMENT_BIT)
-            .setMod(frag_module)
-            .setName("main"),
-    };
+    for (usz i = 0; i < stage_count; ++i) {
+        modules[i] = vk::loadShaderModule(device, self.shaders[i].spirv)!;
+        shader_stages[i] = vk::pipelineShaderStageCreateInfo()
+            .setStage(self.shaders[i].stage)
+            .setMod(modules[i])
+            .setName(self.shaders[i].entry);
+    }
 
     PipelineVertexInputStateCreateInfo vertex_info = vk::pipelineVertexInputStateCreateInfo().setVertexBindingDescriptionCount(0);
 
@@ -305,7 +310,7 @@ fn RenderState? RenderState.build(&self, Device device) {
     .setSetLayouts({ self.descriptor_layout }).build(device)!;
 
     GraphicsPipelineCreateInfo pipeline_info = vk::graphicsPipelineCreateInfo()
-    .setStages(shader_stages[..])
+    .setStages(shader_stages[:stage_count])
     .setLayout(self.pipeline_layout)
     .setVertexInputState(&vertex_info)
     .setDynamicState(&dynamic_states)
@@ -319,8 +324,7 @@ fn RenderState? RenderState.build(&self, Device device) {
 
     self.pipeline = pipeline_info.build(device)!;
 
-    vert_module.free(device);
-    frag_module.free(device);
+    for (usz i = 0; i < stage_count; ++i) modules[i].free(device);
 
     return *self;
 }

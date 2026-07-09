@@ -2,7 +2,6 @@ import std::io;
 import cui;
 import std::collections::list;
 import std::math;
-import camera;
 
 String[] images = {
     "test/assets/spirited.png",
@@ -15,59 +14,66 @@ String[] images = {
 
 fn void main(String[] args)
 {
-	Vec2 window_size = {900.0, 700.0};
+    Vec2 window_size = {900.0, 700.0};
 
-	List{Drawing} canvas;
-	defer canvas.free();
+    Renderer renderer = cui::new(window_size: window_size, images: images)!!;
+    defer catch renderer.free();
+
+    Ui* ui = cui::new_ui(window_size);
+    defer ui.free();
+
+    // Widgets are owned by the app and must outlive their elements.
+    Stack stack;
+    Rectangle[6] cards;
+    Element*[6] card_elements;
+
+    Element* root = ui.mount(&stack);
 
     for (uint i = 0; i < 6; i += 2) {
         Vec2 box_size = {window_size.x / 3.3, window_size.y / 2};
         float padding = 20.0;
         float offset = padding + i * (box_size.x / 2 + padding);
 
-        canvas.push({
-            .size = {box_size.x, box_size.y},
-            .corner = {offset, box_size.y / 3},
-            .border_width = 1.0,
-            .border_color = {1.0, 1.0, 1.0, 1.0},
-            .border_radius = {1.0, 1.0, 1.0, 1.0},
-            .color = {0.1, 0.5, 0.4, 1.0},
-            .texture_id = (int)(i + 1),
-            .transform = cui::MATRIX4F_IDENTITY
-        });
+        // Backdrop card: bordered, rounded, textured with the *_bg image.
+        cards[i] = {
+            .size = box_size,
+            .style = {
+                .border_width = 1.0,
+                .border_color = {1.0, 1.0, 1.0, 1.0},
+                .border_radius = {1.0, 1.0, 1.0, 1.0},
+                .color = {0.1, 0.5, 0.4, 1.0},
+                .texture = (int)i + 2,
+            },
+        };
+        // Foreground card: the character png on top.
+        cards[i + 1] = {
+            .size = box_size,
+            .style = { .texture = (int)i + 1 },
+        };
 
-        float corner_offset = padding + i * (box_size.x / 2 + padding);
+        card_elements[i] = ui.mount(&cards[i], root);
+        card_elements[i].set_offset({offset, box_size.y / 3});
 
-        canvas.push({
-            .size = {box_size.x, box_size.y}, 
-            .corner = {offset, box_size.y / 3},
-            .texture_id = (int)i,
-            .transform = cui::MATRIX4F_IDENTITY
-        });
+        card_elements[i + 1] = ui.mount(&cards[i + 1], root);
+        card_elements[i + 1].set_offset({offset, box_size.y / 3});
     }
 
-	Renderer renderer = cui::new(window_size: window_size, images: images)!!;
-	defer catch renderer.free();
+    double x_rotation = -0.15;
+    double y_rotation = -0.15;
 
-    double x_rotation = -0.8;
-    double y_rotation = -0.8;
-    
-	renderer.@on_frame(canvas; FrameInput input) {
+    renderer.@on_frame(&ui.canvas; FrameInput input) {
         x_rotation += input.mouse_x_delta * 0.005;
         y_rotation += input.mouse_y_delta * 0.005;
 
-        foreach (index, &item: canvas) {
-            float offset = 10.0;
-            if (index % 2 == 0) {
-                item.transform = cui::MATRIX4F_IDENTITY
-                .rotate_y((float)x_rotation * 1.5)
-                .rotate_x((float)y_rotation * 1.5);
-            } else {
-                item.transform = cui::MATRIX4F_IDENTITY
-                .rotate_y((float)x_rotation)
-                .rotate_x((float)y_rotation);
-            }
+        // Transform-only animation: no layout or paint runs for this, each
+        // card is a single matrix write into the palette.
+        foreach (index, element : card_elements) {
+            float rate = index % 2 == 0 ? 1.5f : 1.0f;
+            element.set_transform(cui::MATRIX4F_IDENTITY
+                .rotate_y((float)(x_rotation * rate))
+                .rotate_x((float)(y_rotation * rate)));
         }
-	}!!;
 
+        ui.flush();
+    }!!;
 }

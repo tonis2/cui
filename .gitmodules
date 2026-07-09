@@ -4,3 +4,6 @@
 [submodule "lib/vulkan.c3l"]
 	path = lib/vulkan.c3l
 	url = git@github.com:tonis2/Vulkan.c3.git
+[submodule "lib/window.c3l"]
+	path = lib/window.c3l
+	url = git@github.com:tonis2/Window.c3.git

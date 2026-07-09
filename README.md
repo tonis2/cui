@@ -7,16 +7,42 @@ GPU palette and re-run neither layout nor paint.
 
 The library is split so it can be embedded in an existing Vulkan engine:
 
-- `cui` — the core: element tree, widgets, and the `Canvas` output
-  (drawings + transform palette). No Vulkan or windowing dependencies.
+- `cui` — the core: element tree, the `Widget` interface, and the `Canvas`
+  output (drawings + transform palette). No Vulkan or windowing dependencies.
   Also exports the compiled shader (`cui::shader_spirv`) and the GPU binding
   contract (`cui::ShaderUniforms`, `cui::ShaderPushConstants`) — see
   `src/shader.c3`.
+- `cui::widgets` — the built-in widgets: `Rectangle`, `Column`, `Row`
+  (gap, main/cross alignment, optional fixed size), `Stack` (absolute
+  positioning) and `Padding`. Apps can use these or implement `Widget`
+  themselves.
 - `cui::camera` — projection/view helpers producing the matrices the shader
   expects. Pure math.
 - `cui::vulkan` — a standalone reference renderer (window, swapchain, frame
   loop) used by the example. Engines with their own device skip it and follow
   the embedding steps below.
+
+### Building UI
+
+Trees are declared Flutter-style with `Ui.@node` and installed with
+`Ui.build`:
+
+```c3
+ui.build(
+    ui.@node((Column){ .gap = 8.0 },
+        ui.@node((Rectangle){ .size = {100, 40}, .style = { .color = cui::WHITE } }),
+        ui.@node((Rectangle){ .size = {100, 40} })));
+```
+
+`@node` takes the widget either as a **value** (a struct literal, as above —
+the element makes a heap copy it owns and frees on unmount) or as a
+**pointer** (`ui.@node(&my_widget, ...)` — borrowed; the app owns the struct,
+can mutate it between frames, and must keep it alive). Children follow as
+extra arguments; `Element.append` grafts nodes built in loops, and
+`Ui.mount` / `Ui.unmount` add and remove widgets incrementally at runtime.
+
+`test/layout.c3` is a full declarative example; `test/main.c3` uses app-owned
+widgets so it can animate their elements every frame.
 
 ### Running the example
 
@@ -36,13 +62,15 @@ c3c build shaders
 (a prebuilt `shader.spv` is checked in, so this is only needed when the shader
 changes).
 
-Then run the example with:
+Then run the examples:
 
 ```
-c3c run ui
+c3c run ui        # textured cards animated through the transform palette
+c3c run layout    # Column / Row / Padding layout widgets (test/layout.c3)
 ```
 
-Drag with the left mouse button to rotate the cards. Escape quits.
+In the `ui` example, drag with the left mouse button to rotate the cards.
+Escape quits.
 
 ### Embedding in a Vulkan engine
 
@@ -62,8 +90,10 @@ module with entry points `cui::SHADER_VERTEX_ENTRY` and
 **Descriptor set 0** —
 - binding 0: uniform buffer holding a `cui::ShaderUniforms`
   (vertex + fragment stages). Upload `projection` and `view` **transposed**;
-  `cui::camera` produces matrices in the expected convention. `resolution` is
-  the drawable size in pixels — drawing coordinates are pixels.
+  use `Camera.perspective` and `Camera.ui_view()` from `cui::camera` —
+  `ui_view()` bakes a compensating scale into the view so canvas coordinates
+  are pixel-exact under the perspective projection. `resolution` is the
+  drawable size in pixels — drawing coordinates are pixels.
 - binding 1: array of combined image samplers, one per UI texture.
   `Drawing.texture` / `RectStyle.texture` are 1-based indices into this array
   (0 means untextured).

@@ -6,7 +6,7 @@
   "dependencies": ["vk", "c3w", "image"],
   "features": [],
   "version": "0.1.0",
-  "sources": [ "src/**", "test/main.c3" ],
+  "sources": [ "src/**" ],
   "output": "build",
   "targets": {
     "shaders": {
@@ -17,6 +17,14 @@
     },
     "ui": {
       "type": "executable",
+      "sources": [ "src/**", "test/main.c3" ],
+      "linked-libraries": ["vulkan"],
+      "linker-search-paths": ["/usr/local/lib"],
+      "link-args": ["-rpath", "/usr/local/lib"]
+    },
+    "layout": {
+      "type": "executable",
+      "sources": [ "src/**", "test/layout.c3" ],
       "linked-libraries": ["vulkan"],
       "linker-search-paths": ["/usr/local/lib"],
       "link-args": ["-rpath", "/usr/local/lib"]

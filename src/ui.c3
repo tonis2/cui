@@ -430,7 +430,7 @@ struct Painter {
 fn void Painter.rect(&self, Vec2 pos, Vec2 size, RectStyle style = {})
 {
     self.element.local_drawings.push({
-        .kind = DRAWING_RECT,
+        .kind = DrawingKind.RECT,
         .texture = (int)style.texture,
         .border_width = style.border_width,
         .size = size,
@@ -450,7 +450,7 @@ fn void Painter.ellipse(&self, Vec2 center, Vec2 radii, CircleStyle style = {})
 {
     Vec2 half = radii + 1.0f;   // 1px pad so the edge antialiasing isn't clipped
     self.element.local_drawings.push({
-        .kind = DRAWING_ELLIPSE,
+        .kind = DrawingKind.ELLIPSE,
         .texture = (int)style.texture,
         .border_width = style.border_width,
         .size = half * 2.0f,
@@ -469,7 +469,7 @@ fn void Painter.line(&self, Vec2 from, Vec2 to, float thickness, Color color)
     Vec2 hi = { math::max(from.x, to.x) + pad, math::max(from.y, to.y) + pad };
     Vec2 center = (lo + hi) * 0.5f;
     self.element.local_drawings.push({
-        .kind = DRAWING_LINE,
+        .kind = DrawingKind.LINE,
         .border_width = thickness,
         .size = hi - lo,
         .corner = lo,
@@ -484,7 +484,7 @@ fn void Painter.arc(&self, Vec2 center, float radius, float start, float sweep, 
 {
     float pad = radius + thickness * 0.5f + 1.0f;
     self.element.local_drawings.push({
-        .kind = DRAWING_ARC,
+        .kind = DrawingKind.ARC,
         .border_width = thickness,
         .size = {pad * 2, pad * 2},
         .corner = center - pad,
@@ -499,7 +499,7 @@ fn void Painter.arc(&self, Vec2 center, float radius, float start, float sweep, 
 fn void Painter.rect_shadow(&self, Vec2 pos, Vec2 size, float blur, Color color, Vec4 border_radius = {})
 {
     self.element.local_drawings.push({
-        .kind = DRAWING_SHADOW,
+        .kind = DrawingKind.SHADOW,
         .border_width = blur,
         .size = size + 2.0f * blur,
         .corner = pos - blur,

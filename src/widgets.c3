@@ -204,20 +204,22 @@ fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Button: a clickable rect with hover and press styles. on_click is a plain
-// contextless callback — the button carries no per-instance state to thread
-// through. A callback that needs to touch app state finds it through the tree
-// with the ambient cui::get_widget query, the way a Flutter callback reaches
+// Button: a clickable rect with hover and press styles. on_click receives the
+// Ui the button is rendered in — the framework passes the button's own
+// element's ui automatically, so the callback carries no app-threaded context
+// yet can still reach the rest of the tree, the way a Flutter callback reaches
 // other widgets through its BuildContext:
 //
-//     fn void reset_clicked() { cui::get_widget(Dial).value = 0; cui::request_paint(Dial); }
+//     fn void reset_clicked(Ui* ui) {
+//         if (try dial = ui.get_widget(Dial)) { dial.value = 0; ui.request_paint(Dial); }
+//     }
 //     ui.@node((Button){ .on_click = &reset_clicked, ... });
 //
 // Also the worked example of the Widget event callbacks: on_hover/on_mouse
 // mutate state and request_paint; on_click fires when a left press is
 // released inside.
 
-alias OnClick = fn void();
+alias OnClick = fn void(Ui* ui);
 
 struct Button (Widget) {
     Vec2 size;
@@ -266,7 +268,7 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
             elem.request_paint();
             bool inside = event.pos.x >= 0 && event.pos.y >= 0
                 && event.pos.x < elem.size.x && event.pos.y < elem.size.y;
-            if (inside && self.on_click) self.on_click();
+            if (inside && self.on_click) self.on_click(elem.ui);
             return true;
         default:
             return false;

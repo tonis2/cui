@@ -147,25 +147,28 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.circle(center, 7.0f, { .color = { 0.95, 0.60, 0.20, 1.0 } });
 }
 
-// Button callbacks carry no context at all (C3 has no closures, and they don't
-// need one): get_widget queries the active UI's tree for the single Dial and
-// hands back a Dial* to mutate; request_paint(Dial) invalidates it. So the
-// buttons below set no .ctx — the callbacks reach what they need through the
-// tree, the way a Flutter callback reaches other widgets through its context.
-fn void reset_dial()
+// Button callbacks are handed the Ui they're rendered in — passed automatically
+// from the button's own element, so there's no global and no app-threaded
+// handle. From it, get_widget queries the tree for the single Dial and hands
+// back a Dial* to mutate; request_paint(Dial) invalidates it. So the buttons
+// below set no context: each callback reaches what it needs through the ui it
+// is given, the way a Flutter callback reaches other widgets through its context.
+fn void reset_dial(Ui* ui)
 {
-	Dial* dial = cui::get_widget(Dial);
-	dial.value = 0.0;
-	cui::request_paint(Dial);
-	io::printfn("[layout] reset clicked -> %.2f", dial.value);
+	if (try Dial* dial = ui.get_widget(Dial)) {
+		dial.value = 0.0;
+		ui.request_paint(Dial);
+		io::printfn("[layout] reset clicked -> %.2f", dial.value);
+	}
 }
 
-fn void bump_dial()
+fn void bump_dial(Ui* ui)
 {
-	Dial* dial = cui::get_widget(Dial);
-	dial.value = math::clamp(dial.value + 0.1f, 0.0f, 1.0f);
-	cui::request_paint(Dial);
-	io::printfn("[layout] bump clicked -> %.2f", dial.value);
+	if (try Dial* dial = ui.get_widget(Dial)) {
+		dial.value = math::clamp(dial.value + 0.1f, 0.0f, 1.0f);
+		ui.request_paint(Dial);
+		io::printfn("[layout] bump clicked -> %.2f", dial.value);
+	}
 }
 
 fn void main(String[] args)

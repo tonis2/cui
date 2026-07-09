@@ -404,7 +404,7 @@ struct RectStyle {
     Color border_color;
     float border_width;
     Vec4 border_radius;
-    int texture;            // 0 = none, else renderer image index + 1
+    Texture texture;        // from Renderer.load_image; default = untextured
 }
 
 struct Painter {
@@ -415,7 +415,7 @@ fn void Painter.rect(&self, Vec2 pos, Vec2 size, RectStyle style = {})
 {
     self.element.local_drawings.push({
         .kind = DRAWING_RECT,
-        .texture = style.texture,
+        .texture = (int)style.texture,
         .border_width = style.border_width,
         .size = size,
         .corner = pos,

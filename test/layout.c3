@@ -22,8 +22,12 @@ fn void main(String[] args)
 	Vec2 window_size    = { 900.0, 700.0 };
 	float content_width = window_size.x - 48.0f; // window minus 2 x 24 padding
 
-	Renderer renderer = cui::vulkan::new(window_size: window_size, images: { "test/assets/spirited_bg.jpg" })!!;
+	Renderer renderer = cui::vulkan::new(window_size: window_size)!!;
 	defer catch renderer.free();
+
+	// Images are uploaded to the renderer, which hands back the Texture
+	// handle that widget styles reference.
+	Texture header_image = renderer.load_image("test/assets/spirited_bg.jpg")!!;
 
 	Ui* ui = cui::new_ui(window_size);
 	defer ui.free();
@@ -70,7 +74,7 @@ fn void main(String[] args)
 				ui.@node(
 					(Rectangle) {
 						.size = { content_width, 96.0 },
-						.style = { .texture = 1, .border_radius = { 1.0, 1.0, 1.0, 1.0 } },
+						.style = { .texture = header_image, .border_radius = { 1.0, 1.0, 1.0, 1.0 } },
 					}
 				),
 				ui.@node(

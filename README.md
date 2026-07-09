@@ -41,6 +41,16 @@ can mutate it between frames, and must keep it alive). Children follow as
 extra arguments; `Element.append` grafts nodes built in loops, and
 `Ui.mount` / `Ui.unmount` add and remove widgets incrementally at runtime.
 
+Images are uploaded to the renderer, which returns the `Texture` handle that
+widget styles reference (textures can be loaded at any time; the renderer
+rebuilds its pipeline when the count grows):
+
+```c3
+Texture portrait = renderer.load_image("assets/portrait.png")!!;
+// or from raw RGBA8 pixels: renderer.load_pixels(rgba, width, height)
+ui.@node((Rectangle){ .size = {260, 300}, .style = { .texture = portrait } });
+```
+
 `test/layout.c3` is a full declarative example; `test/main.c3` uses app-owned
 widgets so it can animate their elements every frame.
 
@@ -95,8 +105,11 @@ module with entry points `cui::SHADER_VERTEX_ENTRY` and
   are pixel-exact under the perspective projection. `resolution` is the
   drawable size in pixels — drawing coordinates are pixels.
 - binding 1: array of combined image samplers, one per UI texture.
-  `Drawing.texture` / `RectStyle.texture` are 1-based indices into this array
-  (0 means untextured).
+  `Drawing.texture` / `RectStyle.texture` carry `cui::Texture` handles:
+  1-based indices into this array (0 means untextured), so the engine defines
+  handle values by how it populates the array. The reference renderer hands
+  them out from `load_image` / `load_pixels` and keeps a built-in 1x1 white
+  placeholder in slot 1 so the binding is never empty.
 
 **Buffers** — two buffers created with
 `BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT`: the drawing list and the transform

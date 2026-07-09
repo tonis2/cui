@@ -10,11 +10,6 @@ alias DescriptorImages = List{DescriptorImageInfo};
 faultdef FILE_NOT_FOUND;
 
 fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
-    vk::Device device = allocator.device;
-
-    Format image_format = FORMAT_R8G8B8A8_UNORM;
-    DescriptorImageInfo texture = { .imageLayout = IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-
     image::Image img;
     if (path.ends_with(".png")) {
         img = image::png::load_file(path)!;
@@ -28,11 +23,20 @@ fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allo
 
     char[] rgba = img.to_rgba();
     defer alloc::free(mem, rgba);
-    sz data_size = (sz)img.width * img.height * 4;
+    self.load_rgba(rgba, img.width, img.height, allocator, queue)!;
+}
+
+fn void? DescriptorImages.load_rgba(&self, char[] rgba, uint width, uint height, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
+    vk::Device device = allocator.device;
+
+    Format image_format = FORMAT_R8G8B8A8_UNORM;
+    DescriptorImageInfo texture = { .imageLayout = IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+
+    sz data_size = (sz)width * height * 4;
 
     vk::Image texture_image = vk::imageCreateInfo()
         .setImageType(IMAGE_TYPE_2D)
-        .setExtent({.width = img.width, .height = img.height, .depth = 1 })
+        .setExtent({.width = width, .height = height, .depth = 1 })
         .setMipLevels(1)
         .setArrayLayers(1)
         .setSamples(SAMPLE_COUNT_1_BIT)
@@ -85,7 +89,7 @@ fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allo
                 .layerCount = 1,
             },
             .imageOffset = {0, 0, 0},
-            .imageExtent = {.width = img.width, .height = img.height, .depth = 1 }
+            .imageExtent = {.width = width, .height = height, .depth = 1 }
         };
 
         vk::cmdCopyBufferToImage(

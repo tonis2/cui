@@ -16,7 +16,7 @@ fn void main(String[] args)
 {
     Vec2 window_size = {900.0, 700.0};
 
-    Renderer renderer = cui::vulkan::new(window_size: window_size, images: images)!!;
+    Renderer renderer = cui::vulkan::new(window_size: window_size)!!;
     defer catch renderer.free();
 
     Ui* ui = cui::new_ui(window_size);
@@ -34,6 +34,9 @@ fn void main(String[] args)
         float padding = 20.0;
         float offset = padding + i * (box_size.x / 2 + padding);
 
+        Texture character = renderer.load_image(images[i])!!;
+        Texture backdrop = renderer.load_image(images[i + 1])!!;
+
         // Backdrop card: bordered, rounded, textured with the *_bg image.
         cards[i] = {
             .size = box_size,
@@ -42,13 +45,13 @@ fn void main(String[] args)
                 .border_color = {1.0, 1.0, 1.0, 1.0},
                 .border_radius = {1.0, 1.0, 1.0, 1.0},
                 .color = {0.1, 0.5, 0.4, 1.0},
-                .texture = (int)i + 2,
+                .texture = backdrop,
             },
         };
         // Foreground card: the character png on top.
         cards[i + 1] = {
             .size = box_size,
-            .style = { .texture = (int)i + 1 },
+            .style = { .texture = character },
         };
 
         card_elements[i] = ui.mount(&cards[i], root);
@@ -69,7 +72,7 @@ fn void main(String[] args)
         // card is a single matrix write into the palette.
         foreach (index, element : card_elements) {
             float rate = index % 2 == 0 ? 1.5f : 1.0f;
-            element.set_transform(cui::MATRIX4F_IDENTITY
+            element.set_transform(matrix::IDENTITY4
                 .rotate_y((float)(x_rotation * rate))
                 .rotate_x((float)(y_rotation * rate)));
         }

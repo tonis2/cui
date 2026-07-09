@@ -6,12 +6,19 @@ import std::math::matrix;
 // SDF primitive kinds, dispatched in the fragment shader.
 const uint DRAWING_RECT = 0;
 
+// Opaque texture handle referenced by drawings; 0 = untextured. Handles come
+// from the backend that consumes the canvas — with the built-in renderer,
+// from cui::vulkan Renderer.load_image / load_pixels. The value is a 1-based
+// index into the backend's sampler array (shader binding 1).
+typedef Texture = int;
+const Texture NO_TEXTURE = (Texture)0;
+
 // One GPU-side primitive. Field order and sizes must match struct Drawing in
 // shader.slang (scalar layout): keep 4-byte fields in groups of four so the
 // Vec2/Vec4 members land on the same offsets on both sides.
 struct Drawing {
     uint kind;
-    int texture;            // 0 = none, else renderer image index + 1
+    int texture;            // Texture handle as raw int; 0 = untextured
     float border_width;
     uint transform_id;      // index into Canvas.transforms
 

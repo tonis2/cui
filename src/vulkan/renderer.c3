@@ -33,8 +33,6 @@ struct Renderer {
 	Vec2 window_size;
     Extent2D extent;
 
-	List{String} images;
-
 	c3w::Window window;
     Vec2 prev_mouse;
 
@@ -59,6 +57,9 @@ struct Renderer {
 
     RenderState pipeline;
     DescriptorSetLayout descriptor_layout;
+    vk::Format depth_format;
+    sz pipeline_texture_count;  // texture count the pipeline was built for;
+                                // 0 = not built yet (see rebuild_pipeline)
 
     CommandPool command_pool;
     CommandBufferList command_buffers;
@@ -74,7 +75,7 @@ struct Renderer {
 }
 
 
-fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_debug = false) {
+fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false) {
 
 	ZStringList validations;
 	ZStringList extensions;
@@ -265,9 +266,13 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
     }.init()!;
 
-    // Create texture images on GPU
     renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, window_size, depth_format)!;
-    foreach (source : images) renderer.textures.loadPath(source, &renderer.allocator, graphics_queue)!;
+    renderer.depth_format = depth_format;
+
+    // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
+    // never empty; user images get their handles from load_image/load_pixels.
+    char[4] white_pixel = { 255, 255, 255, 255 };
+    renderer.textures.load_rgba(white_pixel[..], 1, 1, &renderer.allocator, graphics_queue)!;
 
     // Uniform buffer (host visible) - uploaded at creation
     renderer.uniform_buffer = vk::new_buffer(
@@ -296,9 +301,63 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         data_size: Matrix4f::size * INITIAL_TRANSFORMS,
     )!;
 
+    // The descriptor layout and pipeline are built lazily on the first frame
+    // (and rebuilt when textures are added) since the sampler-array binding is
+    // sized by the texture count — see rebuild_pipeline.
+
+    // Acquire semaphores and fences are per frame slot; render-finished
+    // semaphores are per swapchain image so one is never re-signaled while a
+    // presentation of the same image may still wait on it.
+    for (uint i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        renderer.wait_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
+        renderer.frame_fences.push(vk::fenceCreateInfo().setFlags(FENCE_CREATE_SIGNALED_BIT).build(device))!;
+    }
+    for (uint i = 0; i < swapchain_info.minImageCount; ++i) {
+        renderer.signal_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
+    }
+
+    renderer.instance = instance;
+	renderer.physical_device = physical_device;
+	renderer.graphics_queue = graphics_queue;
+	renderer.device = device;
+
+    renderer.window = window;
+
+	return renderer;
+}
+
+
+// Uploads an image file (png/jpg) to the GPU and returns the handle to
+// reference it with (RectStyle.texture). Textures can be loaded at any time;
+// ones loaded inside the frame body become valid the next frame (the pipeline
+// is rebuilt for the new sampler count at the top of a frame).
+fn cui::Texture? Renderer.load_image(&self, String path)
+{
+    self.textures.loadPath(path, &self.allocator, self.graphics_queue)!;
+    return (cui::Texture)self.textures.len();
+}
+
+// Same, from raw RGBA8 pixels (e.g. a generated atlas).
+fn cui::Texture? Renderer.load_pixels(&self, char[] rgba, uint width, uint height)
+{
+    self.textures.load_rgba(rgba, width, height, &self.allocator, self.graphics_queue)!;
+    return (cui::Texture)self.textures.len();
+}
+
+// (Re)creates the descriptor layout and pipeline for the current texture
+// count. Runs before the first frame and again whenever load_image grew the
+// texture array; the GPU is idled first since in-flight frames still use the
+// old pipeline.
+fn void? Renderer.rebuild_pipeline(&self)
+{
+    if (self.pipeline_texture_count > 0) {
+        self.device.waitIdle();
+        self.pipeline.free(self.device);    // also frees the descriptor layout
+    }
+
     // Descriptor writes are rebuilt per-frame in @on_frame so the pBufferInfo /
     // pImageInfo pointers reference data that is alive at record time.
-    renderer.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
+    self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
     .setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
     .setBindings({
         {
@@ -310,13 +369,13 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         {
             .binding = 1,
             .descriptorType = DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = (uint)renderer.textures.len(),
+            .descriptorCount = (uint)self.textures.len(),
             .stageFlags = SHADER_STAGE_FRAGMENT_BIT
         },
-    }).build(device)!;
+    }).build(self.device)!;
 
-    renderer.pipeline = (RenderState) {
-        .descriptor_layout = renderer.descriptor_layout,
+    self.pipeline = (RenderState) {
+        .descriptor_layout = self.descriptor_layout,
         .shaders = {
             { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
             { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_FRAGMENT_ENTRY, .stage = SHADER_STAGE_FRAGMENT_BIT },
@@ -355,35 +414,13 @@ fn Renderer? new(Vec2 window_size = {800, 600}, String[] images, bool enable_deb
         .color_attachments = {
             FORMAT_B8G8R8A8_UNORM
         },
-        .depth_format = depth_format
-    }.build(device)!;
+        .depth_format = self.depth_format
+    }.build(self.device)!;
 
-
-    // Acquire semaphores and fences are per frame slot; render-finished
-    // semaphores are per swapchain image so one is never re-signaled while a
-    // presentation of the same image may still wait on it.
-    for (uint i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        renderer.wait_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
-        renderer.frame_fences.push(vk::fenceCreateInfo().setFlags(FENCE_CREATE_SIGNALED_BIT).build(device))!;
-    }
-    for (uint i = 0; i < swapchain_info.minImageCount; ++i) {
-        renderer.signal_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
-    }
-
-    renderer.instance = instance;
-	renderer.physical_device = physical_device;
-	renderer.graphics_queue = graphics_queue;
-	renderer.device = device;
-
-    renderer.window = window;
-
-	return renderer;
+    self.pipeline_texture_count = self.textures.len();
 }
 
-
 fn void Renderer.free(&self) {
-	self.images.free();
-
     self.device.waitIdle();
     if (self.enable_debug) self.debug_messenger.free(self.instance);
 
@@ -403,8 +440,8 @@ fn void Renderer.free(&self) {
 
     self.command_pool.free(self.device);
 
-    self.descriptor_layout.free(self.device);
-    self.pipeline.free(self.device);
+    // RenderState.free also frees the descriptor layout it holds.
+    if (self.pipeline_texture_count > 0) self.pipeline.free(self.device);
 
     self.wait_semaphores.release(self.device);
     self.signal_semaphores.release(self.device);
@@ -444,6 +481,10 @@ macro void? Renderer.@on_frame(self, Canvas* canvas; @body(FrameInput input))
     bool running = true;
 
     while (running) {
+        // First frame, or textures were added since: (re)build the pipeline
+        // so the sampler-array binding matches the texture count.
+        if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
+
         c3w::EventMap event_map = self.window.getEvent();
 
         float dx = 0;

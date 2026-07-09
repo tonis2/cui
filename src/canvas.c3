@@ -1,8 +1,7 @@
 module cui;
 import std::collections::list;
 import std::math;
-
-const Matrix4f MATRIX4F_IDENTITY = { .m = { [0] = 1, [5] = 1, [10] = 1, [15] = 1 } };
+import std::math::matrix;
 
 // SDF primitive kinds, dispatched in the fragment shader.
 const uint DRAWING_RECT = 0;
@@ -36,7 +35,7 @@ struct Canvas {
 
 fn void Canvas.init(&self)
 {
-    self.transforms.push(MATRIX4F_IDENTITY);
+    self.transforms.push(matrix::IDENTITY4);
     self.drawings_dirty = true;
     self.transforms_dirty = true;
 }

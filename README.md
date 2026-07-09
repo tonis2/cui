@@ -121,9 +121,7 @@ ui.@node((Button){ .size = {130, 40}, .on_click = &reset_clicked });
 ```
 
 `cui::get_widget($Type)` returns a pointer to the first widget of that type in
-the *active* UI (the one `new_ui` created; `Ui.make_active` switches it) — CUI's
-answer to Flutter's `findAncestorStateOfType`, and to "how does a callback with
-no context reach the rest of the tree." For a stable handle you can also keep
+the *active* UI 
 the `Element*` that `@node` returns and read it back with `Element.widget_as`
 (`ui.find($Type)` is the explicit, non-ambient form). Type-based lookup fits
 singletons; hold an explicit handle when several widgets of a kind coexist.

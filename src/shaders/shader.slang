@@ -23,7 +23,7 @@ struct Drawing
     float4 border_color;
 };
 
-// Drawing kinds — must match the DRAWING_* constants in canvas.c3.
+// Drawing kinds — must match cui::DrawingKind in canvas.c3.
 static const uint KIND_RECT = 0;
 static const uint KIND_ELLIPSE = 1;
 static const uint KIND_LINE = 2;

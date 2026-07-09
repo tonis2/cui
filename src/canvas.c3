@@ -3,12 +3,16 @@ import std::collections::list;
 import std::math;
 import std::math::matrix;
 
-// SDF primitive kinds, dispatched in the fragment shader.
-const uint DRAWING_RECT = 0;
-const uint DRAWING_ELLIPSE = 1;
-const uint DRAWING_LINE = 2;
-const uint DRAWING_ARC = 3;
-const uint DRAWING_SHADOW = 4;
+// SDF primitive kinds, dispatched in the fragment shader. The values are the
+// GPU contract: they must match the KIND_* constants in shader.slang.
+constdef DrawingKind : inline uint
+{
+    RECT = 0,
+    ELLIPSE = 1,
+    LINE = 2,
+    ARC = 3,
+    SHADOW = 4,
+}
 
 // Opaque texture handle referenced by drawings; 0 = untextured. Handles come
 // from the backend that consumes the canvas — with the built-in renderer,
@@ -21,7 +25,7 @@ const Texture NO_TEXTURE = (Texture)0;
 // shader.slang (scalar layout): keep 4-byte fields in groups of four so the
 // Vec2/Vec4 members land on the same offsets on both sides.
 struct Drawing {
-    uint kind;
+    DrawingKind kind;
     int texture;            // Texture handle as raw int; 0 = untextured
     float border_width;     // px; LINE/ARC store their thickness here, SHADOW its blur
     uint transform_id;      // index into Canvas.transforms

@@ -12,16 +12,25 @@ struct Drawing
 {
     uint kind;
     int tex_id;             // 0 = none, else textures[tex_id - 1]
-    float border_width;
+    float border_width;     // px; LINE/ARC thickness, SHADOW blur
     uint transform_id;      // index into PushData.transforms
 
-    float2 size;
+    float2 size;            // quad bounds in pixels
     float2 corner;
 
-    float4 border_radius;
+    float4 params;          // per-kind data, see cui::Drawing
     float4 color;
     float4 border_color;
 };
+
+// Drawing kinds — must match the DRAWING_* constants in canvas.c3.
+static const uint KIND_RECT = 0;
+static const uint KIND_ELLIPSE = 1;
+static const uint KIND_LINE = 2;
+static const uint KIND_ARC = 3;
+static const uint KIND_SHADOW = 4;
+
+static const float TAU = 6.28318530718;
 
 // The transform palette is read as raw float4 vectors, 4 per matrix. C3's
 // Matrix4f stores column-major, so each float4 is one column of the logical
@@ -89,13 +98,49 @@ VertexOutput vertexMain(uint vid : SV_VertexID, uint iid : SV_InstanceID)
     return output;
 }
 
-float rounded_box_sdf(float2 center, float2 size, float4 radius)
-{
-    radius.xy = (center.x > 0.0) ? radius.xy : radius.zw;
-    radius.x = (center.y > 0.0) ? radius.x : radius.y;
+// All SDFs work in quad-centered pixel coordinates, so distances, widths and
+// radii are pixels and antialiasing is a fixed 1px band.
 
-    float2 q = abs(center) - size + radius.x;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius.x;
+// Rounded box; radius = per-corner px {top-left, top-right, bottom-right,
+// bottom-left} (y points down), clamped to what the box can fit.
+float sd_round_box(float2 p, float2 half_size, float4 radius)
+{
+    float r = (p.x < 0.0) ? ((p.y < 0.0) ? radius.x : radius.w)
+                          : ((p.y < 0.0) ? radius.y : radius.z);
+    r = min(r, min(half_size.x, half_size.y));
+    float2 q = abs(p) - half_size + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+// Gradient-normalized ellipse approximation (exact for circles).
+float sd_ellipse(float2 p, float2 r)
+{
+    float k2 = length(p / (r * r));
+    if (k2 == 0.0) return -min(r.x, r.y);   // exact center: 0/0 otherwise
+    float k1 = length(p / r);
+    return k1 * (k1 - 1.0) / k2;
+}
+
+float sd_segment(float2 p, float2 a, float2 b)
+{
+    float2 pa = p - a;
+    float2 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// Distance to the centerline of an arc of radius ra spanning sweep radians
+// from start (0 = +x, increasing clockwise on screen since y points down).
+float sd_arc(float2 p, float ra, float start, float sweep)
+{
+    if (sweep >= TAU) return abs(length(p) - ra);
+    float mid = start + sweep * 0.5;
+    // Rotate into the frame where the arc midpoint lies on +y.
+    float2 q = float2(dot(p, float2(-sin(mid), cos(mid))),
+                      dot(p, float2(cos(mid), sin(mid))));
+    q.x = abs(q.x);
+    float2 sc = float2(sin(sweep * 0.5), cos(sweep * 0.5));
+    return (sc.y * q.x > sc.x * q.y) ? length(q - sc * ra) : abs(length(q) - ra);
 }
 
 [shader("fragment")]
@@ -103,17 +148,49 @@ float4 fragmentMain(VertexOutput input) : SV_Target
 {
     Drawing item = push_constant.drawings[input.draw_id];
 
-    float border_size = item.border_width / 100.0;
-    float2 widget_size = float2(0.5, 0.5) - float2(border_size, border_size);
+    float2 p = (input.tex_pos - 0.5) * item.size;   // quad-centered pixels
+    float2 half_size = item.size * 0.5;
 
-    float dist = rounded_box_sdf(input.tex_pos - border_size - widget_size, widget_size, item.border_radius / 10.0);
+    float dist;
+    float border = 0.0;         // border band width; 0 = no border shading
+    float4 fill = item.color;
 
-    float4 color = float4(0.5, 0.5, 0.5, 0.0);
-    if (dist < 0.0)
+    switch (item.kind)
     {
-        color = item.tex_id > 0 ? textures[item.tex_id - 1].Sample(input.tex_pos) : item.color;
+    case KIND_ELLIPSE:
+    {
+        float2 radii = item.params.xy;
+        dist = sd_ellipse(p, radii);
+        border = item.border_width;
+        if (item.tex_id > 0) fill = textures[item.tex_id - 1].Sample(p / (radii * 2.0) + 0.5);
+        break;
+    }
+    case KIND_LINE:
+        dist = sd_segment(p, item.params.xy, item.params.zw) - item.border_width * 0.5;
+        break;
+    case KIND_ARC:
+        dist = sd_arc(p, item.params.x, item.params.y, item.params.z) - item.border_width * 0.5;
+        break;
+    case KIND_SHADOW:
+    {
+        float blur = max(item.border_width, 0.5);
+        float4 shadow = item.color;
+        shadow.a *= 1.0 - smoothstep(-blur, blur, sd_round_box(p, half_size - blur, item.params));
+        return shadow;
+    }
+    default: // KIND_RECT
+        dist = sd_round_box(p, half_size, item.params);
+        border = item.border_width;
+        if (item.tex_id > 0) fill = textures[item.tex_id - 1].Sample(input.tex_pos);
+        break;
     }
 
-    float border_alpha = smoothstep(border_size - 0.002, border_size, abs(dist));
-    return lerp(item.border_color, color, border_alpha);
+    // Border drawn inside the shape edge; both edges get the 1px AA band.
+    float4 color = fill;
+    if (border > 0.0)
+    {
+        color = lerp(fill, item.border_color, smoothstep(-border - 0.5, -border + 0.5, dist));
+    }
+    color.a *= 1.0 - smoothstep(-0.5, 0.5, dist);
+    return color;
 }

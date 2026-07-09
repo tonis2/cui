@@ -17,6 +17,63 @@ struct TileSpec
 	Color color;
 }
 
+// A custom widget painting with the Painter primitives directly — circle,
+// line, arc and rect_shadow — the way app-defined widgets are meant to.
+// A gauge: shadowed face, tick marks, a track + value arc, and a needle.
+struct Dial (Widget)
+{
+	Vec2 size;
+	float value; // 0..1
+}
+
+fn Vec2 Dial.layout(&self, Element* elem, Constraints constraints) @dynamic => self.size.constrain(constraints);
+
+fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	Vec2 center  = elem.size * 0.5f;
+	float radius = math::min(elem.size.x, elem.size.y) * 0.5f - 16.0f;
+
+	// The gauge spans 3/4 of a turn, opening at the bottom. Angles: 0 = +x,
+	// clockwise on screen.
+	float start = 0.75f * (float)math::PI;
+	float span  = 1.5f * (float)math::PI;
+
+	// Soft circular glow behind the face — a shadow is just a blurred rect,
+	// and full-corner radii make it round. On a dark background a warm color
+	// reads better than black.
+	painter.rect_shadow(
+		{ center.x - radius, center.y - radius },
+		{ radius * 2.0f, radius * 2.0f },
+		26.0f,
+		{ 0.95, 0.60, 0.20, 0.35 },
+		{ radius, radius, radius, radius }
+	);
+
+	painter.circle(
+		center,
+		radius,
+		{ .color = { 0.13, 0.15, 0.19, 1.0 }, .border_width = 2.0f, .border_color = { 0.32, 0.35, 0.42, 1.0 }, }
+	);
+
+	// Tick lines around the rim.
+	for (int i = 0; i <= 10; i++)
+	{
+		float angle = start + span * (float)i / 10.0f;
+		Vec2 dir    = { math::cos(angle), math::sin(angle) };
+		painter.line(center + dir * (radius - 16.0f), center + dir * (radius - 8.0f), 2.0f, { 0.45, 0.48, 0.56, 1.0 });
+	}
+
+	// Track arc, then the value arc over it.
+	painter.arc(center, radius - 28.0f, start, span, 7.0f, { 0.22, 0.24, 0.30, 1.0 });
+	painter.arc(center, radius - 28.0f, start, span * self.value, 7.0f, { 0.95, 0.60, 0.20, 1.0 });
+
+	// Needle and hub.
+	float needle_angle = start + span * self.value;
+	Vec2 dir           = { math::cos(needle_angle), math::sin(needle_angle) };
+	painter.line(center, center + dir * (radius - 34.0f), 3.0f, cui::WHITE);
+	painter.circle(center, 7.0f, { .color = { 0.95, 0.60, 0.20, 1.0 } });
+}
+
 fn void main(String[] args)
 {
 	Vec2 window_size    = { 900.0, 700.0 };
@@ -57,15 +114,15 @@ fn void main(String[] args)
 			ui.@node(
 				(Rectangle) {
 					.size = { 90.0, tile.height },
-					.style = { .color = tile.color, .border_radius = { 0.6, 0.6, 0.6, 0.6 } },
+					.style = { .color = tile.color, .border_radius = { 8.0, 8.0, 8.0, 8.0 } },
 				}
 			)
 		);
 	}
 
 	// Root: 24px of padding around a column that fills the window and centers
-	// its content: a full-width textured header, three cards spread across
-	// the width by SPACE_BETWEEN, and the shelf.
+	// its content: a full-width textured header, two cards and the custom
+	// Dial spread across the width by SPACE_BETWEEN, and the shelf.
 	ui.build(
 		ui.@node(
 			(Padding) { .insets = widgets::insets_all(24.0) },
@@ -74,7 +131,7 @@ fn void main(String[] args)
 				ui.@node(
 					(Rectangle) {
 						.size = { content_width, 96.0 },
-						.style = { .texture = header_image, .border_radius = { 1.0, 1.0, 1.0, 1.0 } },
+						.style = { .texture = header_image, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
 					}
 				),
 				ui.@node(
@@ -82,22 +139,20 @@ fn void main(String[] args)
 					ui.@node(
 						(Rectangle) {
 							.size = { 260.0, 240.0 },
-							.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 1.0, 1.0, 1.0, 1.0 } },
+							.style = {
+								.color = { 0.16, 0.45, 0.42, 1.0 },
+								.border_radius = { 16.0, 16.0, 16.0, 16.0 }
+							},
 						}
 					),
-					ui.@node(
-						(Rectangle) {
-							.size = { 260.0, 300.0 },
-							.style = { .color = { 0.75, 0.42, 0.16, 1.0 }, .border_radius = { 1.0, 1.0, 1.0, 1.0 } },
-						}
-					),
+					ui.@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 }),
 					ui.@node(
 						(Rectangle) {
 							.size = { 260.0, 270.0 },
 							.style = {
 								.color = { 0.36, 0.28, 0.55, 1.0 },
-								.border_radius = { 1.0, 1.0, 1.0, 1.0 },
-								.border_width = 1.0,
+								.border_radius = { 16.0, 16.0, 16.0, 16.0 },
+								.border_width = 2.0,
 								.border_color = cui::WHITE
 							},
 						}

@@ -5,6 +5,10 @@ import std::math::matrix;
 
 // SDF primitive kinds, dispatched in the fragment shader.
 const uint DRAWING_RECT = 0;
+const uint DRAWING_ELLIPSE = 1;
+const uint DRAWING_LINE = 2;
+const uint DRAWING_ARC = 3;
+const uint DRAWING_SHADOW = 4;
 
 // Opaque texture handle referenced by drawings; 0 = untextured. Handles come
 // from the backend that consumes the canvas — with the built-in renderer,
@@ -19,13 +23,17 @@ const Texture NO_TEXTURE = (Texture)0;
 struct Drawing {
     uint kind;
     int texture;            // Texture handle as raw int; 0 = untextured
-    float border_width;
+    float border_width;     // px; LINE/ARC store their thickness here, SHADOW its blur
     uint transform_id;      // index into Canvas.transforms
 
-    Vec2 size;
+    Vec2 size;              // quad bounds in pixels
     Vec2 corner;
 
-    Vec4 border_radius;
+    Vec4 params;            // per-kind data (pixels / radians), filled by Painter:
+                            //   RECT/SHADOW  corner radii {TL, TR, BR, BL}
+                            //   ELLIPSE      radii in xy
+                            //   LINE         endpoints {a.x, a.y, b.x, b.y}, quad-centered
+                            //   ARC          {radius, start, sweep, -}
     Vec4 color;
     Vec4 border_color;
 }

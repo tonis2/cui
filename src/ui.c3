@@ -57,6 +57,13 @@ interface Widget
     fn void unmount() @optional;
 }
 
+fn Vec2 Vec2.constrain(self, Constraints c) {
+	return {
+        math::max(c.min.x, math::min(self.x, c.max.x)),
+        math::max(c.min.y, math::min(self.y, c.max.y)),
+    };
+}
+
 // Clamps a wanted size into the given constraints; the usual last step of a
 // layout implementation.
 fn Vec2 clamp_size(Vec2 size, Constraints c)
@@ -390,21 +397,30 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot)
     foreach (child : element.children) self.emit(child, absolute, slot);
 }
 
-fn bool vec2_eq(Vec2 a, Vec2 b)
-{
-    return a.x == b.x && a.y == b.y;
-}
+fn bool vec2_eq(Vec2 a, Vec2 b) => a.x == b.x && a.y == b.y;
 
 // ---------------------------------------------------------------------------
 // Painter: what Widget.paint implementations draw with. Positions are local to
 // the element; the emit pass translates them to absolute coordinates.
+//
+// All units are pixels; angles are radians with 0 = +x, increasing clockwise
+// on screen (y points down). Corner radii run {top-left, top-right,
+// bottom-right, bottom-left} and are clamped to what the shape can fit.
+// Borders are drawn inside the shape's edge.
 
 struct RectStyle {
     Color color;
     Color border_color;
-    float border_width;
-    Vec4 border_radius;
+    float border_width;     // px, inside the edge
+    Vec4 border_radius;     // per-corner px {TL, TR, BR, BL}
     Texture texture;        // from Renderer.load_image; default = untextured
+}
+
+struct CircleStyle {
+    Color color;
+    Color border_color;
+    float border_width;     // px, inside the edge
+    Texture texture;        // sampled across the shape's bounding box
 }
 
 struct Painter {
@@ -419,8 +435,75 @@ fn void Painter.rect(&self, Vec2 pos, Vec2 size, RectStyle style = {})
         .border_width = style.border_width,
         .size = size,
         .corner = pos,
-        .border_radius = style.border_radius,
+        .params = style.border_radius,
         .color = (Vec4)style.color,
         .border_color = (Vec4)style.border_color,
+    });
+}
+
+fn void Painter.circle(&self, Vec2 center, float radius, CircleStyle style = {})
+{
+    self.ellipse(center, {radius, radius}, style);
+}
+
+fn void Painter.ellipse(&self, Vec2 center, Vec2 radii, CircleStyle style = {})
+{
+    Vec2 half = radii + 1.0f;   // 1px pad so the edge antialiasing isn't clipped
+    self.element.local_drawings.push({
+        .kind = DRAWING_ELLIPSE,
+        .texture = (int)style.texture,
+        .border_width = style.border_width,
+        .size = half * 2.0f,
+        .corner = center - half,
+        .params = {radii.x, radii.y, 0, 0},
+        .color = (Vec4)style.color,
+        .border_color = (Vec4)style.border_color,
+    });
+}
+
+// Line segment with rounded caps.
+fn void Painter.line(&self, Vec2 from, Vec2 to, float thickness, Color color)
+{
+    float pad = thickness * 0.5f + 1.0f;
+    Vec2 lo = { math::min(from.x, to.x) - pad, math::min(from.y, to.y) - pad };
+    Vec2 hi = { math::max(from.x, to.x) + pad, math::max(from.y, to.y) + pad };
+    Vec2 center = (lo + hi) * 0.5f;
+    self.element.local_drawings.push({
+        .kind = DRAWING_LINE,
+        .border_width = thickness,
+        .size = hi - lo,
+        .corner = lo,
+        .params = {from.x - center.x, from.y - center.y, to.x - center.x, to.y - center.y},
+        .color = (Vec4)color,
+    });
+}
+
+// Stroked circular arc: from `start`, spanning `sweep` radians, rounded caps.
+// A sweep of 2π or more draws the full ring — progress rings and spinners.
+fn void Painter.arc(&self, Vec2 center, float radius, float start, float sweep, float thickness, Color color)
+{
+    float pad = radius + thickness * 0.5f + 1.0f;
+    self.element.local_drawings.push({
+        .kind = DRAWING_ARC,
+        .border_width = thickness,
+        .size = {pad * 2, pad * 2},
+        .corner = center - pad,
+        .params = {radius, start, sweep, 0},
+        .color = (Vec4)color,
+    });
+}
+
+// Soft drop shadow of a (rounded) rect at pos/size: the edge fades over
+// `blur` px each way. Paint it before the shape casting it; a border_radius
+// of half the size makes it circular.
+fn void Painter.rect_shadow(&self, Vec2 pos, Vec2 size, float blur, Color color, Vec4 border_radius = {})
+{
+    self.element.local_drawings.push({
+        .kind = DRAWING_SHADOW,
+        .border_width = blur,
+        .size = size + 2.0f * blur,
+        .corner = pos - blur,
+        .params = border_radius,
+        .color = (Vec4)color,
     });
 }

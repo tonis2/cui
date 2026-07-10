@@ -3,14 +3,16 @@ import std::math;
 import std::io;
 
 // Composite-widget example: a widget whose look is not painted directly but
-// COMPOSED from already-defined widgets. StatCard.build returns a ui.@node(...)
-// subtree of Stack / Padding / Column / Row / Rectangle — the analog of a
-// Flutter StatelessWidget.build(). The widget has no paint(): its children ARE
-// its appearance, and self.value / self.accent parameterize the composition the
-// way a Flutter build() reads its widget's fields. (Contrast test/layout.c3's
-// Dial, which paints SDF primitives itself.) The subtree is built once and then
-// cached like any other; changing value would mean rebuilding it (drop the
-// children and re-run build, or mutate the built rectangles + request_paint).
+// COMPOSED from already-defined widgets. StatCard implements the Widget
+// interface's build method — return a ui.@node(...) subtree of Stack / Padding
+// / Column / Row / Rectangle, and the framework does the rest: it attaches the
+// subtree as the element's child on the first flush and, with no layout method,
+// sizes the card to what the subtree wants. The analog of a Flutter
+// StatelessWidget.build(). The widget has no paint(): its children ARE its
+// appearance, and self.value / self.accent parameterize the composition the way
+// a Flutter build() reads its widget's fields. (Contrast test/layout.c3's Dial,
+// which paints SDF primitives itself.) The subtree is built once and then
+// cached like any other widget's children.
 //
 // Run with: c3c run composite
 
@@ -25,11 +27,13 @@ struct StatCard (Widget)
 	Color accent;   // chip + fill color
 }
 
-// The "build": returns a subtree assembled from existing widgets. This is the
-// whole representation of a StatCard — there is no StatCard.paint below, so the
-// element draws nothing itself; the composed children do all the drawing.
-fn Element* StatCard.build(&self, Ui* ui)
+// The build method is the ENTIRE widget implementation — no layout, no paint.
+// It returns a subtree assembled from existing widgets; the composed children
+// do all the drawing, and the framework's single-child passthrough handles
+// sizing.
+fn Element* StatCard.build(&self, Element* elem) @dynamic
 {
+	Ui* ui = elem.ui;
 	float fill = math::clamp(self.value, 0.0f, 1.0f) * BAR_W;
 	return ui.@node(
 		(Stack) { .size = { CARD_W, CARD_H } },
@@ -76,23 +80,6 @@ fn Element* StatCard.build(&self, Ui* ui)
 			)
 		)
 	);
-}
-
-// A composite lays out as a single-child wrapper (like Padding): build the
-// subtree the first time we are laid out, then delegate sizing to it. Pushing
-// the child directly — rather than elem.append, which calls request_layout —
-// avoids re-dirtying mid-layout, so the tree settles in one pass.
-fn Vec2 StatCard.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	if (elem.children.len() == 0)
-	{
-		Element* subtree = self.build(elem.ui);
-		subtree.parent = elem;
-		elem.children.push(subtree);
-	}
-	Vec2 size = elem.layout_child(0, constraints);
-	elem.place_child(0, { 0, 0 });
-	return size;
 }
 
 struct CardSpec

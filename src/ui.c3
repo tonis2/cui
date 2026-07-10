@@ -28,6 +28,7 @@ struct Constraints {
 }
 
 bitstruct DirtyFlags : char {
+    bool build;
     bool layout;
     bool paint;
 }
@@ -40,8 +41,15 @@ const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 
 // A widget is behavior attached to an Element. All methods are optional:
 //
+//   build     compose this widget out of existing widgets: return a subtree
+//             made with elem.ui.@node — the framework attaches it as the
+//             element's single child on the flush after the element enters the
+//             tree (a build widget takes no @node children of its own; the
+//             built subtree IS its content). With layout omitted, the element
+//             sizes itself to the built subtree. See test/composite.c3.
 //   layout    given constraints, return own size; lay out children through
-//             elem.layout_child / elem.place_child. Omitted: children get loose
+//             elem.layout_child / elem.place_child. Omitted: a build widget
+//             delegates to its built subtree; otherwise children get loose
 //             constraints and keep their offsets, size fills the constraints.
 //   paint     emit primitives in element-local coordinates. Omitted: the
 //             element draws nothing itself (pure container).
@@ -61,6 +69,7 @@ const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 // interface.
 interface Widget
 {
+    fn Element* build(Element* elem) @optional;
     fn Vec2 layout(Element* elem, Constraints constraints) @optional;
     fn void paint(Element* elem, Painter* painter) @optional;
     fn bool on_mouse(Element* elem, MouseEvent event) @optional;
@@ -138,6 +147,7 @@ struct Ui {
     List{Element*} all_elements;
     List{uint} free_transform_slots;
 
+    bool build_pending;
     bool layout_pending;
     bool paint_pending;
     bool frame_requested;       // "schedule a frame": set by every invalidation
@@ -366,6 +376,10 @@ fn Element* Ui.attach_node(&self, Widget widget, bool owned, Element*... childre
     element.owns_widget = owned;
     element.transform_slot = NO_TRANSFORM;
     element.dirty = { .layout = true, .paint = true };
+    if (&widget.build) {
+        element.dirty.build = true;
+        self.build_pending = true;
+    }
     foreach (child : children) {
         child.parent = element;
         element.children.push(child);
@@ -527,12 +541,17 @@ fn void Element.place_child(&self, sz index, Vec2 offset)
 }
 
 // ---------------------------------------------------------------------------
-// Frame flush: layout pass, then paint + emit pass. Call once per frame before
-// the renderer consumes the canvas.
+// Frame flush: build pass, then layout pass, then paint + emit pass. Call once
+// per frame before the renderer consumes the canvas.
 
 fn void Ui.flush(&self)
 {
     if (self.root == null) return;
+
+    if (self.build_pending) {
+        self.build_element(self.root);
+        self.build_pending = false;
+    }
 
     if (self.layout_pending) {
         self.layout_element(self.root, { .min = self.size, .max = self.size });
@@ -545,6 +564,23 @@ fn void Ui.flush(&self)
         self.canvas.drawings_dirty = true;
         self.paint_pending = false;
     }
+}
+
+// Build pass: materialize composite widgets. Runs before layout, so build may
+// freely append / request_layout — nothing is mid-pass yet (the reason build
+// beats the build-lazily-inside-layout workaround this replaces). Recursing
+// into children AFTER building the element means composites nested inside a
+// freshly built subtree are built in the same pass, however deep they stack.
+fn void Ui.build_element(&self, Element* element)
+{
+    if (element.dirty.build) {
+        element.dirty.build = false;
+        assert(element.children.len() == 0, "a build widget owns its children: pass none to @node");
+        Element* subtree = element.widget.build(element);
+        subtree.parent = element;
+        element.children.push(subtree);
+    }
+    foreach (child : element.children) self.build_element(child);
 }
 
 fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
@@ -563,6 +599,11 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
     Vec2 size;
     if (&element.widget.layout) {
         size = element.widget.layout(element, constraints);
+    } else if (&element.widget.build) {
+        // Composite default: single-child passthrough — the built subtree
+        // decides the size. Implement layout to override.
+        size = element.layout_child(0, constraints);
+        element.place_child(0, {0, 0});
     } else if (element.children.len() > 0) {
         // Default for layout-less containers: children get loose constraints
         // and keep their offsets; the container fills the available space.

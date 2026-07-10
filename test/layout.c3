@@ -149,26 +149,38 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 
 // Button callbacks are handed the Ui they're rendered in — passed automatically
 // from the button's own element, so there's no global and no app-threaded
-// handle. From it, get_widget queries the tree for the single Dial and hands
-// back a Dial* to mutate; request_paint(Dial) invalidates it. So the buttons
-// below set no context: each callback reaches what it needs through the ui it
-// is given, the way a Flutter callback reaches other widgets through its context.
+// handle. ui.@modify(Dial; d) resolves the Dial's element once, hands the body a
+// Dial* to mutate, then repaints that element — a single tree walk, no context
+// threaded in, the way a Flutter callback reaches other widgets through its own.
 fn void reset_dial(Ui* ui)
 {
-	if (try Dial* dial = ui.get_widget(Dial)) {
-		dial.value = 0.0;
-		ui.request_paint(Dial);
-		io::printfn("[layout] reset clicked -> %.2f", dial.value);
-	}
+	ui.@modify(Dial; d)
+	{
+		d.value = 0.0;
+		io::printfn("[layout] reset clicked -> %.2f", d.value);
+	};
 }
 
 fn void bump_dial(Ui* ui)
 {
-	if (try Dial* dial = ui.get_widget(Dial)) {
-		dial.value = math::clamp(dial.value + 0.1f, 0.0f, 1.0f);
-		ui.request_paint(Dial);
-		io::printfn("[layout] bump clicked -> %.2f", dial.value);
-	}
+	ui.@modify(Dial; d)
+	{
+		d.value = math::clamp(d.value + 0.1f, 0.0f, 1.0f);
+		io::printfn("[layout] bump clicked -> %.2f", d.value);
+	};
+}
+
+// The id twin, for when a bare type lookup is ambiguous: the tree holds many
+// Rectangles, so @modify(Rectangle) would hit the header. @modify_id names the
+// one stamped "teal" — resolved once, mutated, repainted.
+fn void recolor_card(Ui* ui)
+{
+	ui.@modify_id("teal", Rectangle; card)
+	{
+		Vec4 c = (Vec4)card.style.color;
+		card.style.color = c.y > c.x ? (Color) { 0.55, 0.30, 0.50, 1.0 } : (Color) { 0.16, 0.45, 0.42, 1.0 };
+		io::printfn("[layout] recolor teal card");
+	};
 }
 
 fn void main(String[] args)
@@ -195,12 +207,7 @@ fn void main(String[] args)
 	// CrossAlign.END inside the row's fixed height. Built in a loop and
 	// appended, since the tiles only differ by data.
 	Element* shelf = ui.@node(
-		(Row) {
-			.size = { content_width, 130.0 },
-			.gap = 16.0,
-			.main_align = CENTER,
-			.cross_align = END,
-		}
+		(Row) { .size = { content_width, 130.0 }, .gap = 16.0, .main_align = CENTER, .cross_align = END, }
 	);
 
 	TileSpec[4] tiles = {
@@ -224,12 +231,15 @@ fn void main(String[] args)
 
 	// Element.cursor gives any element a pointer shape declaratively — no
 	// widget code involved.
+	// .with_id names this node so a button callback can reach this exact
+	// rectangle among the many in the tree — get_widget(Rectangle) would return
+	// the header, the first one. The id chains onto the @node expression.
 	Element* teal_card = ui.@node(
 		(Rectangle) {
 			.size = { 260.0, 240.0 },
 			.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
 		}
-	);
+	).with_id("teal");
 
 	teal_card.cursor = Cursor.POINTING_HAND;
 
@@ -253,6 +263,15 @@ fn void main(String[] args)
 				.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
 				.on_click = &bump_dial,
 			}
+		),
+		ui.@node(
+			(Button) {
+				.size = { 130.0, 40.0 },
+				.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+				.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+				.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+				.on_click = &recolor_card,
+			}
 		)
 	);
 
@@ -274,7 +293,7 @@ fn void main(String[] args)
 				ui.@node(
 					(Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN },
 					teal_card,
-					ui.@node((Dial){ .size = { 260.0, 300.0 }, .value = 0.72 }),
+					ui.@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 }),
 					ui.@node(
 						(Rectangle) {
 							.size = { 260.0, 270.0 },

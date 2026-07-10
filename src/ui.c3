@@ -90,6 +90,9 @@ fn Vec2 clamp_size(Vec2 size, Constraints c)
 struct Element {
     Ui* ui;
     Widget widget;
+    String id;                  // optional app-chosen name; find_id / get_widget_id
+                                // resolve it. Empty = unkeyed. Borrowed — the string
+                                // must outlive the element (a literal is ideal).
     Element* parent;
     List{Element*} children;
 
@@ -200,13 +203,24 @@ macro Element.widget_as(&self, $Type)
     return ($Type*)((any)self.widget).ptr;
 }
 
+// The fault find / find_id (and the get_widget twins built on them) raise when
+// the tree holds no matching node — so a lookup guards with `if (try elem =
+// ui.find(Dial))` or asserts with `!!`.
+faultdef WIDGET_NOT_FOUND;
+
 // Query the retained tree by widget type: the first element whose widget is
-// exactly $Type, or null. The top-down analog of Flutter's
-// findAncestorStateOfType. The returned Element* is a stable handle, so it
-// stays valid across frames — hold it, or just re-query each time.
-macro Element* Ui.find(&self, $Type)
+// exactly $Type, or a WIDGET_NOT_FOUND fault. The top-down analog of Flutter's
+// findAncestorStateOfType. The returned Element* is a stable handle (valid
+// across frames), and it is *the* thing to hold when a callback will both read
+// and invalidate a widget: resolve it once here, then widget_as (a cast) and
+// request_paint (a flag flip) are both search-free. That is the hot path — the
+// get_widget / request_paint twins below each re-walk the tree, so pairing them
+// to mutate-then-repaint one node walks it twice. Use those only for one-shots.
+macro Ui.find(&self, $Type)
 {
-    return self.root ? find_by_type(self.root, $Type) : null;
+    Element* elem = self.root ? find_by_type(self.root, $Type) : null;
+    if (!elem) return WIDGET_NOT_FOUND~;
+    return elem;
 }
 
 fn Element* find_by_type(Element* elem, typeid type) @private
@@ -219,29 +233,110 @@ fn Element* find_by_type(Element* elem, typeid type) @private
     return null;
 }
 
-// The fault get_widget raises when the tree holds no widget of the asked type.
-faultdef WIDGET_NOT_FOUND;
-
-// Convenience twins of Element.widget_as / Element.request_paint that resolve a
-// widget by type. get_widget(Dial) hands back a Dial* to mutate, or a
-// WIDGET_NOT_FOUND fault if the tree has none — so a caller can guard it with
-// `if (try dial = ui.get_widget(Dial))` or assert with `!!`. request_paint(Dial)
-// invalidates it (a no-op if absent). A callback reaches these through a Ui it
-// is handed — a Button passes its own element's ui to on_click, so no global and
-// no app-threaded handle are needed. Both act on the first $Type in the tree, so
-// they fit singletons (one Dial, one settings panel); keep an explicit Element*
-// handle (the one @node returns) when several of a kind coexist.
+// One-shot convenience over find: hand back the widget pointer directly
+// (get_widget(Dial) → Dial*), or re-raise WIDGET_NOT_FOUND. One tree walk —
+// right for reading a singleton's field. To mutate AND repaint, hold the
+// Element* from find instead, so invalidation doesn't walk the tree a second
+// time. A callback reaches these through a Ui it is handed — a Button passes its
+// own element's ui to on_click, so no global and no app-threaded handle is
+// needed. Both act on the first $Type in the tree, so they fit singletons (one
+// Dial, one settings panel); name a node with .with_id when several coexist.
 macro Ui.get_widget(&self, $Type)
 {
-    Element* elem = self.find($Type);
-    if (!elem) return WIDGET_NOT_FOUND~;
-    return elem.widget_as($Type);
+    if (try elem = self.find($Type)) return elem.widget_as($Type);
+    return WIDGET_NOT_FOUND~;
 }
 
+// One-shot invalidate by type: one tree walk, a no-op if absent. Same caveat —
+// if you already hold the element, call elem.request_paint() and skip the walk.
 macro Ui.request_paint(&self, $Type)
 {
-    Element* elem = self.find($Type);
-    if (elem) elem.request_paint();
+    if (try elem = self.find($Type)) elem.request_paint();
+}
+
+// ---------------------------------------------------------------------------
+// Query the tree by app-chosen id — the escape hatch for when several widgets
+// of a kind coexist, where a bare type lookup can't say which one you mean (its
+// Flutter analog is a GlobalKey). Stamp a node with .with_id while building,
+// then reach exactly that node by name from anywhere. This mirrors the type
+// family above one-for-one — find_id / get_widget_id / request_paint_id — with
+// the same "resolve the element once" rule: the id says *which*, the $Type still
+// says *what*. v1 walks the tree like find_by_type — there is no registry to
+// keep in sync, so an unmounted node simply stops being found; swap in a map
+// behind these same signatures if lookups ever get hot.
+
+// Stamps a stable name onto an element and returns it, so it chains straight
+// into a @node expression: ui.@node((Dial){...}).with_id("dial"). The string is
+// borrowed — it must outlive the element (a literal is ideal). Empty ids are
+// never matched by find_id.
+fn Element* Element.with_id(&self, String id)
+{
+    self.id = id;
+    return self;
+}
+
+// The element carrying this id, or a WIDGET_NOT_FOUND fault — the id-keyed twin
+// of find, and likewise the handle to hold when a callback reads and invalidates
+// the same node.
+macro Ui.find_id(&self, String id)
+{
+    Element* elem = self.root ? find_by_id(self.root, id) : null;
+    if (!elem) return WIDGET_NOT_FOUND~;
+    return elem;
+}
+
+fn Element* find_by_id(Element* elem, String id) @private
+{
+    if (elem.id.len > 0 && equals(elem.id, id)) return elem;
+    foreach (child : elem.children) {
+        Element* hit = find_by_id(child, id);
+        if (hit) return hit;
+    }
+    return null;
+}
+
+// One-shot twins keyed by id — same single-walk cost and same caveat: hold the
+// Element* from find_id to mutate-then-repaint without a second walk.
+// get_widget_id still takes $Type — the id selects which node, the type says how
+// to hand its widget back.
+macro Ui.get_widget_id(&self, String id, $Type)
+{
+    if (try elem = self.find_id(id)) return elem.widget_as($Type);
+    return WIDGET_NOT_FOUND~;
+}
+
+macro Ui.request_paint_id(&self, String id)
+{
+    if (try elem = self.find_id(id)) elem.request_paint();
+}
+
+// ---------------------------------------------------------------------------
+// @modify — the resolve-once sugar for the common callback shape. It walks the
+// tree a single time, hands the body the typed widget, then request_paint()s the
+// element, so
+//     ui.@modify(Dial; d) { d.value = 0; };
+// is the one-walk equal of find + widget_as + request_paint. The id twin names
+// the node instead (still passing $Type to type the widget):
+//     ui.@modify_id("teal", Rectangle; card) { card.style.color = red; };
+// The body runs only if the node exists (a silent no-op otherwise), and the
+// repaint is automatic — so for a change that resizes a widget (needing
+// request_layout) hold the Element* from find and invalidate it yourself.
+macro void Ui.@modify(&self, $Type; @body(widget))
+{
+    if (try elem = self.find($Type))
+    {
+        @body(elem.widget_as($Type));
+        elem.request_paint();
+    }
+}
+
+macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
+{
+    if (try elem = self.find_id(id))
+    {
+        @body(elem.widget_as($Type));
+        elem.request_paint();
+    }
 }
 
 // Installs a built tree as the UI root, releasing any previous root.

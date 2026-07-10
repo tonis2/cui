@@ -28,6 +28,13 @@
       "linked-libraries": ["vulkan"],
       "linker-search-paths": ["/usr/local/lib"],
       "link-args": ["-rpath", "/usr/local/lib"]
+    },
+    "composite": {
+      "type": "executable",
+      "sources": [ "src/**", "test/composite.c3" ],
+      "linked-libraries": ["vulkan"],
+      "linker-search-paths": ["/usr/local/lib"],
+      "link-args": ["-rpath", "/usr/local/lib"]
     }
   },
   "cpu": "generic",

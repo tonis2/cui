@@ -1,0 +1,137 @@
+import cui;
+import std::math;
+import std::io;
+
+// Composite-widget example: a widget whose look is not painted directly but
+// COMPOSED from already-defined widgets. StatCard.build returns a ui.@node(...)
+// subtree of Stack / Padding / Column / Row / Rectangle — the analog of a
+// Flutter StatelessWidget.build(). The widget has no paint(): its children ARE
+// its appearance, and self.value / self.accent parameterize the composition the
+// way a Flutter build() reads its widget's fields. (Contrast test/layout.c3's
+// Dial, which paints SDF primitives itself.) The subtree is built once and then
+// cached like any other; changing value would mean rebuilding it (drop the
+// children and re-run build, or mutate the built rectangles + request_paint).
+//
+// Run with: c3c run composite
+
+const float CARD_W   = 260.0;
+const float CARD_H   = 76.0;
+const float CARD_PAD = 16.0;
+const float BAR_W    = CARD_W - 2.0 * CARD_PAD;   // inner content width
+
+struct StatCard (Widget)
+{
+	float value;    // 0..1, drives the progress fill
+	Color accent;   // chip + fill color
+}
+
+// The "build": returns a subtree assembled from existing widgets. This is the
+// whole representation of a StatCard — there is no StatCard.paint below, so the
+// element draws nothing itself; the composed children do all the drawing.
+fn Element* StatCard.build(&self, Ui* ui)
+{
+	float fill = math::clamp(self.value, 0.0f, 1.0f) * BAR_W;
+	return ui.@node(
+		(Stack) { .size = { CARD_W, CARD_H } },
+		// Background panel — the first Stack child, at the origin.
+		ui.@node((Rectangle) {
+			.size = { CARD_W, CARD_H },
+			.style = {
+				.color = { 0.16, 0.17, 0.22, 1.0 },
+				.border_radius = { 14.0, 14.0, 14.0, 14.0 },
+				.border_width = 1.0,
+				.border_color = { 0.28, 0.30, 0.38, 1.0 },
+			},
+		}),
+		// Content, laid over the panel at the same origin.
+		ui.@node(
+			(Padding) { .insets = widgets::insets_all(CARD_PAD) },
+			ui.@node(
+				(Column) { .gap = 14.0 },
+				// Header: an accent chip + a placeholder title bar (no text yet).
+				ui.@node(
+					(Row) { .size = { BAR_W, 18.0 }, .gap = 10.0, .cross_align = CENTER },
+					ui.@node((Rectangle) {
+						.size = { 18.0, 18.0 },
+						.style = { .color = self.accent, .border_radius = { 6.0, 6.0, 6.0, 6.0 } },
+					}),
+					ui.@node((Rectangle) {
+						.size = { BAR_W - 28.0, 9.0 },
+						.style = { .color = { 0.42, 0.45, 0.52, 1.0 }, .border_radius = { 4.0, 4.0, 4.0, 4.0 } },
+					}),
+				),
+				// Progress bar: a fill and a remainder rect side by side, summing
+				// to BAR_W. self.value sets where they meet.
+				ui.@node(
+					(Row) { .size = { BAR_W, 12.0 } },
+					ui.@node((Rectangle) {
+						.size = { fill, 12.0 },
+						.style = { .color = self.accent, .border_radius = { 6.0, 0.0, 0.0, 6.0 } },
+					}),
+					ui.@node((Rectangle) {
+						.size = { BAR_W - fill, 12.0 },
+						.style = { .color = { 0.24, 0.26, 0.32, 1.0 }, .border_radius = { 0.0, 6.0, 6.0, 0.0 } },
+					}),
+				),
+			)
+		)
+	);
+}
+
+// A composite lays out as a single-child wrapper (like Padding): build the
+// subtree the first time we are laid out, then delegate sizing to it. Pushing
+// the child directly — rather than elem.append, which calls request_layout —
+// avoids re-dirtying mid-layout, so the tree settles in one pass.
+fn Vec2 StatCard.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	if (elem.children.len() == 0)
+	{
+		Element* subtree = self.build(elem.ui);
+		subtree.parent = elem;
+		elem.children.push(subtree);
+	}
+	Vec2 size = elem.layout_child(0, constraints);
+	elem.place_child(0, { 0, 0 });
+	return size;
+}
+
+struct CardSpec
+{
+	float value;
+	Color accent;
+}
+
+fn void main(String[] args)
+{
+	Vec2 window_size = { 520.0, 560.0 };
+
+	Renderer renderer = cui::vulkan::new(window_size: window_size, loop_mode: ON_DEMAND)!!;
+	defer catch renderer.free();
+
+	Ui* ui = cui::new_ui(window_size);
+	defer ui.free();
+
+	CardSpec[4] specs = {
+		{ 0.72, { 0.95, 0.60, 0.20, 1.0 } },
+		{ 0.45, { 0.35, 0.70, 0.95, 1.0 } },
+		{ 0.88, { 0.55, 0.85, 0.45, 1.0 } },
+		{ 0.30, { 0.85, 0.40, 0.55, 1.0 } },
+	};
+
+	// The composite reused with different data, arranged by an ordinary Column
+	// exactly as if StatCard were a built-in widget.
+	Element* column = ui.@node((Column) { .gap = 18.0, .main_align = CENTER, .cross_align = CENTER });
+	foreach (spec : specs)
+	{
+		column.append(ui.@node((StatCard) { .value = spec.value, .accent = spec.accent }));
+	}
+
+	ui.build(
+		ui.@node(
+			(Padding) { .insets = widgets::insets_all(28.0) },
+			column
+		)
+	);
+
+	renderer.@on_frame(ui ; FrameInput input) {}!!;
+}

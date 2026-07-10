@@ -16,6 +16,9 @@ import std::math;
 //   request_paint   that element's paint() re-runs; everything else is cache.
 //   request_layout  the dirty spine re-layouts (constraint cache prunes the
 //                   rest), then the display list is re-emitted.
+//   request_build   a composite drops its built subtree and re-runs build(),
+//                   then layout + paint as above (request_paint on a build
+//                   widget routes here — see Element.request_paint).
 //   nothing         flush() returns immediately; the GPU redraws the retained
 //                   display list without any upload.
 
@@ -46,7 +49,11 @@ const Color BLUE = {0.5, 0.5, 0.5, 1.0};
 //             element's single child on the flush after the element enters the
 //             tree (a build widget takes no @node children of its own; the
 //             built subtree IS its content). With layout omitted, the element
-//             sizes itself to the built subtree. See test/composite.c3.
+//             sizes itself to the built subtree. After mutating fields, call
+//             elem.request_build() (or use ui.@modify) to regenerate the
+//             subtree. Must be pure: read own fields, produce nodes — state
+//             that must survive a rebuild lives on the composite, not inside
+//             the built subtree. See test/composite.c3 and build.md.
 //   layout    given constraints, return own size; lay out children through
 //             elem.layout_child / elem.place_child. Omitted: a build widget
 //             delegates to its built subtree; otherwise children get loose
@@ -329,8 +336,10 @@ macro Ui.request_paint_id(&self, String id)
 // the node instead (still passing $Type to type the widget):
 //     ui.@modify_id("teal", Rectangle; card) { card.style.color = red; };
 // The body runs only if the node exists (a silent no-op otherwise), and the
-// repaint is automatic — so for a change that resizes a widget (needing
-// request_layout) hold the Element* from find and invalidate it yourself.
+// invalidation is automatic and kind-aware: a painting widget repaints, a
+// composite rebuilds its subtree (request_paint routes to request_build). For a
+// change that resizes a non-composite widget (needing request_layout) hold the
+// Element* from find and invalidate it yourself.
 macro void Ui.@modify(&self, $Type; @body(widget))
 {
     if (try elem = self.find($Type))
@@ -478,9 +487,31 @@ fn void Element.request_layout(&self)
     self.ui.frame_requested = true;
 }
 
-// Appearance changed but not size: only this element's paint() re-runs.
+// Composite state changed: drop the built subtree and re-run build() on the
+// next flush — CUI's setState. The release is DEFERRED to the build pass, so
+// this is safe to call from event handlers running inside the subtree it
+// condemns (releasing immediately would free the very widget whose callback is
+// on the stack). Rebuilding cascades: nested composites in the fresh subtree
+// are built in the same pass, Flutter-style.
+fn void Element.request_build(&self)
+{
+    assert(&self.widget.build, "request_build on a widget with no build method");
+    self.dirty.build = true;
+    self.ui.build_pending = true;
+    self.ui.frame_requested = true;
+}
+
+// Appearance changed but not size: only this element's paint() re-runs. On a
+// build widget this routes to request_build — a composite has no paint of its
+// own, so "appearance changed" can only mean "regenerate the subtree". That
+// makes @modify work uniformly: mutate fields, and a leaf repaints while a
+// composite rebuilds.
 fn void Element.request_paint(&self)
 {
+    if (&self.widget.build && !&self.widget.paint) {
+        self.request_build();
+        return;
+    }
     self.dirty.paint = true;
     self.ui.paint_pending = true;
     self.ui.frame_requested = true;
@@ -548,9 +579,13 @@ fn void Ui.flush(&self)
 {
     if (self.root == null) return;
 
+    // Cleared BEFORE the walk: attach_node re-sets it for nodes created during
+    // builds (handled in this same pass), and a request_build aimed at an
+    // already-visited element correctly lands on the next flush instead of
+    // being lost.
     if (self.build_pending) {
-        self.build_element(self.root);
         self.build_pending = false;
+        self.build_element(self.root);
     }
 
     if (self.layout_pending) {
@@ -570,15 +605,24 @@ fn void Ui.flush(&self)
 // freely append / request_layout — nothing is mid-pass yet (the reason build
 // beats the build-lazily-inside-layout workaround this replaces). Recursing
 // into children AFTER building the element means composites nested inside a
-// freshly built subtree are built in the same pass, however deep they stack.
+// freshly built subtree are built in the same pass, however deep they stack —
+// so a rebuild regenerates its nested composites too, Flutter-style.
+//
+// A rebuild is a naive replace: the old subtree is released wholesale (unmount
+// hooks fire, elements recycle) and build() runs fresh. The contract that makes
+// this correct rather than lossy: build is a pure function of the composite's
+// OWN fields — state that must survive a rebuild belongs on the composite (or
+// above), not on widgets inside the built subtree. See build.md.
 fn void Ui.build_element(&self, Element* element)
 {
     if (element.dirty.build) {
         element.dirty.build = false;
-        assert(element.children.len() == 0, "a build widget owns its children: pass none to @node");
+        foreach (child : element.children) self.release(child);
+        element.children.clear();
         Element* subtree = element.widget.build(element);
         subtree.parent = element;
         element.children.push(subtree);
+        element.request_layout();
     }
     foreach (child : element.children) self.build_element(child);
 }

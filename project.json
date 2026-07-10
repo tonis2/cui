@@ -7,6 +7,7 @@
   "features": [],
   "version": "0.1.0",
   "sources": [ "src/**" ],
+  "test-sources": [ "test/unit/**" ],
   "output": "build",
   "targets": {
     "shaders": {
@@ -32,6 +33,13 @@
     "composite": {
       "type": "executable",
       "sources": [ "src/**", "test/composite.c3" ],
+      "linked-libraries": ["vulkan"],
+      "linker-search-paths": ["/usr/local/lib"],
+      "link-args": ["-rpath", "/usr/local/lib"]
+    },
+    "unittest": {
+      "type": "executable",
+      "sources": [ "src/**" ],
       "linked-libraries": ["vulkan"],
       "linker-search-paths": ["/usr/local/lib"],
       "link-args": ["-rpath", "/usr/local/lib"]

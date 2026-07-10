@@ -211,7 +211,7 @@ fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 // other widgets through its BuildContext:
 //
 //     fn void reset_clicked(Ui* ui) {
-//         if (try dial = ui.get_widget(Dial)) { dial.value = 0; ui.request_paint(Dial); }
+//         ui.@modify(Dial; d) { d.value = 0; };   // resolve once, mutate, repaint
 //     }
 //     ui.@node((Button){ .on_click = &reset_clicked, ... });
 //

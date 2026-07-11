@@ -137,7 +137,9 @@ fn void main(String[] args)
 
 	ui.build(ui.@node((Padding) { .insets = widgets::insets_all(28.0) }, column));
 
-	renderer.@on_frame(ui ; FrameInput input)
-	{
-	}!!;
+	// The app owns the loop; all the interactivity lives in the widgets, so
+	// there is no per-frame code — frame() polls input, dispatches to the
+	// widgets, flushes and presents (and, in ON_DEMAND mode, sleeps until
+	// input when nothing scheduled a frame).
+	while (renderer.frame(ui)!!) { }
 }

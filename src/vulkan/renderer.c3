@@ -42,18 +42,6 @@ enum LoopMode
 const INITIAL_DRAWINGS = 64;
 const INITIAL_TRANSFORMS = 16;
 
-// Yielded to the @on_frame body each frame. The full input state lives on
-// ui.input (fed by this renderer before the body runs); the delta fields are
-// a convenience that reports pointer movement only while LEFT is held,
-// preserving the examples' drag-to-rotate behavior.
-struct FrameInput {
-    float mouse_x_delta;
-    float mouse_y_delta;
-    Vec2 mouse;             // pointer in UI coordinates (top-left origin)
-    float dt;               // seconds since last frame
-    c3w::EventMap events;
-}
-
 struct Renderer {
 	Camera camera;
 	Vec2 window_size;
@@ -98,7 +86,7 @@ struct Renderer {
     ImageViewList swapchain_views;
     vk::ImageList swapchain_images;
 
-    uint frame;
+    uint frame_index;   // frame-in-flight slot, cycles mod MAX_FRAMES_IN_FLIGHT
 
     bool enable_debug;
 }
@@ -111,7 +99,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 	ZStringList device_extensions;
 
     Renderer renderer = {
-        .frame = 0,
+        .frame_index = 0,
         .camera = camera::new(eye: {0.0, 0.0, 1.0}, aspect: window_size.x / window_size.y, min_zoom: 0.1, max_zoom: 10),
         .window_size = window_size,
         .enable_debug = enable_debug,
@@ -360,8 +348,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
 // Uploads an image file (png/jpg) to the GPU and returns the handle to
 // reference it with (RectStyle.texture). Textures can be loaded at any time;
-// ones loaded inside the frame body become valid the next frame (the pipeline
-// is rebuilt for the new sampler count at the top of a frame).
+// ones loaded between frames become valid on the next frame() call (the
+// pipeline is rebuilt for the new sampler count at the top of a frame).
 fn cui::Texture? Renderer.load_image(&self, String path)
 {
     self.textures.loadPath(path, &self.allocator, self.graphics_queue)!;
@@ -386,7 +374,7 @@ fn void? Renderer.rebuild_pipeline(&self)
         self.pipeline.free(self.device);    // also frees the descriptor layout
     }
 
-    // Descriptor writes are rebuilt per-frame in @on_frame so the pBufferInfo /
+    // Descriptor writes are rebuilt per-frame in frame() so the pBufferInfo /
     // pImageInfo pointers reference data that is alive at record time.
     self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
     .setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
@@ -541,246 +529,239 @@ fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
     }
 }
 
-macro void? Renderer.@on_frame(self, Ui* ui; @body(FrameInput input))
+// Runs one frame: poll input → dispatch to widgets → flush → record → present.
+// Returns false when the user asked to quit (ESCAPE or window close). The app
+// owns the loop; per-frame logic goes in the body, reading ui.input directly:
+//
+//     while (renderer.frame(ui)!!)
+//     {
+//         // app/game logic — mutations made here render on the next call
+//     }
+//
+// In ON_DEMAND mode the call blocks for input when nothing scheduled a frame,
+// so the loop body only runs when frames do — a game simulation that must tick
+// every iteration wants CONTINUOUS.
+fn bool? Renderer.frame(&self, Ui* ui)
 {
     Canvas* canvas = &ui.canvas;
-    bool running = true;
 
-    // ON_DEMAND only: true once a frame settled with nothing scheduled, so the
-    // next getEvent blocks until input instead of spinning. Starts false — the
-    // first frame always renders.
-    bool wait_for_events = false;
+    // First frame, or textures were added since: (re)build the pipeline
+    // so the sampler-array binding matches the texture count.
+    if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
 
-    while (running) {
-        // First frame, or textures were added since: (re)build the pipeline
-        // so the sampler-array binding matches the texture count.
-        if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
+    // Sleep decision, made at the top of the frame so it sees everything since
+    // the last frame began — input handlers, update() hooks, AND app code run
+    // between frame() calls. ON_DEMAND with nothing scheduled → getEvent parks
+    // the thread at 0% CPU until an event arrives. Ui.build/mount set
+    // frame_requested, so the first frame always renders.
+    bool wait_for_events = self.loop_mode == LoopMode.ON_DEMAND && !ui.frame_requested;
 
-        // In ON_DEMAND mode this call parks the thread until an event arrives
-        // when wait_for_events is set; otherwise it polls and returns at once.
-        c3w::EventMap event_map = self.window.getEvent(wait_for_events);
-        if (event_map.is_pressed(ESCAPE) || self.window.should_close()) running = false;
+    c3w::EventMap event_map = self.window.getEvent(wait_for_events);
+    if (event_map.is_pressed(ESCAPE) || self.window.should_close()) return false;
 
-        // Anything this frame schedules (input handlers, the app body, an
-        // animation) re-sets frame_requested; we read it after the frame to
-        // decide whether to sleep next. Clear it first so it reflects only
-        // this frame's activity.
-        ui.frame_requested = false;
+    // Anything from here on that schedules work (input handlers, update hooks,
+    // app code before the next call) re-sets frame_requested; clear it first so
+    // the next sleep decision reflects only that activity.
+    ui.frame_requested = false;
 
-        // Clamped so a long idle sleep (or a stall) doesn't advance animations
-        // by the whole elapsed wall-clock in one step.
-        float dt = math::min((float)self.frame_clock.mark().to_sec(), MAX_FRAME_DT);
+    // Clamped so a long idle sleep (or a stall) doesn't advance animations
+    // by the whole elapsed wall-clock in one step.
+    float dt = math::min((float)self.frame_clock.mark().to_sec(), MAX_FRAME_DT);
 
-        // c3w reports the pointer in Cocoa window coordinates (bottom-left
-        // origin, points); cui works top-left.
-        Vec2 raw_mouse = self.window.getMousePos();
-        Vec2 mouse = { raw_mouse.x, self.window_size.y - raw_mouse.y };
+    // c3w reports the pointer in Cocoa window coordinates (bottom-left
+    // origin, points); cui works top-left.
+    Vec2 raw_mouse = self.window.getMousePos();
+    Vec2 mouse = { raw_mouse.x, self.window_size.y - raw_mouse.y };
 
-        self.key_scratch.clear();
-        event_map.@each(; c3w::EventKey key, bool held) {
-            if (held && !is_mouse_key(key)) self.key_scratch.push((cui::Key)key.code);
-        };
+    self.key_scratch.clear();
+    event_map.@each(; c3w::EventKey key, bool held) {
+        if (held && !is_mouse_key(key)) self.key_scratch.push((cui::Key)key.code);
+    };
 
-        // Feed the frame's input; the Ui updates ui.input, dispatches the
-        // widget events, and runs update() hooks — before the app body runs.
-        ui.process_input({
-            .mouse = mouse,
-            .buttons = {
-                event_map.is_pressed(LEFT_MOUSE),
-                event_map.is_pressed(RIGHT_MOUSE),
-                event_map.is_pressed(MIDDLE_MOUSE),
-            },
-            .scroll = self.window.get_scroll(),
-            .text = self.window.get_text(),
-            .keys_down = self.key_scratch.array_view(),
-        }, dt);
+    // Feed the frame's input; the Ui updates ui.input, dispatches the
+    // widget events, and runs update() hooks.
+    ui.process_input({
+        .mouse = mouse,
+        .buttons = {
+            event_map.is_pressed(LEFT_MOUSE),
+            event_map.is_pressed(RIGHT_MOUSE),
+            event_map.is_pressed(MIDDLE_MOUSE),
+        },
+        .scroll = self.window.get_scroll(),
+        .text = self.window.get_text(),
+        .keys_down = self.key_scratch.array_view(),
+    }, dt);
 
-        if (ui.cursor != self.applied_cursor) {
-            self.applied_cursor = ui.cursor;
-            self.window.set_cursor(cursor_shape(ui.cursor));
-        }
+    if (ui.cursor != self.applied_cursor) {
+        self.applied_cursor = ui.cursor;
+        self.window.set_cursor(cursor_shape(ui.cursor));
+    }
 
-        float dx = ui.input.down[0] ? ui.input.mouse_delta.x : 0;
-        float dy = ui.input.down[0] ? ui.input.mouse_delta.y : 0;
+    Fence frame_fence = self.frame_fences[self.frame_index];
+    Semaphore wait_semaphore = self.wait_semaphores[self.frame_index];
 
-        Fence frame_fence = self.frame_fences[self.frame];
-        Semaphore wait_semaphore = self.wait_semaphores[self.frame];
+    frame_fence.wait(self.device)!;
+    frame_fence.reset(self.device)!;
 
-        frame_fence.wait(self.device)!;
-        frame_fence.reset(self.device)!;
+    uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
+    Semaphore signal_semaphore = self.signal_semaphores[next_image];
 
-        uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
-        Semaphore signal_semaphore = self.signal_semaphores[next_image];
-
-        RenderingInfo rendering_info = vk::renderingInfo()
-        .setLayerCount(1)
-        .setRenderArea({
-            .offset = { .x = 0, .y = 0 },
-            .extent = self.extent,
+    RenderingInfo rendering_info = vk::renderingInfo()
+    .setLayerCount(1)
+    .setRenderArea({
+        .offset = { .x = 0, .y = 0 },
+        .extent = self.extent,
+    })
+    .setColorAttachments({
+        vk::renderingAttachmentInfo()
+        .setImageView(self.swapchain_views[next_image])
+        .setImageLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        .setStoreOp(ATTACHMENT_STORE_OP_STORE)
+        .setLoadOp(ATTACHMENT_LOAD_OP_CLEAR)
+        .setClearValue({
+            .color = { .float32 = { 0.0, 0.0, 0.0, 1.0 }}
         })
-        .setColorAttachments({
-            vk::renderingAttachmentInfo()
-            .setImageView(self.swapchain_views[next_image])
-            .setImageLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-            .setStoreOp(ATTACHMENT_STORE_OP_STORE)
-            .setLoadOp(ATTACHMENT_LOAD_OP_CLEAR)
-            .setClearValue({
-                .color = { .float32 = { 0.0, 0.0, 0.0, 1.0 }}
-            })
-        })
-        .setDepthAttachment(&&vk::renderingAttachmentInfo()
-            .setImageView(self.depth_texture.imageView)
-            .setImageLayout(IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-            .setStoreOp(ATTACHMENT_STORE_OP_STORE)
-            .setLoadOp(ATTACHMENT_LOAD_OP_CLEAR)
-            .setClearValue({
-            .depthStencil = { 1.0f, 0 }
-        }));
+    })
+    .setDepthAttachment(&&vk::renderingAttachmentInfo()
+        .setImageView(self.depth_texture.imageView)
+        .setImageLayout(IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        .setStoreOp(ATTACHMENT_STORE_OP_STORE)
+        .setLoadOp(ATTACHMENT_LOAD_OP_CLEAR)
+        .setClearValue({
+        .depthStencil = { 1.0f, 0 }
+    }));
 
-        CommandBuffer command_buffer = self.command_buffers[next_image];
-        vk::resetCommandBuffer(command_buffer, (vk::CommandBufferResetFlags)0)!;
-        vk::beginCommandBuffer(command_buffer, &&vk::commandBufferBeginInfo())!;
+    CommandBuffer command_buffer = self.command_buffers[next_image];
+    vk::resetCommandBuffer(command_buffer, (vk::CommandBufferResetFlags)0)!;
+    vk::beginCommandBuffer(command_buffer, &&vk::commandBufferBeginInfo())!;
 
-        ImageMemoryBarrier image_memory_start = vk::imageMemoryBarrier()
-        .setDstAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
-        .setOldLayout(IMAGE_LAYOUT_UNDEFINED)
-        .setNewLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-        .setImage(self.swapchain_images[next_image])
-        .setSubresourceRange({
-            .aspectMask = IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        });
+    ImageMemoryBarrier image_memory_start = vk::imageMemoryBarrier()
+    .setDstAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+    .setOldLayout(IMAGE_LAYOUT_UNDEFINED)
+    .setNewLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    .setImage(self.swapchain_images[next_image])
+    .setSubresourceRange({
+        .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    });
 
-        vk::cmdPipelineBarrier(
-            command_buffer,
-            PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            (DependencyFlags)0,
-            0,
-            null,
-            0,
-            null,
-            1,
-            &image_memory_start
-        );
+    vk::cmdPipelineBarrier(
+        command_buffer,
+        PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        (DependencyFlags)0,
+        0,
+        null,
+        0,
+        null,
+        1,
+        &image_memory_start
+    );
 
-        vk::cmdBeginRenderingKHR(command_buffer, &rendering_info);
+    vk::cmdBeginRenderingKHR(command_buffer, &rendering_info);
 
-        vk::Viewport viewport = { .width = self.window_size.x, .height = self.window_size.y, .minDepth = 0.0, .maxDepth = 1.0, .y = 0, .x = 0 };
-        vk::Rect2D scissor = { .extent = self.extent, .offset = { .x = 0, .y = 0 }};
-        vk::cmdSetViewport(command_buffer, 0, 1, &viewport);
-        vk::cmdSetScissor(command_buffer, 0, 1, &scissor);
+    vk::Viewport viewport = { .width = self.window_size.x, .height = self.window_size.y, .minDepth = 0.0, .maxDepth = 1.0, .y = 0, .x = 0 };
+    vk::Rect2D scissor = { .extent = self.extent, .offset = { .x = 0, .y = 0 }};
+    vk::cmdSetViewport(command_buffer, 0, 1, &viewport);
+    vk::cmdSetScissor(command_buffer, 0, 1, &scissor);
 
-        vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
+    vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
 
-        DescriptorBufferInfo[1] uniform_info = {
-            { .buffer = self.uniform_buffer.buffer, .offset = 0, .range = ShaderUniforms::size },
-        };
-        WriteDescriptorSet[2] descriptor_writes = {
-            vk::writeDescriptorSet()
-            .setDescriptorType(DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setDstBinding(0)
-            .setBufferInfo(uniform_info[..]),
-            vk::writeDescriptorSet()
-            .setDstBinding(1)
-            .setDescriptorType(DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .setImageInfo(self.textures.array_view()),
-        };
-        vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
+    DescriptorBufferInfo[1] uniform_info = {
+        { .buffer = self.uniform_buffer.buffer, .offset = 0, .range = ShaderUniforms::size },
+    };
+    WriteDescriptorSet[2] descriptor_writes = {
+        vk::writeDescriptorSet()
+        .setDescriptorType(DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setDstBinding(0)
+        .setBufferInfo(uniform_info[..]),
+        vk::writeDescriptorSet()
+        .setDstBinding(1)
+        .setDescriptorType(DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setImageInfo(self.textures.array_view()),
+    };
+    vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
 
-        @body((FrameInput){
-            .mouse_x_delta = dx,
-            .mouse_y_delta = dy,
-            .mouse = ui.input.mouse,
-            .dt = dt,
-            .events = event_map,
-        });
-        ui.flush();
+    ui.flush();
 
-        // Re-upload only what changed since the last frame, growing the
-        // buffers to whatever the UI actually produced.
-        sz draw_count = canvas.drawings.len();
+    // Re-upload only what changed since the last frame, growing the
+    // buffers to whatever the UI actually produced.
+    sz draw_count = canvas.drawings.len();
 
-        if (canvas.drawings_dirty) {
-            if (draw_count > 0) {
-                self.ensure_buffer_capacity(&self.canvas_buffer, Drawing::size * draw_count)!;
-                self.canvas_buffer.upload(canvas.drawings.entries, Drawing::size * draw_count);
-            }
-            canvas.drawings_dirty = false;
+    if (canvas.drawings_dirty) {
+        if (draw_count > 0) {
+            self.ensure_buffer_capacity(&self.canvas_buffer, Drawing::size * draw_count)!;
+            self.canvas_buffer.upload(canvas.drawings.entries, Drawing::size * draw_count);
         }
+        canvas.drawings_dirty = false;
+    }
 
-        if (canvas.transforms_dirty) {
-            sz transform_count = canvas.transforms.len();
-            if (transform_count > 0) {
-                self.ensure_buffer_capacity(&self.transform_buffer, Matrix4f::size * transform_count)!;
-                self.transform_buffer.upload(canvas.transforms.entries, Matrix4f::size * transform_count);
-            }
-            canvas.transforms_dirty = false;
+    if (canvas.transforms_dirty) {
+        sz transform_count = canvas.transforms.len();
+        if (transform_count > 0) {
+            self.ensure_buffer_capacity(&self.transform_buffer, Matrix4f::size * transform_count)!;
+            self.transform_buffer.upload(canvas.transforms.entries, Matrix4f::size * transform_count);
         }
+        canvas.transforms_dirty = false;
+    }
 
-        ShaderPushConstants constant_data = {
-            .drawings = self.canvas_buffer.address,
-            .transforms = self.transform_buffer.address,
-        };
-        vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
+    ShaderPushConstants constant_data = {
+        .drawings = self.canvas_buffer.address,
+        .transforms = self.transform_buffer.address,
+    };
+    vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
 
-        // The whole canvas in one instanced draw; the vertex shader indexes
-        // drawings by SV_InstanceID.
-        if (draw_count > 0) vk::cmdDraw(command_buffer, 6, (uint)draw_count, 0, 0);
+    // The whole canvas in one instanced draw; the vertex shader indexes
+    // drawings by SV_InstanceID.
+    if (draw_count > 0) vk::cmdDraw(command_buffer, 6, (uint)draw_count, 0, 0);
 
-        vk::cmdEndRenderingKHR(command_buffer);
+    vk::cmdEndRenderingKHR(command_buffer);
 
-        ImageMemoryBarrier image_memory_end = vk::imageMemoryBarrier()
-        .setSrcAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
-        .setOldLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-        .setNewLayout(IMAGE_LAYOUT_PRESENT_SRC_KHR)
-        .setImage(self.swapchain_images[next_image])
-        .setSubresourceRange({
-            .aspectMask = IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        });
+    ImageMemoryBarrier image_memory_end = vk::imageMemoryBarrier()
+    .setSrcAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+    .setOldLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    .setNewLayout(IMAGE_LAYOUT_PRESENT_SRC_KHR)
+    .setImage(self.swapchain_images[next_image])
+    .setSubresourceRange({
+        .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    });
 
-        vk::cmdPipelineBarrier(
-            command_buffer,
-            PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            (DependencyFlags)0,
-            0,
-            null,
-            0,
-            null,
-            1,
-            &image_memory_end
-        );
+    vk::cmdPipelineBarrier(
+        command_buffer,
+        PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        (DependencyFlags)0,
+        0,
+        null,
+        0,
+        null,
+        1,
+        &image_memory_end
+    );
 
-        SubmitInfo submit_info = vk::submitInfo()
-        .setWaitSemaphores({ wait_semaphore })
-        .setCommandBuffers({ command_buffer })
-        .setSignalSemaphores({ signal_semaphore })
-        .setWaitDstStageMask({ PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT });
+    SubmitInfo submit_info = vk::submitInfo()
+    .setWaitSemaphores({ wait_semaphore })
+    .setCommandBuffers({ command_buffer })
+    .setSignalSemaphores({ signal_semaphore })
+    .setWaitDstStageMask({ PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT });
 
-        vk::endCommandBuffer(command_buffer)!;
-        vk::queueSubmit(self.graphics_queue.handle, 1, &submit_info, frame_fence)!;
+    vk::endCommandBuffer(command_buffer)!;
+    vk::queueSubmit(self.graphics_queue.handle, 1, &submit_info, frame_fence)!;
 
-        PresentInfoKHR present_info = vk::presentInfoKHR()
-        .setWaitSemaphores({ signal_semaphore })
-        .setSwapchains({ self.swapchain })
-        .setImageIndices({ next_image });
+    PresentInfoKHR present_info = vk::presentInfoKHR()
+    .setWaitSemaphores({ signal_semaphore })
+    .setSwapchains({ self.swapchain })
+    .setImageIndices({ next_image });
 
-        vk::queuePresentKHR(self.graphics_queue.handle, &present_info)!;
+    vk::queuePresentKHR(self.graphics_queue.handle, &present_info)!;
 
-        self.frame = (self.frame + 1) % 2;
-
-        // Decide whether to sleep before the next frame: only in ON_DEMAND mode,
-        // and only if nothing this frame scheduled another. A live animation
-        // keeps re-scheduling (set_transform / request_paint each frame), so it
-        // never sleeps mid-animation — it settles first, then blocks for input.
-        wait_for_events = self.loop_mode == LoopMode.ON_DEMAND && !ui.frame_requested;
-	}
+    self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
+    return true;
 }

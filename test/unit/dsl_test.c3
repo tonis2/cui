@@ -143,6 +143,56 @@ fn void subtree_in_composite_build() @test
 	cui_tests::eq_vec2(pair.children[0].children[1].absolute, {0, 24});
 }
 
+// The free @node's extra arguments are widgets auto-wrapped as leaf children —
+// a one-call row-of-leaves that lays out exactly like its @tree-body equal.
+fn void node_varargs_attach_leaves() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* column;
+	@canvas(ui)
+	{
+		@tree((Stack){})
+		{
+			column = @node(
+				(Column){ .gap = 10.0 },
+					(Rectangle){ .size = {100, 40} },
+					(Rectangle){ .size = {80, 10} },
+					(Rectangle){ .size = {80, 10} }
+				);
+		};
+	};
+	ui.flush();
+
+	test::eq(column.children.len(), 3);
+	cui_tests::eq_vec2(column.children[0].absolute, {0, 0});
+	cui_tests::eq_vec2(column.children[1].absolute, {0, 50}); // 40 + gap 10
+	cui_tests::eq_vec2(column.children[2].absolute, {0, 70});
+	cui_tests::eq_vec2(column.size, {100, 80});
+}
+
+// Varargs also work on the body's top-level node, mix values with borrowed
+// pointers, and the parent handle still chains.
+fn void node_varargs_as_root() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Rectangle borrowed = { .size = {30, 30} };
+	Element* stack;
+	@canvas(ui)
+	{
+		stack = @node((Stack){}, (Rectangle){ .size = {10, 10} }, &borrowed).with_id("panel");
+	};
+	ui.flush();
+
+	test::eq(ui.root == stack, true);
+	test::eq(stack.children.len(), 2);
+	test::eq(ui.find_id("panel")!! == stack, true);
+	test::eq(stack.children[1].widget_as(Rectangle) == &borrowed, true); // borrowed, not copied
+}
+
 // Scope bookkeeping unwinds completely, and a detached ui.@node made inside a
 // body stays detached — the DSL only attaches its own nodes.
 fn void scope_state_unwinds() @test

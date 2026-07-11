@@ -410,9 +410,10 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 // All four macros are @builtin, so app code calls them without the cui::
 // prefix. Rules:
 //   - @tree/@node only work inside a @canvas/@subtree body (asserted).
-//   - The free @node takes no child arguments: children come from the
-//     enclosing body. Never pass a @tree/@node result to ui.@node's varargs —
-//     it is already attached. ui.@node remains the detached form.
+//   - The free @node's extra arguments are leaf WIDGETS attached as its
+//     children (see the macro below) — never Element*. And never pass a
+//     @tree/@node result to ui.@node's varargs: it is already attached.
+//     ui.@node remains the detached form.
 //   - A `return` inside a body exits the surrounding function (like @pool);
 //     the scope state unwinds correctly, but no root gets installed.
 
@@ -482,12 +483,31 @@ macro Element* @tree(widget; @body()) @builtin
 }
 
 // Leaf node: attaches to the enclosing scope (or becomes the body's root).
-macro Element* @node(widget) @builtin
+// Extra arguments are leaf WIDGETS (values or borrowed pointers, like the
+// first) attached as children in order — a one-call subtree for the common
+// row-of-leaves shape, without a @tree body:
+//
+//   @node((Row){ .gap = 16.0 },
+//       (Button){ .on_click = &reset },
+//       (Button){ .on_click = &bump });
+//
+// Unlike ui.@node's varargs these never take Element* — an already-attached
+// node passed here would attach twice, and the compiler rejects it (Element*
+// is not a Widget). Children needing statements — loops, locals, chained
+// set_offset, nesting — use a @tree body instead.
+macro Element* @node(widget, ...) @builtin
 {
 	Ui* scope_ui = ambient_ui;
 	assert(scope_ui, "@node outside a @canvas/@subtree body");
 	Element* elem = scope_ui.@node(widget);
 	scope_ui.attach_scoped(elem);
+	$for var $i = 0; $i < $vaarg.len; $i++:
+	{
+		Element* child = scope_ui.@node($vaarg[$i]);
+		child.parent = elem;
+		elem.children.push(child);
+	}
+	$endfor
 	return elem;
 }
 

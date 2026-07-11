@@ -29,12 +29,14 @@ struct ShaderUniforms
 	Vec2 resolution; // window size in pixels; drawings are in pixels
 }
 
-// Push constant block, 16 bytes, visible to vertex + fragment stages: buffer
-// device addresses of the Drawing array and the transform palette. Both
-// buffers need BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT. The palette is read as
-// raw float4s (4 per matrix), so Matrix4f data is uploaded as-is, untransposed.
+// Push constant block, 24 bytes, visible to vertex + fragment stages: buffer
+// device addresses of the Drawing array, the transform palette and the clip
+// list. All three buffers need BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT. The
+// palette is read as raw float4s (4 per matrix), so Matrix4f data is uploaded
+// as-is, untransposed; clips are read the same way (2 float4s per ClipEntry).
 struct ShaderPushConstants
 {
 	ulong drawings; // VkDeviceAddress of Drawing[canvas.drawings.len()]
 	ulong transforms; // VkDeviceAddress of Matrix4f[canvas.transforms.len()]
+	ulong clips; // VkDeviceAddress of ClipEntry[canvas.clips.len()]
 }

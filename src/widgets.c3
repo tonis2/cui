@@ -222,6 +222,148 @@ fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
+// Clip: clips its single child's subtree — including anything the subtree
+// overflows — to its own bounds, optionally rounded. Sizes itself to the
+// child. The clip is resolved per fragment in the shader, so rounded corners
+// get the same antialiasing as shape edges; hit testing is gated by the rect
+// (corners are visual only, like transforms — see input.c3).
+
+struct Clip (Widget)
+{
+	Vec4 radii; // per-corner px {TL, TR, BR, BL}; zero = square
+}
+
+fn Vec2 Clip.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	elem.clips = true;
+	elem.clip_radii = self.radii;
+
+	Vec2 size = { 0, 0 };
+	if (elem.children.len() > 0)
+	{
+		size = elem.layout_child(0, constraints);
+		elem.place_child(0, { 0, 0 });
+	}
+	return cui::clamp_size(size, constraints);
+}
+
+// ---------------------------------------------------------------------------
+// Scroll: a clipped viewport over one child laid out with unbounded height.
+// Vertical only — the platform wheel reports a single vertical delta. Takes
+// exactly ONE @node child (the content); children[1] is an internal
+// scrollbar-indicator overlay mounted on first layout, so don't append to a
+// Scroll. Wheel events over the viewport move the content; at either end the
+// event is left unconsumed so an enclosing Scroll can take over.
+
+const float SCROLL_STEP_DEFAULT = 40.0; // px per wheel unit
+const float THUMB_WIDTH = 6.0;
+const float THUMB_MARGIN = 2.0;
+const float THUMB_MIN = 24.0;
+const Color THUMB_COLOR_DEFAULT = { 1.0, 1.0, 1.0, 0.35 };
+
+struct Scroll (Widget)
+{
+	Vec2 size; // per axis: 0 = fill the available space
+	float scroll_offset; // px scrolled down, clamped to [0, content - viewport];
+	// settable in the literal for an initial position
+	float step; // px per wheel unit; 0 = SCROLL_STEP_DEFAULT
+	Vec4 radii; // viewport corner radii (rounded clipping)
+	Color thumb_color; // zero alpha = THUMB_COLOR_DEFAULT
+	float content_extent; // content height, remembered by layout for on_mouse
+}
+
+// The indicator: a pill at the viewport's right edge, sized and placed by the
+// owning Scroll. Non-interactive — it shows scroll position, it doesn't take
+// drags.
+struct ScrollThumb (Widget)
+{
+	Color color;
+	bool visible;
+}
+
+fn void ScrollThumb.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	if (!self.visible) return;
+	float r = elem.size.x * 0.5f;
+	painter.rect({ 0, 0 }, elem.size, { .color = self.color, .border_radius = { r, r, r, r } });
+}
+
+fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	// Mount the thumb overlay once, AFTER the content child so it emits (and
+	// paints) on top. Deliberately not Ui.mount / Element.append: those call
+	// request_layout, which from inside the layout pass would re-dirty this
+	// element after layout_element cleared it. Pushed directly and laid out
+	// below in this same call instead.
+	if (elem.children.len() == 1)
+	{
+		Color color = ((Vec4)self.thumb_color).w > 0 ? self.thumb_color : THUMB_COLOR_DEFAULT;
+		Element* thumb = elem.ui.@node((ScrollThumb){ .color = color });
+		thumb.parent = elem;
+		elem.children.push(thumb);
+	}
+
+	Vec2 viewport = {
+		self.size.x > 0 ? self.size.x : constraints.max.x,
+		self.size.y > 0 ? self.size.y : constraints.max.y,
+	};
+	viewport = cui::clamp_size(viewport, constraints);
+
+	Vec2 content = elem.layout_child(0, { .min = { 0, 0 }, .max = { viewport.x, cui::UNBOUNDED } });
+	self.content_extent = content.y;
+
+	float max_scroll = math::max(content.y - viewport.y, 0.0f);
+	self.scroll_offset = math::clamp(self.scroll_offset, 0.0f, max_scroll);
+	elem.place_child(0, { 0, -self.scroll_offset });
+
+	elem.clips = true;
+	elem.clip_radii = self.radii;
+
+	// Thumb: proportional length, shown only on overflow.
+	ScrollThumb* thumb = elem.children[1].widget_as(ScrollThumb);
+	bool show = max_scroll > 0;
+	if (thumb.visible != show)
+	{
+		thumb.visible = show;
+		elem.children[1].request_paint(); // safe: the paint pass runs after layout
+	}
+	float track = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
+	float len = show ? math::clamp(track * (viewport.y / content.y), THUMB_MIN, track) : 0;
+	Vec2 thumb_size = { show ? THUMB_WIDTH : 0, len };
+	elem.layout_child(1, { .min = thumb_size, .max = thumb_size });
+	self.place_thumb(elem, viewport, max_scroll);
+	return viewport;
+}
+
+// Thumb position from scroll_offset; shared by layout and the wheel handler
+// (which rides the same cheap re-emit as the content's set_offset).
+fn void Scroll.place_thumb(&self, Element* elem, Vec2 viewport, float max_scroll)
+{
+	Element* thumb = elem.children[1];
+	float track = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
+	float travel = math::max(track - thumb.size.y, 0.0f);
+	float y = THUMB_MARGIN + (max_scroll > 0 ? travel * (self.scroll_offset / max_scroll) : 0);
+	thumb.offset = { viewport.x - THUMB_WIDTH - THUMB_MARGIN, y };
+}
+
+fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (event.kind != MouseEventKind.SCROLL) return false;
+	float max_scroll = math::max(self.content_extent - elem.size.y, 0.0f);
+	if (max_scroll <= 0) return false;
+
+	// Wheel up (positive) moves the content down: offset shrinks.
+	float step = self.step > 0 ? self.step : SCROLL_STEP_DEFAULT;
+	float target = math::clamp(self.scroll_offset - event.scroll * step, 0.0f, max_scroll);
+	if (target == self.scroll_offset) return false; // at a limit: let ancestors scroll
+
+	self.scroll_offset = target;
+	elem.children[0].set_offset({ 0, -target }); // offset write + re-emit, no relayout
+	self.place_thumb(elem, elem.size, max_scroll);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Button: a clickable rect with hover and press styles. on_click receives the
 // Ui the button is rendered in — the framework passes the button's own
 // element's ui automatically, so the callback carries no app-threaded context

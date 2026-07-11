@@ -41,6 +41,7 @@ enum LoopMode
 // the next power of two (see ensure_buffer_capacity).
 const INITIAL_DRAWINGS = 64;
 const INITIAL_TRANSFORMS = 16;
+const INITIAL_CLIPS = 16;
 
 struct Renderer {
 	Camera camera;
@@ -61,6 +62,7 @@ struct Renderer {
 
 	vk::Memory canvas_buffer;
 	vk::Memory transform_buffer;
+	vk::Memory clip_buffer;
 	vk::Memory uniform_buffer;
 
 	vk::MemoryAllocator allocator;
@@ -301,8 +303,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         data_size: ShaderUniforms::size,
     )!;
 
-    // Retained display list + transform palette; re-uploaded only when the
-    // widget layer marks them dirty.
+    // Retained display list + transform palette + clip list; re-uploaded only
+    // when the widget layer marks them dirty.
     renderer.canvas_buffer = vk::new_buffer(
         &renderer.allocator,
         usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -317,6 +319,14 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
         data: null,
         data_size: Matrix4f::size * INITIAL_TRANSFORMS,
+    )!;
+
+    renderer.clip_buffer = vk::new_buffer(
+        &renderer.allocator,
+        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+        data: null,
+        data_size: ClipEntry::size * INITIAL_CLIPS,
     )!;
 
     // The descriptor layout and pipeline are built lazily on the first frame
@@ -446,6 +456,7 @@ fn void Renderer.free(&self) {
     self.uniform_buffer.free();
     self.canvas_buffer.free();
     self.transform_buffer.free();
+    self.clip_buffer.free();
     self.textures.free();
     self.allocator.free();
 
@@ -708,9 +719,19 @@ fn bool? Renderer.frame(&self, Ui* ui)
         canvas.transforms_dirty = false;
     }
 
+    if (canvas.clips_dirty) {
+        sz clip_count = canvas.clips.len();
+        if (clip_count > 0) {
+            self.ensure_buffer_capacity(&self.clip_buffer, ClipEntry::size * clip_count)!;
+            self.clip_buffer.upload(canvas.clips.entries, ClipEntry::size * clip_count);
+        }
+        canvas.clips_dirty = false;
+    }
+
     ShaderPushConstants constant_data = {
         .drawings = self.canvas_buffer.address,
         .transforms = self.transform_buffer.address,
+        .clips = self.clip_buffer.address,
     };
     vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
 

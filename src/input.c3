@@ -349,7 +349,9 @@ fn void Ui.dispatch_key(&self, KeyEvent event)
 
 // Deepest element whose rect contains the point, in reverse paint order so
 // visually-topmost wins. Uses the absolute origins stored by the last emit;
-// transform-palette matrices (set_transform) are NOT applied to hit tests.
+// transform-palette matrices (set_transform) are NOT applied to hit tests, and
+// a clipping element gates by its rect only — a point in a clipped-away
+// rounded corner still hits (the same class of simplification).
 fn Element* Ui.hit_test(&self, Vec2 point)
 {
 	if (self.root == null) return null;
@@ -358,12 +360,21 @@ fn Element* Ui.hit_test(&self, Vec2 point)
 
 fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 {
+	Vec2 local = point - element.absolute;
+	if (element.clips)
+	{
+		// Outside the clip nothing is visible, so nothing is hittable — not
+		// even children whose own rects contain the point.
+		if (local.x < 0 || local.y < 0 || local.x >= element.size.x || local.y >= element.size.y)
+		{
+			return null;
+		}
+	}
 	foreach_r (child : element.children)
 	{
 		Element* hit = self.hit_test_element(child, point);
 		if (hit) return hit;
 	}
-	Vec2 local = point - element.absolute;
 	if (local.x >= 0 && local.y >= 0 && local.x < element.size.x && local.y < element.size.y)
 	{
 		return element;

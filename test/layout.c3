@@ -312,10 +312,11 @@ fn void main(String[] args)
 		)
 	);
 
-	renderer.@on_frame(ui ; FrameInput input)
+	// frame() polls input, dispatches to widgets, flushes and presents; the
+	// loop body runs between frames. ui.input is the queryable context —
+	// e.g. text typed during the frame just processed:
+	while (renderer.frame(ui)!!)
 	{
-		// Input dispatch and ui.flush() run in the renderer around this body.
-		// ui.input is the queryable context — e.g. text typed this frame:
 		if (ui.input.text.len > 0) io::printfn("[layout] typed: %s", ui.input.text);
-	}!!;
+	}
 }

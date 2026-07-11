@@ -6,7 +6,8 @@ import std::io;
 // @canvas(ui) block — @tree nests a container, @node adds a leaf, and the
 // nesting of the code is the nesting of the tree. Widgets passed as struct
 // literals are copied and owned by their element — no widget variables to
-// keep alive. The shelf tiles show a plain loop inside a @tree body.
+// keep alive. The shelf tiles show a plain loop inside a @tree body; the
+// button row shows leaf widgets riding as @node varargs instead of a body.
 // 
 // Compare with main.c3, which keeps app-owned widget structs (mount with a
 // pointer) so it can mutate them and animate their elements every frame.
@@ -246,7 +247,6 @@ fn void main(String[] args)
 					teal_card.cursor = Cursor.POINTING_HAND;
 
 					@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 });
-
 					@node(
 						(Rectangle) {
 							.size = { 260.0, 270.0 },
@@ -277,37 +277,32 @@ fn void main(String[] args)
 				};
 
 				// Three unlabeled buttons (no text rendering yet): reset, +10%
-				// and recolor.
-				@tree((Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER })
-				{
-					@node(
-						(Button) {
-							.size = { 130.0, 40.0 },
-							.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.on_click = &reset_dial,
-						}
-					);
-					@node(
-						(Button) {
-							.size = { 130.0, 40.0 },
-							.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.on_click = &bump_dial,
-						}
-					);
-					@node(
-						(Button) {
-							.size = { 130.0, 40.0 },
-							.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-							.on_click = &recolor_card,
-						}
-					);
-				};
+				// and recolor. All plain leaf literals, so they ride as @node
+				// varargs — no @tree body needed.
+				@node(
+					(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER },
+					(Button) {
+						.size = { 130.0, 40.0 },
+						.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.on_click = &reset_dial,
+					},
+					(Button) {
+						.size = { 130.0, 40.0 },
+						.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.on_click = &bump_dial,
+					},
+					(Button) {
+						.size = { 130.0, 40.0 },
+						.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.on_click = &recolor_card,
+					}
+				);
 			};
 		};
 	};

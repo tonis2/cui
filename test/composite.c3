@@ -56,39 +56,39 @@ fn Element* StatCard.build(&self, Element* elem) @dynamic
 			{
 				@tree((Column) { .gap = 14.0 })
 				{
-					// Header: an accent chip + a placeholder title bar (no text yet).
-					@tree((Row) { .size = { BAR_W, 18.0 }, .gap = 10.0, .cross_align = CENTER })
-					{
-						@node(
-							(Rectangle) {
-								.size = { 18.0, 18.0 },
-								.style = { .color = self.accent, .border_radius = { 6.0, 6.0, 6.0, 6.0 } },
-							}
-						);
-						@node(
-							(Rectangle) {
-								.size = { BAR_W - 28.0, 9.0 },
-								.style = { .color = { 0.42, 0.45, 0.52, 1.0 }, .border_radius = { 4.0, 4.0, 4.0, 4.0 } },
-							}
-						);
-					};
+					// Header: an accent chip + a placeholder title bar (no text
+					// yet). Leaf-only rows skip the @tree body: the leaves ride
+					// as @node varargs.
+					@node(
+						(Row) { .size = { BAR_W, 18.0 }, .gap = 10.0, .cross_align = CENTER },
+						(Rectangle) {
+							.size = { 18.0, 18.0 },
+							.style = { .color = self.accent, .border_radius = { 6.0, 6.0, 6.0, 6.0 } },
+						},
+						(Rectangle) {
+							.size = { BAR_W - 28.0, 9.0 },
+							.style = {
+								.color = { 0.42, 0.45, 0.52, 1.0 },
+								.border_radius = { 4.0, 4.0, 4.0, 4.0 }
+							},
+						}
+					);
 					// Progress bar: a fill and a remainder rect side by side,
 					// summing to BAR_W. self.value sets where they meet.
-					@tree((Row) { .size = { BAR_W, 12.0 } })
-					{
-						@node(
-							(Rectangle) {
-								.size = { fill, 12.0 },
-								.style = { .color = self.accent, .border_radius = { 6.0, 0.0, 0.0, 6.0 } },
-							}
-						);
-						@node(
-							(Rectangle) {
-								.size = { BAR_W - fill, 12.0 },
-								.style = { .color = { 0.24, 0.26, 0.32, 1.0 }, .border_radius = { 0.0, 6.0, 6.0, 0.0 } },
-							}
-						);
-					};
+					@node(
+						(Row) { .size = { BAR_W, 12.0 } },
+						(Rectangle) {
+							.size = { fill, 12.0 },
+							.style = { .color = self.accent, .border_radius = { 6.0, 0.0, 0.0, 6.0 } },
+						},
+						(Rectangle) {
+							.size = { BAR_W - fill, 12.0 },
+							.style = {
+								.color = { 0.24, 0.26, 0.32, 1.0 },
+								.border_radius = { 0.0, 6.0, 6.0, 0.0 }
+							},
+						}
+					);
 				};
 			};
 		};
@@ -153,5 +153,7 @@ fn void main(String[] args)
 	// there is no per-frame code — frame() polls input, dispatches to the
 	// widgets, flushes and presents (and, in ON_DEMAND mode, sleeps until
 	// input when nothing scheduled a frame).
-	while (renderer.frame(ui)!!) { }
+	while (renderer.frame(ui)!!)
+	{
+	}
 }

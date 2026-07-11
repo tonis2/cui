@@ -40,27 +40,53 @@ struct Drawing {
                             //   ARC          {radius, start, sweep, -}
     Vec4 color;
     Vec4 border_color;
+
+    uint clip_id;           // index into Canvas.clips, assigned by emit; 0 = unclipped
+    uint reserved0;         // pad to a full group of four (see the layout rule above)
+    uint reserved1;
+    uint reserved2;
 }
 
-// Everything the renderer consumes per frame: the retained display list and
-// the transform palette. Slot 0 of the palette is always identity; elements
-// without their own transform inherit whatever slot their ancestor uses.
+// One clip region, in absolute PRE-transform UI pixels: the fragment shader
+// compares the UI-space position a drawing was emitted at, so a clip travels
+// with any palette transform applied on top (Flutter-consistent) instead of
+// staying screen-fixed. Read by the shader as two raw float4s per entry — no
+// matrices, no structs (see the BDA note in shader.slang).
+struct ClipEntry {
+    Vec4 rect;              // {min.x, min.y, max.x, max.y}
+    Vec4 radii;             // per-corner px {TL, TR, BR, BL}
+}
+
+// Slot 0 = "no clip". The shader early-outs on clip_id == 0; the huge rect is
+// belt and braces.
+const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = {} };
+
+// Everything the renderer consumes per frame: the retained display list, the
+// transform palette and the clip list. Slot 0 of the palette is always
+// identity; elements without their own transform inherit whatever slot their
+// ancestor uses. The clip list is rebuilt on every emit (clip rects depend on
+// absolute origins); slot 0 is always NO_CLIP_ENTRY.
 struct Canvas {
     List{Drawing} drawings;
     List{Matrix4f} transforms;
+    List{ClipEntry} clips;
     bool drawings_dirty;
     bool transforms_dirty;
+    bool clips_dirty;
 }
 
 fn void Canvas.init(&self)
 {
     self.transforms.push(matrix::IDENTITY4);
+    self.clips.push(NO_CLIP_ENTRY);
     self.drawings_dirty = true;
     self.transforms_dirty = true;
+    self.clips_dirty = true;
 }
 
 fn void Canvas.free(&self)
 {
     self.drawings.free();
     self.transforms.free();
+    self.clips.free();
 }

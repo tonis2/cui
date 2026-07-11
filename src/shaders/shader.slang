@@ -1,7 +1,7 @@
 // CUI shader: every UI drawing is one instance of a unit quad, shaped in the
-// fragment stage by an SDF picked via Drawing.kind. Drawings and the transform
-// palette are read through buffer device addresses; one instanced draw call
-// renders the whole canvas.
+// fragment stage by an SDF picked via Drawing.kind. Drawings, the transform
+// palette and the clip list are read through buffer device addresses; one
+// instanced draw call renders the whole canvas.
 //
 // SDF code adapted from
 // https://thebookofshaders.com/edit.php?log=160414041142
@@ -21,6 +21,11 @@ struct Drawing
     float4 params;          // per-kind data, see cui::Drawing
     float4 color;
     float4 border_color;
+
+    uint clip_id;           // index into PushData.clips; 0 = unclipped
+    uint reserved0;
+    uint reserved1;
+    uint reserved2;
 };
 
 // Drawing kinds — must match cui::DrawingKind in canvas.c3.
@@ -42,6 +47,7 @@ struct PushData
 {
     Drawing* drawings;
     float4* transforms;
+    float4* clips;          // 2 float4s per entry: {min.xy, max.xy}, then radii
 };
 [vk_push_constant] const PushData push_constant;
 
@@ -112,6 +118,22 @@ float sd_round_box(float2 p, float2 half_size, float4 radius)
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
+// Clip factor for a fragment: 1 = keep, 0 = clipped, with the same 1px AA
+// band as the shape edges. The position is reconstructed in PRE-transform UI
+// space (corner is absolute after emit), so clips move with palette
+// transforms rather than staying screen-fixed.
+float clip_factor(Drawing item, float2 tex_pos)
+{
+    if (item.clip_id == 0) return 1.0;
+    float4 rect  = push_constant.clips[item.clip_id * 2 + 0];
+    float4 radii = push_constant.clips[item.clip_id * 2 + 1];
+    float2 frag_ui   = item.corner + tex_pos * item.size;
+    float2 center    = (rect.xy + rect.zw) * 0.5;
+    float2 half_size = max((rect.zw - rect.xy) * 0.5, float2(0.0));
+    float d = sd_round_box(frag_ui - center, half_size, radii);
+    return 1.0 - smoothstep(-0.5, 0.5, d);
+}
+
 // Gradient-normalized ellipse approximation (exact for circles).
 float sd_ellipse(float2 p, float2 r)
 {
@@ -176,6 +198,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         float blur = max(item.border_width, 0.5);
         float4 shadow = item.color;
         shadow.a *= 1.0 - smoothstep(-blur, blur, sd_round_box(p, half_size - blur, item.params));
+        shadow.a *= clip_factor(item, input.tex_pos);
         return shadow;
     }
     default: // KIND_RECT
@@ -192,5 +215,6 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         color = lerp(fill, item.border_color, smoothstep(-border - 0.5, -border + 0.5, dist));
     }
     color.a *= 1.0 - smoothstep(-0.5, 0.5, dist);
+    color.a *= clip_factor(item, input.tex_pos);
     return color;
 }

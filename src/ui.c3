@@ -25,6 +25,12 @@ import std::math;
 // Sentinel: element has no palette slot and inherits its ancestor's.
 const uint NO_TRANSFORM = 0xFFFF_FFFF;
 
+// "Unbounded" constraint for scrollable axes. Deliberately finite: float.inf
+// would turn a fill-to-max widget (a Stack with size 0) into an infinite
+// element and NaNs downstream; 1e9 keeps the arithmetic sane. Fill-parent
+// widgets must not be unbounded-axis children of a Scroll.
+const float UNBOUNDED = 1e9;
+
 struct Constraints
 {
 	Vec2 min;
@@ -127,6 +133,14 @@ struct Element
 	sz drawing_count;
 
 	uint transform_slot;
+
+	// Clipping: when set (widgets set it from layout(), like cursor), emit
+	// clips this element's own drawings and its whole subtree to the element's
+	// rect, rounded by clip_radii {TL, TR, BR, BL}. Nested clips intersect
+	// (axis-aligned; the inner radii win — a documented approximation). Hit
+	// testing is gated by the same rect.
+	bool clips;
+	Vec4 clip_radii;
 
 	bool owns_widget; // widget is a heap copy made by @node; freed on release
 	DirtyFlags dirty;
@@ -611,8 +625,13 @@ fn void Ui.flush(&self)
 	if (self.paint_pending)
 	{
 		self.canvas.drawings.clear();
-		self.emit(self.root, { 0, 0 }, 0);
+		// Clip rects depend on absolute origins, so the clip list is rebuilt
+		// alongside the drawings; slot 0 is always "no clip".
+		self.canvas.clips.clear();
+		self.canvas.clips.push(NO_CLIP_ENTRY);
+		self.emit(self.root, { 0, 0 }, 0, 0);
 		self.canvas.drawings_dirty = true;
+		self.canvas.clips_dirty = true;
 		self.paint_pending = false;
 	}
 }
@@ -695,11 +714,32 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 	return size;
 }
 
-fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot)
+fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint inherited_clip)
 {
 	Vec2 absolute = origin + element.offset;
 	element.absolute = absolute; // hit testing reads this
 	uint slot = element.transform_slot != NO_TRANSFORM ? element.transform_slot : inherited_slot;
+
+	// A clipping element pushes its rect (intersected with the inherited clip)
+	// and the whole subtree stamps the new slot. An empty intersection
+	// degenerates to a zero-area rect: fully clipped.
+	uint clip = inherited_clip;
+	if (element.clips)
+	{
+		Vec4 rect = { absolute.x, absolute.y, absolute.x + element.size.x, absolute.y + element.size.y };
+		if (inherited_clip != 0)
+		{
+			Vec4 parent = self.canvas.clips[inherited_clip].rect;
+			rect = {
+				math::max(rect.x, parent.x), math::max(rect.y, parent.y),
+				math::min(rect.z, parent.z), math::min(rect.w, parent.w),
+			};
+			if (rect.z < rect.x) rect.z = rect.x;
+			if (rect.w < rect.y) rect.w = rect.y;
+		}
+		self.canvas.clips.push({ .rect = rect, .radii = element.clip_radii });
+		clip = (uint)self.canvas.clips.len() - 1;
+	}
 
 	if (element.dirty.paint)
 	{
@@ -717,11 +757,12 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot)
 	{
 		drawing.corner += absolute;
 		drawing.transform_id = slot;
+		drawing.clip_id = clip;
 		self.canvas.drawings.push(drawing);
 	}
 	element.drawing_count = self.canvas.drawings.len() - element.first_drawing;
 
-	foreach (child : element.children) self.emit(child, absolute, slot);
+	foreach (child : element.children) self.emit(child, absolute, slot, clip);
 }
 
 fn bool vec2_eq(Vec2 a, Vec2 b) => a.x == b.x && a.y == b.y;

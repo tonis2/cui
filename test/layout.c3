@@ -2,10 +2,11 @@ import cui;
 import std::math;
 import std::io;
 
-// Layout-widget example, built declaratively: the whole tree is described in
-// one ui.build(...) expression, Flutter-style. Widgets passed to @node as
-// struct literals are copied and owned by their element — no widget variables
-// to keep alive. The shelf tiles show dynamic building with Element.append.
+// Layout-widget example, built declaratively: the whole tree is one
+// @canvas(ui) block — @tree nests a container, @node adds a leaf, and the
+// nesting of the code is the nesting of the tree. Widgets passed as struct
+// literals are copied and owned by their element — no widget variables to
+// keep alive. The shelf tiles show a plain loop inside a @tree body.
 // 
 // Compare with main.c3, which keeps app-owned widget structs (mount with a
 // pointer) so it can mutate them and animate their elements every frame.
@@ -203,13 +204,6 @@ fn void main(String[] args)
 	Ui* ui = cui::new_ui(window_size);
 	defer ui.free();
 
-	// A shelf of small tiles: centered as a group, bottoms lined up by
-	// CrossAlign.END inside the row's fixed height. Built in a loop and
-	// appended, since the tiles only differ by data.
-	Element* shelf = ui.@node(
-		(Row) { .size = { content_width, 130.0 }, .gap = 16.0, .main_align = CENTER, .cross_align = END, }
-	);
-
 	TileSpec[4] tiles = {
 		{ 60.0, { 0.50, 0.50, 0.55, 1.0 } },
 		{ 130.0, { 0.65, 0.60, 0.30, 1.0 } },
@@ -217,84 +211,43 @@ fn void main(String[] args)
 		{ 110.0, { 0.60, 0.35, 0.40, 1.0 } },
 	};
 
-	foreach (tile : tiles)
-	{
-		shelf.append(
-			ui.@node(
-				(Rectangle) {
-					.size = { 90.0, tile.height },
-					.style = { .color = tile.color, .border_radius = { 8.0, 8.0, 8.0, 8.0 } },
-				}
-			)
-		);
-	}
-
-	// Element.cursor gives any element a pointer shape declaratively — no
-	// widget code involved.
-	// .with_id names this node so a button callback can reach this exact
-	// rectangle among the many in the tree — get_widget(Rectangle) would return
-	// the header, the first one. The id chains onto the @node expression.
-	Element* teal_card = ui.@node(
-		(Rectangle) {
-			.size = { 260.0, 240.0 },
-			.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
-		}
-	).with_id("teal");
-
-	teal_card.cursor = Cursor.POINTING_HAND;
-
-	// Two unlabeled buttons (no text rendering yet): reset and +10%.
-	Element* buttons = ui.@node(
-		(Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER },
-		ui.@node(
-			(Button) {
-				.size = { 130.0, 40.0 },
-				.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.on_click = &reset_dial,
-			}
-		),
-		ui.@node(
-			(Button) {
-				.size = { 130.0, 40.0 },
-				.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.on_click = &bump_dial,
-			}
-		),
-		ui.@node(
-			(Button) {
-				.size = { 130.0, 40.0 },
-				.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-				.on_click = &recolor_card,
-			}
-		)
-	);
-
 	// Root: 24px of padding around a column that fills the window and centers
 	// its content: a full-width textured header, two cards and the custom
 	// Dial spread across the width by SPACE_BETWEEN, the shelf, and the
 	// button row.
-	ui.build(
-		ui.@node(
-			(Padding) { .insets = widgets::insets_all(24.0) },
-			ui.@node(
-				(Column) { .gap = 24.0, .main_align = CENTER, .cross_align = CENTER, },
-				ui.@node(
+	@canvas(ui)
+	{
+		@tree((Padding) { .insets = widgets::insets_all(24.0) })
+		{
+			@tree((Column) { .gap = 24.0, .main_align = CENTER, .cross_align = CENTER, })
+			{
+				// The full-width textured header.
+				@node(
 					(Rectangle) {
 						.size = { content_width, 96.0 },
 						.style = { .texture = header_image, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
 					}
-				),
-				ui.@node(
-					(Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN },
-					teal_card,
-					ui.@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 }),
-					ui.@node(
+				);
+
+				@tree((Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN })
+				{
+					// Element.cursor gives any element a pointer shape
+					// declaratively — no widget code involved.
+					// .with_id names this node so a button callback can reach
+					// this exact rectangle among the many in the tree —
+					// get_widget(Rectangle) would return the header, the first
+					// one. The id chains onto the @node expression.
+					Element* teal_card = @node(
+						(Rectangle) {
+							.size = { 260.0, 240.0 },
+							.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
+						}
+					).with_id("teal");
+					teal_card.cursor = Cursor.POINTING_HAND;
+
+					@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 });
+
+					@node(
 						(Rectangle) {
 							.size = { 260.0, 270.0 },
 							.style = {
@@ -304,13 +257,60 @@ fn void main(String[] args)
 								.border_color = cui::WHITE
 							},
 						}
-					)
-				),
-				shelf,
-				buttons
-			)
-		)
-	);
+					);
+				};
+
+				// A shelf of small tiles: centered as a group, bottoms lined up
+				// by CrossAlign.END inside the row's fixed height. A plain loop,
+				// since the tiles only differ by data.
+				@tree((Row) { .size = { content_width, 130.0 }, .gap = 16.0, .main_align = CENTER, .cross_align = END, })
+				{
+					foreach (tile : tiles)
+					{
+						@node(
+							(Rectangle) {
+								.size = { 90.0, tile.height },
+								.style = { .color = tile.color, .border_radius = { 8.0, 8.0, 8.0, 8.0 } },
+							}
+						);
+					}
+				};
+
+				// Three unlabeled buttons (no text rendering yet): reset, +10%
+				// and recolor.
+				@tree((Row) { .size = { content_width, 0 }, .gap = 16.0, .main_align = CENTER })
+				{
+					@node(
+						(Button) {
+							.size = { 130.0, 40.0 },
+							.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.on_click = &reset_dial,
+						}
+					);
+					@node(
+						(Button) {
+							.size = { 130.0, 40.0 },
+							.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.on_click = &bump_dial,
+						}
+					);
+					@node(
+						(Button) {
+							.size = { 130.0, 40.0 },
+							.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+							.on_click = &recolor_card,
+						}
+					);
+				};
+			};
+		};
+	};
 
 	// frame() polls input, dispatches to widgets, flushes and presents; the
 	// loop body runs between frames. ui.input is the queryable context —

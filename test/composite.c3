@@ -4,7 +4,7 @@ import std::io;
 
 // Composite-widget example: a widget whose look is not painted directly but
 // COMPOSED from already-defined widgets. StatCard implements the Widget
-// interface's build method — return a ui.@node(...) subtree of Stack / Padding
+// interface's build method — return a @subtree(...) of Stack / Padding
 // / Column / Row / Rectangle, and the framework does the rest: it attaches the
 // subtree as the element's child on the first flush and, with no layout method,
 // sizes the card to what the subtree wants. The analog of a Flutter
@@ -34,59 +34,65 @@ struct StatCard (Widget)
 // sizing.
 fn Element* StatCard.build(&self, Element* elem) @dynamic
 {
-	Ui* ui     = elem.ui;
 	float fill = math::clamp(self.value, 0.0f, 1.0f) * BAR_W;
-	return ui.@node(
-		(Stack) { .size = { CARD_W, CARD_H } }, // Background panel — the first Stack child, at the origin.
-		ui.@node(
-			(Rectangle) {
-				.size = { CARD_W, CARD_H },
-				.style = {
-					.color = { 0.16, 0.17, 0.22, 1.0 },
-					.border_radius = { 14.0, 14.0, 14.0, 14.0 },
-					.border_width = 1.0,
-					.border_color = { 0.28, 0.30, 0.38, 1.0 },
-				},
-			}
-		), // Content, laid over the panel at the same origin.
-		ui.@node(
-			(Padding) { .insets = widgets::insets_all(CARD_PAD) },
-			ui.@node(
-				(Column) { .gap = 14.0 }, // Header: an accent chip + a placeholder title bar (no text yet).
-				ui.@node(
-					(Row) { .size = { BAR_W, 18.0 }, .gap = 10.0, .cross_align = CENTER },
-					ui.@node(
-						(Rectangle) {
-							.size = { 18.0, 18.0 },
-							.style = { .color = self.accent, .border_radius = { 6.0, 6.0, 6.0, 6.0 } },
-						}
-					),
-					ui.@node(
-						(Rectangle) {
-							.size = { BAR_W - 28.0, 9.0 },
-							.style = { .color = { 0.42, 0.45, 0.52, 1.0 }, .border_radius = { 4.0, 4.0, 4.0, 4.0 } },
-						}
-					),
-				), // Progress bar: a fill and a remainder rect side by side, summing
-				// to BAR_W. self.value sets where they meet.
-				ui.@node(
-					(Row) { .size = { BAR_W, 12.0 } },
-					ui.@node(
-						(Rectangle) {
-							.size = { fill, 12.0 },
-							.style = { .color = self.accent, .border_radius = { 6.0, 0.0, 0.0, 6.0 } },
-						}
-					),
-					ui.@node(
-						(Rectangle) {
-							.size = { BAR_W - fill, 12.0 },
-							.style = { .color = { 0.24, 0.26, 0.32, 1.0 }, .border_radius = { 0.0, 6.0, 6.0, 0.0 } },
-						}
-					),
-				),
-			)
-		)
-	);
+	return @subtree(elem.ui)
+	{
+		@tree((Stack) { .size = { CARD_W, CARD_H } })
+		{
+			// Background panel — the first Stack child, at the origin.
+			@node(
+				(Rectangle) {
+					.size = { CARD_W, CARD_H },
+					.style = {
+						.color = { 0.16, 0.17, 0.22, 1.0 },
+						.border_radius = { 14.0, 14.0, 14.0, 14.0 },
+						.border_width = 1.0,
+						.border_color = { 0.28, 0.30, 0.38, 1.0 },
+					},
+				}
+			);
+			// Content, laid over the panel at the same origin.
+			@tree((Padding) { .insets = widgets::insets_all(CARD_PAD) })
+			{
+				@tree((Column) { .gap = 14.0 })
+				{
+					// Header: an accent chip + a placeholder title bar (no text yet).
+					@tree((Row) { .size = { BAR_W, 18.0 }, .gap = 10.0, .cross_align = CENTER })
+					{
+						@node(
+							(Rectangle) {
+								.size = { 18.0, 18.0 },
+								.style = { .color = self.accent, .border_radius = { 6.0, 6.0, 6.0, 6.0 } },
+							}
+						);
+						@node(
+							(Rectangle) {
+								.size = { BAR_W - 28.0, 9.0 },
+								.style = { .color = { 0.42, 0.45, 0.52, 1.0 }, .border_radius = { 4.0, 4.0, 4.0, 4.0 } },
+							}
+						);
+					};
+					// Progress bar: a fill and a remainder rect side by side,
+					// summing to BAR_W. self.value sets where they meet.
+					@tree((Row) { .size = { BAR_W, 12.0 } })
+					{
+						@node(
+							(Rectangle) {
+								.size = { fill, 12.0 },
+								.style = { .color = self.accent, .border_radius = { 6.0, 0.0, 0.0, 6.0 } },
+							}
+						);
+						@node(
+							(Rectangle) {
+								.size = { BAR_W - fill, 12.0 },
+								.style = { .color = { 0.24, 0.26, 0.32, 1.0 }, .border_radius = { 0.0, 6.0, 6.0, 0.0 } },
+							}
+						);
+					};
+				};
+			};
+		};
+	};
 }
 
 // Interactivity composes with build: clicks on the card's rectangles bubble up
@@ -129,13 +135,19 @@ fn void main(String[] args)
 
 	// The composite reused with different data, arranged by an ordinary Column
 	// exactly as if StatCard were a built-in widget.
-	Element* column = ui.@node((Column) { .gap = 18.0, .main_align = CENTER, .cross_align = CENTER });
-	foreach (spec : specs)
+	@canvas(ui)
 	{
-		column.append(ui.@node((StatCard) { .value = spec.value, .accent = spec.accent }));
-	}
-
-	ui.build(ui.@node((Padding) { .insets = widgets::insets_all(28.0) }, column));
+		@tree((Padding) { .insets = widgets::insets_all(28.0) })
+		{
+			@tree((Column) { .gap = 18.0, .main_align = CENTER, .cross_align = CENTER })
+			{
+				foreach (spec : specs)
+				{
+					@node((StatCard) { .value = spec.value, .accent = spec.accent });
+				}
+			};
+		};
+	};
 
 	// The app owns the loop; all the interactivity lives in the widgets, so
 	// there is no per-frame code — frame() polls input, dispatches to the

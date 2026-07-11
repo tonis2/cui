@@ -167,6 +167,14 @@ struct Ui
 	List{Element*} all_elements;
 	List{uint} free_transform_slots;
 
+	// Scoped tree building (@canvas / @tree / @node): the open @tree scopes;
+	// nodes made by the free macros attach to the top one. scope_floor hides
+	// outer scopes from a nested @subtree; scoped_root catches the single node
+	// built at the top level of a @canvas/@subtree body.
+	List{Element*} build_stack;
+	sz scope_floor;
+	Element* scoped_root;
+
 	bool build_pending;
 	bool layout_pending;
 	bool paint_pending;
@@ -192,6 +200,7 @@ fn void Ui.free(&self)
 	self.all_elements.free();
 	self.free_elements.free();
 	self.free_transform_slots.free();
+	self.build_stack.free();
 	self.held_keys.free();
 	self.canvas.free();
 	mem::free(self);
@@ -210,6 +219,9 @@ fn void Ui.free(&self)
 //   ui.build(ui.@node((Column){ .gap = 8.0 },
 //       ui.@node((Rectangle){ .size = {100, 40} }),
 //       ui.@node((Rectangle){ .size = {100, 40} })));
+//
+// The scoped builder below (@canvas / @tree / @node) is sugar over this and
+// reads better for whole trees; this stays the detached primitive.
 macro Element* Ui.@node(&self, widget, ...)
 {
 	$if @kindof(widget) == POINTER:
@@ -371,6 +383,129 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 		@body(elem.widget_as($Type));
 		elem.request_paint();
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Scoped tree building — @pool-style sugar over @node. @canvas(ui) opens a
+// build scope; inside its body @tree and @node need no ui and attach
+// themselves to the enclosing node:
+//
+//   @canvas(ui)
+//   {
+//       @tree((Column){ .gap = 8.0 })
+//       {
+//           @node((Rectangle){ .size = {100, 40} });
+//           for (int i = 0; i < 4; i++) @node((Rectangle){ .size = {80, 20} });
+//       };
+//   };
+//
+// The single node built at the top level of the body becomes the UI root
+// (Ui.build installs it). Both macros return the Element*, so handles still
+// chain — @node(...).with_id("card"), Element* col = @tree(...) { ... }; — and
+// plain statements (loops, locals, set_offset on a returned handle) mix freely
+// into the bodies. A composite's build() uses @subtree(elem.ui) { ... }
+// instead: same body rules, but the root comes back detached instead of
+// installed.
+//
+// All four macros are @builtin, so app code calls them without the cui::
+// prefix. Rules:
+//   - @tree/@node only work inside a @canvas/@subtree body (asserted).
+//   - The free @node takes no child arguments: children come from the
+//     enclosing body. Never pass a @tree/@node result to ui.@node's varargs —
+//     it is already attached. ui.@node remains the detached form.
+//   - A `return` inside a body exits the surrounding function (like @pool);
+//     the scope state unwinds correctly, but no root gets installed.
+
+tlocal Ui* ambient_ui @private;
+
+macro void @canvas(Ui* ui; @body()) @builtin
+{
+	Ui* prev_ui = ambient_ui;
+	Element* prev_root = ui.scoped_root;
+	sz prev_floor = ui.scope_floor;
+	ambient_ui = ui;
+	ui.scoped_root = null;
+	ui.scope_floor = ui.build_stack.len();
+	defer
+	{
+		ambient_ui = prev_ui;
+		ui.scoped_root = prev_root;
+		ui.scope_floor = prev_floor;
+	}
+	@body();
+	assert(ui.scoped_root, "@canvas body built no root node");
+	ui.build(ui.scoped_root);
+}
+
+// The detached twin of @canvas: returns the body's single top-level node
+// instead of installing it — the shape of a composite's build():
+//
+//   fn Element* Counter.build(&self, Element* elem) @dynamic
+//   {
+//       return @subtree(elem.ui)
+//       {
+//           @tree((Row){ .gap = 4.0 }) { ... };
+//       };
+//   }
+macro Element* @subtree(Ui* ui; @body()) @builtin
+{
+	Ui* prev_ui = ambient_ui;
+	Element* prev_root = ui.scoped_root;
+	sz prev_floor = ui.scope_floor;
+	ambient_ui = ui;
+	ui.scoped_root = null;
+	ui.scope_floor = ui.build_stack.len();
+	defer
+	{
+		ambient_ui = prev_ui;
+		ui.scoped_root = prev_root;
+		ui.scope_floor = prev_floor;
+	}
+	@body();
+	Element* root = ui.scoped_root;
+	assert(root, "@subtree body built no root node");
+	return root;
+}
+
+// Container node: attaches to the enclosing scope (or becomes the body's
+// root), then IS the enclosing scope for its own body.
+macro Element* @tree(widget; @body()) @builtin
+{
+	Ui* scope_ui = ambient_ui;
+	assert(scope_ui, "@tree outside a @canvas/@subtree body");
+	Element* elem = scope_ui.@node(widget);
+	scope_ui.attach_scoped(elem);
+	scope_ui.build_stack.push(elem);
+	defer (void)scope_ui.build_stack.pop();
+	@body();
+	return elem;
+}
+
+// Leaf node: attaches to the enclosing scope (or becomes the body's root).
+macro Element* @node(widget) @builtin
+{
+	Ui* scope_ui = ambient_ui;
+	assert(scope_ui, "@node outside a @canvas/@subtree body");
+	Element* elem = scope_ui.@node(widget);
+	scope_ui.attach_scoped(elem);
+	return elem;
+}
+
+// Plain parent/child wiring, matching attach_node — no request_layout walks:
+// nothing built here is mounted yet (@canvas installs the root afterwards,
+// which invalidates everything once). Internal to the DSL macros; not part of
+// the widget-facing API (@private is a no-op on methods).
+fn void Ui.attach_scoped(&self, Element* elem)
+{
+	if (self.build_stack.len() > self.scope_floor)
+	{
+		Element* top = self.build_stack[self.build_stack.len() - 1];
+		elem.parent = top;
+		top.children.push(elem);
+		return;
+	}
+	assert(!self.scoped_root, "a @canvas/@subtree body can only build one root node");
+	self.scoped_root = elem;
 }
 
 // Installs a built tree as the UI root, releasing any previous root.

@@ -1,0 +1,114 @@
+name: Vendor Vulkan libraries
+
+# Run by hand, rarely — only to refresh the Vulkan libraries under vulkan/.
+#
+# Those libraries are committed to the repository on purpose, so that cutting a
+# release is nothing but zipping files: no toolchains, no package installs, no
+# network fetches, and the binaries shipped are exactly the ones that were tested.
+#
+# They cannot simply be downloaded, which is why this exists:
+#   - the macOS STATIC loader is published by nobody (the LunarG SDK ships only a
+#     dylib), so it has to be built
+#   - the Windows import library needs a Windows toolchain (or llvm-dlltool)
+#   - only the Linux .so is available prebuilt, and building it here keeps all
+#     three pinned to one loader version
+#
+# Download the `vulkan-libs` artifact this produces, unzip it over vulkan/, and
+# commit. See vulkan/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      loader_version:
+        description: "Vulkan-Loader tag to build, e.g. vulkan-sdk-1.4.350.1"
+        required: true
+        default: "vulkan-sdk-1.4.350.1"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-aarch64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: windows-latest
+            target: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Vulkan-Loader
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/Vulkan-Loader
+          ref: ${{ inputs.loader_version }}
+
+      - name: WSI headers (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcb1-dev libxrandr-dev libwayland-dev
+
+      - name: Build loader
+        shell: bash
+        run: |
+          # macOS links the loader in statically, so an app has no Vulkan dylib
+          # dependency at all -- the one platform with no system Vulkan to fall
+          # back on. APPLE_STATIC_LOADER is macOS-only.
+          EXTRA=""
+          if [ "${{ matrix.target }}" = "macos-aarch64" ]; then
+            EXTRA="-D APPLE_STATIC_LOADER=ON -D CMAKE_OSX_ARCHITECTURES=arm64"
+          fi
+          cmake -S . -B build -D CMAKE_BUILD_TYPE=Release -D UPDATE_DEPS=ON $EXTRA
+          cmake --build build --config Release -j
+
+          mkdir -p out/${{ matrix.target }}
+          case "${{ matrix.target }}" in
+            macos-aarch64)
+              find build -name 'libvulkan*.a' -exec cp {} out/${{ matrix.target }}/libvulkan.a \;
+              ;;
+            linux-x64)
+              # The real file, not the symlink chain: zip does not carry symlinks
+              # reliably. -lvulkan wants the bare name; the SONAME baked inside
+              # still points at libvulkan.so.1, so at runtime the machine's own
+              # loader is used and nothing extra ships with the app.
+              cp "$(find build -name 'libvulkan.so.1.*' | head -1)" out/${{ matrix.target }}/libvulkan.so
+              ;;
+            windows-x64)
+              # Named vulkan.lib so the manifest's "vulkan" resolves. The DLL it
+              # imports (vulkan-1.dll) is recorded inside and is unaffected; that
+              # DLL ships with the GPU driver.
+              cp "$(find build -name 'vulkan-1.lib' | head -1)" out/${{ matrix.target }}/vulkan.lib
+              ;;
+          esac
+          ls -la out/${{ matrix.target }}
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-libs-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+
+  # One zip to unpack over vulkan/, rather than three to assemble by hand.
+  collect:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vulkan-libs-*
+          path: staging
+          merge-multiple: true
+
+      - name: Show what to commit
+        run: |
+          echo "Unzip this over vulkan/ and commit:"
+          find staging -type f -exec ls -la {} \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-libs
+          path: staging/*
+          if-no-files-found: error

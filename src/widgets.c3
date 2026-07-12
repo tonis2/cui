@@ -1,6 +1,12 @@
-// Built-in widgets: leaves and layout containers implementing the Widget
-// interface from module cui. Apps compose these or write their own widgets
-// against the same interface — nothing here is special-cased by the core.
+<*
+ Built-in widgets: leaves and layout containers implementing the Widget
+ interface from module `cui`. Apps compose these or write their own widgets
+ against the same interface — nothing here is special-cased by the core.
+
+ Every widget is a plain struct: build one with a literal in a node macro, pass
+ it by value (the element copies and owns it) or by pointer (borrowed, and
+ mutable from a callback).
+*>
 module cui::widgets;
 import std::collections::list;
 import std::math;
@@ -8,31 +14,47 @@ import std::math;
 import cui;
 
 // ---------------------------------------------------------------------------
-// Rectangle: leaf with a preferred size and an SDF rect style.
 
+<*
+ Leaf with a preferred size and an SDF rect style: fill, border and per-corner
+ radii. The workhorse for cards, chips, bars and dividers.
+*>
 struct Rectangle (Widget)
 {
 	Vec2 size;
 	RectStyle style;
 }
 
+<*
+ Takes its preferred size, clamped to the constraints.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken.`
+*>
 fn Vec2 Rectangle.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	return cui::clamp_size(self.size, constraints);
 }
 
+<*
+ Draws the styled rect filling the element.
+
+ @param elem : `The element this widget is attached to.`
+ @param painter : `The painter to draw into, in element-local coordinates.`
+*>
 fn void Rectangle.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	painter.rect({ 0, 0 }, elem.size, self.style);
 }
 
 // ---------------------------------------------------------------------------
-// Column / Row: stack children along one axis with a gap. By default they
-// wrap their content; a non-zero size fixes that axis, and the alignments
-// distribute whatever slack the fixed size (or the incoming constraints)
-// creates. A wrap-content container has no slack, so alignment only shows
-// when something forces it bigger than its children.
+// Column / Row: stack children along one axis with a gap.
 
+<*
+ How a Column or Row distributes slack along its MAIN axis (vertical for a
+ Column, horizontal for a Row).
+*>
 enum MainAlign
 {
 	START,
@@ -41,6 +63,10 @@ enum MainAlign
 	SPACE_BETWEEN, // slack becomes equal extra spacing between children
 }
 
+<*
+ How a Column or Row aligns children across its CROSS axis (horizontal for a
+ Column, vertical for a Row).
+*>
 enum CrossAlign
 {
 	START,
@@ -48,6 +74,14 @@ enum CrossAlign
 	END,
 }
 
+<*
+ Stacks children vertically with a gap between them.
+
+ By default it wraps its content; a non-zero `size` fixes that axis, and the
+ alignments distribute whatever slack the fixed size (or the incoming
+ constraints) creates. A wrap-content Column has no slack, so alignment only
+ shows when something forces it bigger than its children.
+*>
 struct Column (Widget)
 {
 	float gap;
@@ -56,6 +90,13 @@ struct Column (Widget)
 	CrossAlign cross_align;
 }
 
+<*
+ Lays children out top to bottom, then aligns them in whatever slack is left.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken: content-sized per axis unless size fixes it.`
+*>
 fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	sz count      = elem.children.len();
@@ -103,6 +144,10 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	return own;
 }
 
+<*
+ Stacks children left to right with a gap between them — the horizontal twin of
+ Column, with the same wrap-content and alignment rules.
+*>
 struct Row (Widget)
 {
 	float gap;
@@ -111,6 +156,13 @@ struct Row (Widget)
 	CrossAlign cross_align;
 }
 
+<*
+ Lays children out left to right, then aligns them in whatever slack is left.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken: content-sized per axis unless size fixes it.`
+*>
 fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	sz count      = elem.children.len();
@@ -159,8 +211,10 @@ fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Padding: insets around a single child; sizes itself to child + insets.
 
+<*
+ Per-edge insets in pixels.
+*>
 struct Insets
 {
 	float left;
@@ -169,16 +223,34 @@ struct Insets
 	float bottom;
 }
 
+<*
+ Insets with the same value on every edge.
+
+ @param value : `The inset in pixels.`
+ @return `The insets.`
+*>
 fn Insets insets_all(float value)
 {
 	return { value, value, value, value };
 }
 
+<*
+ Insets around a single child; sizes itself to child + insets. Takes one child
+ and ignores any others.
+*>
 struct Padding (Widget)
 {
 	Insets insets;
 }
 
+<*
+ Shrinks the constraints by the insets, lays the child out inside them, and
+ takes the size of the child plus the insets.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken: child + insets, clamped.`
+*>
 fn Vec2 Padding.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	float w = self.insets.left + self.insets.right;
@@ -198,14 +270,26 @@ fn Vec2 Padding.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Stack: absolute container. Children are positioned by Element.set_offset and
-// sized by their own layout under loose constraints.
 
+<*
+ Absolute container: children are positioned by `Element.set_offset` and sized by
+ their own layout under loose constraints. The escape hatch from the
+ constraint-driven containers — and the base for overlays, badges and anything
+ animated by moving a handle.
+*>
 struct Stack (Widget)
 {
 	Vec2 size; // zero on an axis = fill the available space
 }
 
+<*
+ Fills the available space (unless `size` fixes an axis) and lays every child out
+ loosely; placement is left to whoever holds the child handles.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken.`
+*>
 fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	Vec2 own = {
@@ -222,17 +306,28 @@ fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Clip: clips its single child's subtree — including anything the subtree
-// overflows — to its own bounds, optionally rounded. Sizes itself to the
-// child. The clip is resolved per fragment in the shader, so rounded corners
-// get the same antialiasing as shape edges; hit testing is gated by the rect
-// (corners are visual only, like transforms — see input.c3).
 
+<*
+ Clips the subtree of its single child — including anything that subtree
+ overflows — to its own bounds, optionally rounded. Sizes itself to the child.
+
+ The clip is resolved per fragment in the shader, so rounded corners get the same
+ antialiasing as shape edges. Hit testing is gated by the rect: a point in a
+ clipped-away rounded corner still hits (corners are visual only, like
+ transforms).
+*>
 struct Clip (Widget)
 {
 	Vec4 radii; // per-corner px {TL, TR, BR, BL}; zero = square
 }
 
+<*
+ Marks the element as clipping, then sizes itself to its child.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size of the child, clamped; zero when there is no child.`
+*>
 fn Vec2 Clip.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	elem.clips = true;
@@ -248,19 +343,44 @@ fn Vec2 Clip.layout(&self, Element* elem, Constraints constraints) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Scroll: a clipped viewport over one child laid out with unbounded height.
-// Vertical only — the platform wheel reports a single vertical delta. Takes
-// exactly ONE @node child (the content); children[1] is an internal
-// scrollbar-indicator overlay mounted on first layout, so don't append to a
-// Scroll. Wheel events over the viewport move the content; at either end the
-// event is left unconsumed so an enclosing Scroll can take over.
 
-const float SCROLL_STEP_DEFAULT = 40.0; // px per wheel unit
+<*
+ Default scroll distance per wheel unit, in pixels — used when `Scroll.step` is
+ zero.
+*>
+const float SCROLL_STEP_DEFAULT = 40.0;
+
+<*
+ Width of the scrollbar indicator pill, in pixels.
+*>
 const float THUMB_WIDTH = 6.0;
+
+<*
+ Gap between the indicator pill and the edges of the viewport, in pixels.
+*>
 const float THUMB_MARGIN = 2.0;
+
+<*
+ Shortest the indicator pill gets, however long the content — in pixels.
+*>
 const float THUMB_MIN = 24.0;
+
+<*
+ Indicator color used when `Scroll.thumb_color` is left at zero alpha.
+*>
 const Color THUMB_COLOR_DEFAULT = { 1.0, 1.0, 1.0, 0.35 };
 
+<*
+ A clipped viewport over one child laid out with unbounded height.
+
+ Vertical only — the platform wheel reports a single vertical delta. Takes
+ exactly ONE node child (the content); `children[1]` is an internal
+ scrollbar-indicator overlay mounted on first layout, so do not append to a
+ Scroll.
+
+ Wheel events over the viewport move the content; at either end the event is left
+ unconsumed, so an enclosing Scroll can take over.
+*>
 struct Scroll (Widget)
 {
 	Vec2 size; // per axis: 0 = fill the available space
@@ -272,15 +392,23 @@ struct Scroll (Widget)
 	float content_extent; // content height, remembered by layout for on_mouse
 }
 
-// The indicator: a pill at the viewport's right edge, sized and placed by the
-// owning Scroll. Non-interactive — it shows scroll position, it doesn't take
-// drags.
+<*
+ The indicator: a pill at the right edge of the viewport, sized and placed by the
+ owning Scroll. Non-interactive — it shows the scroll position, it does not take
+ drags. Mounted internally by Scroll; apps never build one.
+*>
 struct ScrollThumb (Widget)
 {
 	Color color;
 	bool visible;
 }
 
+<*
+ Draws the pill, or nothing while the content fits.
+
+ @param elem : `The element this widget is attached to.`
+ @param painter : `The painter to draw into, in element-local coordinates.`
+*>
 fn void ScrollThumb.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	if (!self.visible) return;
@@ -288,6 +416,16 @@ fn void ScrollThumb.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.rect({ 0, 0 }, elem.size, { .color = self.color, .border_radius = { r, r, r, r } });
 }
 
+<*
+ Sizes the viewport, lays the content out with unbounded height, clamps the
+ scroll offset to the overflow, and sizes and places the thumb. Mounts the thumb
+ on the first run.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @require elem.children.len() >= 1 : `A Scroll takes exactly one node child: the content to scroll.`
+ @return `The size of the viewport.`
+*>
 fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	// Mount the thumb overlay once, AFTER the content child so it emits (and
@@ -335,8 +473,15 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 	return viewport;
 }
 
-// Thumb position from scroll_offset; shared by layout and the wheel handler
-// (which rides the same cheap re-emit as the content's set_offset).
+<*
+ Positions the thumb from `scroll_offset`; shared by layout and the wheel handler
+ (which rides the same cheap re-emit as the content set_offset).
+
+ @param elem : `The Scroll element.`
+ @param viewport : `The size of the viewport, in pixels.`
+ @param max_scroll : `The overflow: content height minus viewport height.`
+ @require elem.children.len() == 2 : `The thumb is mounted by Scroll.layout, which must run first.`
+*>
 fn void Scroll.place_thumb(&self, Element* elem, Vec2 viewport, float max_scroll)
 {
 	Element* thumb = elem.children[1];
@@ -346,6 +491,14 @@ fn void Scroll.place_thumb(&self, Element* elem, Vec2 viewport, float max_scroll
 	thumb.offset = { viewport.x - THUMB_WIDTH - THUMB_MARGIN, y };
 }
 
+<*
+ Moves the content on wheel events. At either end the event is left unconsumed,
+ so an enclosing Scroll can pick it up.
+
+ @param elem : `The element this widget is attached to.`
+ @param event : `The mouse event; only SCROLL is handled.`
+ @return `True when the wheel actually moved this Scroll.`
+*>
 fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	if (event.kind != MouseEventKind.SCROLL) return false;
@@ -364,23 +517,26 @@ fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 }
 
 // ---------------------------------------------------------------------------
-// Button: a clickable rect with hover and press styles. on_click receives the
-// Ui the button is rendered in — the framework passes the button's own
-// element's ui automatically, so the callback carries no app-threaded context
-// yet can still reach the rest of the tree, the way a Flutter callback reaches
-// other widgets through its BuildContext:
-// 
-//     fn void reset_clicked(Ui* ui) {
-//         ui.@modify(Dial; d) { d.value = 0; };   // resolve once, mutate, repaint
-//     }
-//     ui.@node((Button){ .on_click = &reset_clicked, ... });
-// 
-// Also the worked example of the Widget event callbacks: on_hover/on_mouse
-// mutate state and request_paint; on_click fires when a left press is
-// released inside.
 
+<*
+ A click callback. It receives the Ui the button is rendered in — the framework
+ passes the ui of the button element automatically, so the callback carries no
+ app-threaded context yet can still reach the rest of the tree, the way a Flutter
+ callback reaches other widgets through its BuildContext:
+
+     `fn void reset_clicked(Ui* ui) {`
+     `    ui.@modify(Dial; d) { d.value = 0; };   // resolve once, mutate, repaint`
+     `}`
+*>
 alias OnClick = fn void(Ui* ui);
 
+<*
+ A clickable rect with hover and press styles.
+
+ Also the worked example of the Widget event callbacks: `on_hover` / `on_mouse`
+ mutate state and `request_paint`; `on_click` fires when a left press is released
+ inside.
+*>
 struct Button (Widget)
 {
 	Vec2 size;
@@ -392,12 +548,26 @@ struct Button (Widget)
 	bool held;
 }
 
+<*
+ Takes its preferred size and asks for the hand cursor while hovered.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken.`
+*>
 fn Vec2 Button.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	elem.cursor = Cursor.POINTING_HAND;
 	return self.size.constrain(constraints);
 }
 
+<*
+ Draws the rect in the style matching the current state: press, then hover, then
+ the base style (a state style counts as set when its color alpha is above zero).
+
+ @param elem : `The element this widget is attached to.`
+ @param painter : `The painter to draw into, in element-local coordinates.`
+*>
 fn void Button.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	RectStyle style = self.style;
@@ -412,12 +582,27 @@ fn void Button.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.rect({ 0, 0 }, elem.size, style);
 }
 
+<*
+ Tracks hover state and repaints.
+
+ @param elem : `The element this widget is attached to.`
+ @param entered : `True when the pointer entered, false when it left.`
+*>
 fn void Button.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
 	elem.request_paint();
 }
 
+<*
+ Tracks the held state and fires `on_click` when a left press is released inside
+ the button. Consuming the press captures the pointer, so a drag out and back
+ still resolves correctly.
+
+ @param elem : `The element this widget is attached to.`
+ @param event : `The mouse event.`
+ @return `True when the event was consumed (any left press or release).`
+*>
 fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	switch (event.kind)

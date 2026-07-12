@@ -19,6 +19,10 @@ import std::math;
 // ---------------------------------------------------------------------------
 // Event types
 
+<*
+ Mouse buttons. The ordinal indexes the `down` / `pressed` / `released` arrays
+ on Input and InputFrame.
+*>
 enum MouseButton
 {
 	LEFT,
@@ -26,6 +30,9 @@ enum MouseButton
 	MIDDLE,
 }
 
+<*
+ What a MouseEvent reports. PRESS/RELEASE carry a button, SCROLL a wheel delta.
+*>
 enum MouseEventKind
 {
 	PRESS,
@@ -34,6 +41,11 @@ enum MouseEventKind
 	SCROLL,
 }
 
+<*
+ One mouse event delivered to `Widget.on_mouse`. Hit-tested and bubbling: the
+ deepest element under the pointer sees it first, and returning true consumes it
+ (consuming a PRESS captures the pointer until that button releases).
+*>
 struct MouseEvent
 {
 	MouseEventKind kind;
@@ -43,16 +55,22 @@ struct MouseEvent
 	float scroll; // wheel delta, for SCROLL (positive = up)
 }
 
+<*
+ One key edge delivered to `Widget.on_key` — press and release only; hold state
+ lives in `Input.keys_down`.
+*>
 struct KeyEvent
 {
 	Key key;
 	bool down; // true = pressed, false = released
 }
 
-// Mouse cursor shape, resolved per frame from the hovered element chain: the
-// deepest hovered element whose `cursor` field is not DEFAULT wins (widgets
-// like MouseRegion set it declaratively). The embedder applies Ui.cursor to
-// the OS after process_input.
+<*
+ Mouse cursor shape, resolved per frame from the hovered element chain: the
+ deepest hovered element whose `cursor` field is not DEFAULT wins (a widget sets
+ it declaratively from `layout()`, as Button does). The embedder applies
+ `Ui.cursor` to the OS after `process_input`.
+*>
 enum Cursor
 {
 	DEFAULT, // no preference — inherit from an ancestor, or ARROW
@@ -66,9 +84,11 @@ enum Cursor
 	RESIZE_V,
 }
 
-// Key identifiers. Values are X11 keycodes, matching c3w's EventKey.code so
-// the reference renderer maps with `(Key)event_key.code`; engines with other
-// key spaces translate to these constants.
+<*
+ Key identifiers. Values are X11 keycodes, matching the EventKey.code of c3w so
+ the reference renderer maps with `(Key)event_key.code`; engines with other key
+ spaces translate to these constants.
+*>
 constdef Key : inline uint
 {
 	EMPTY         = 0,
@@ -189,9 +209,14 @@ constdef Key : inline uint
 // ---------------------------------------------------------------------------
 // Per-frame state, and what the embedder feeds in
 
-// Lives on Ui as `ui.input` — readable from any widget via elem.ui. Note that
-// paint() output is cached: widgets reading this from paint() won't see it
-// change; react in the event callbacks or update(), then request_paint().
+<*
+ Per-frame input state, live on Ui as `ui.input` — readable from any widget via
+ `elem.ui`. This is the "context" a widget polls in `update()`.
+
+ Note that `paint()` output is cached: a widget reading this from `paint()` will
+ not see it change. React in the event callbacks or in `update()`, then call
+ `request_paint()`.
+*>
 struct Input
 {
 	Vec2 mouse; // UI coordinates (top-left origin, pixels)
@@ -206,13 +231,24 @@ struct Input
 	Key[] keys_down; // all currently held keys (borrowed, this frame)
 }
 
+<*
+ Whether a key is held right now — the level query, as against the edges
+ delivered to `Widget.on_key`.
+
+ @param key : `The key to test.`
+ @return `True while the key is down.`
+*>
 fn bool Input.key_down(&self, Key key)
 {
 	foreach (k : self.keys_down) if (k == key) return true;
 	return false;
 }
 
-// Everything the embedder knows about input this frame, in UI coordinates.
+<*
+ Everything the embedder knows about input this frame, in UI coordinates
+ (top-left origin, pixels). Fill one per frame and hand it to
+ `Ui.process_input`; the reference renderer does this from c3w events.
+*>
 struct InputFrame
 {
 	Vec2 mouse;
@@ -225,9 +261,18 @@ struct InputFrame
 // ---------------------------------------------------------------------------
 // Dispatch
 
-// Call once per frame, before mutating the tree and before Ui.flush. Handlers
-// may unmount elements from their own subtree; don't structurally modify
-// unrelated parts of the tree from inside a handler.
+<*
+ Updates `ui.input`, hit-tests the tree and dispatches this frame of input to
+ the widget callbacks (`on_mouse` / `on_hover` / `on_key`, with bubbling), then
+ runs `update(dt)` on every widget implementing it.
+
+ Call once per frame, before mutating the tree and before `Ui.flush`. Handlers
+ may unmount elements from their own subtree; do not structurally modify
+ unrelated parts of the tree from inside a handler.
+
+ @param frame : `What the embedder knows about input this frame, in UI coordinates.`
+ @param dt : `Seconds since the last frame — passed on to update().`
+*>
 fn void Ui.process_input(&self, InputFrame frame, float dt)
 {
 	Input* input = &self.input;
@@ -321,8 +366,14 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	if (self.root) self.tick(self.root, dt);
 }
 
-// Bubbles the event from `element` toward the root; each widget gets the
-// position translated into its own local space. Returns the consumer.
+<*
+ Bubbles the event from `element` toward the root; each widget gets the position
+ translated into its own local space.
+
+ @param element : `The deepest element the event is aimed at — usually the hit-test result.`
+ @param event : `The event, with its absolute position set; the element-local pos is filled in per widget.`
+ @return `The element that consumed the event, or null if nobody did.`
+*>
 fn Element* Ui.dispatch_mouse(&self, Element* element, MouseEvent event)
 {
 	for (Element* e = element; e != null; e = e.parent)
@@ -336,6 +387,12 @@ fn Element* Ui.dispatch_mouse(&self, Element* element, MouseEvent event)
 	return null;
 }
 
+<*
+ Delivers a key edge to the focused element, bubbling toward the root until a
+ widget consumes it. A no-op when nothing is focused.
+
+ @param event : `The key edge to deliver.`
+*>
 fn void Ui.dispatch_key(&self, KeyEvent event)
 {
 	for (Element* e = self.focused; e != null; e = e.parent)
@@ -347,17 +404,31 @@ fn void Ui.dispatch_key(&self, KeyEvent event)
 	}
 }
 
-// Deepest element whose rect contains the point, in reverse paint order so
-// visually-topmost wins. Uses the absolute origins stored by the last emit;
-// transform-palette matrices (set_transform) are NOT applied to hit tests, and
-// a clipping element gates by its rect only — a point in a clipped-away
-// rounded corner still hits (the same class of simplification).
+<*
+ The deepest element whose rect contains the point, searched in reverse paint
+ order so the visually-topmost one wins.
+
+ Uses the absolute origins stored by the last emit. Two documented
+ simplifications: transform-palette matrices (`set_transform`) are NOT applied to
+ hit tests, and a clipping element gates by its rect only — a point in a
+ clipped-away rounded corner still hits.
+
+ @param point : `The position in UI coordinates.`
+ @return `The element under the point, or null.`
+*>
 fn Element* Ui.hit_test(&self, Vec2 point)
 {
 	if (self.root == null) return null;
 	return self.hit_test_element(self.root, point);
 }
 
+<*
+ Hit-tests one subtree — the recursive half of `hit_test`.
+
+ @param element : `The subtree root to test.`
+ @param point : `The position in UI coordinates.`
+ @return `The deepest element in this subtree under the point, or null.`
+*>
 fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 {
 	Vec2 local = point - element.absolute;
@@ -382,7 +453,13 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 	return null;
 }
 
-// A left press focuses the deepest hit element that can receive key events.
+<*
+ Focuses the deepest element at or above `hit` whose widget implements
+ `on_key` — what a left press does automatically. Clears the focus when there is
+ no such element.
+
+ @param hit : `The element under the pointer, or null.`
+*>
 fn void Ui.update_focus(&self, Element* hit)
 {
 	for (Element* e = hit; e != null; e = e.parent)
@@ -396,12 +473,25 @@ fn void Ui.update_focus(&self, Element* hit)
 	self.focused = null;
 }
 
+<*
+ Runs the optional per-frame `update(dt)` hook on every widget in the subtree.
+
+ @param element : `The subtree root to tick.`
+ @param dt : `Seconds since the last frame.`
+*>
 fn void Ui.tick(&self, Element* element, float dt)
 {
 	if (&element.widget.update) element.widget.update(element, dt);
 	foreach (child : element.children) self.tick(child, dt);
 }
 
+<*
+ Whether a key appears in a held-key set.
+
+ @param keys : `The set to search.`
+ @param key : `The key to look for.`
+ @return `True if the key is in the set.`
+*>
 fn bool key_in(Key[] keys, Key key)
 {
 	foreach (k : keys) if (k == key) return true;

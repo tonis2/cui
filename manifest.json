@@ -1,4 +1,9 @@
 {
+  // The manifest of the released cui.c3l -- not used when building this repo, which
+  // reads project.json and each dependency manifest in lib/. The c3w platform folders
+  // are globbed on purpose: listing their files by hand let window.c3l add linux/xkb.c3
+  // without this list following, and the artifact then failed to compile on Linux --
+  // caught only by the release verify job. Keep them globs.
   "provides" : "cui",
   "sources" : [
     "src/**",
@@ -8,7 +13,7 @@
   ],
   "targets" : {
     "macos-x64" : {
-      "sources" : ["deps/c3w/darwin/main.c3", "deps/c3w/darwin/objc.c3"],
+      "sources" : ["deps/c3w/darwin/**"],
       "linked-libraries" : [
         "vulkan",
         "CoreFoundation.framework",
@@ -20,7 +25,7 @@
       ]
     },
     "macos-aarch64" : {
-      "sources" : ["deps/c3w/darwin/main.c3", "deps/c3w/darwin/objc.c3"],
+      "sources" : ["deps/c3w/darwin/**"],
       "linked-libraries" : [
         "vulkan",
         "CoreFoundation.framework",
@@ -32,27 +37,15 @@
       ]
     },
     "linux-x64" : {
-      "sources" : [
-        "deps/c3w/linux/main.c3",
-        "deps/c3w/linux/wayland.c3",
-        "deps/c3w/linux/xdg_shell.c3",
-        "deps/c3w/linux/x11.c3",
-        "deps/c3w/linux/unified.c3"
-      ],
+      "sources" : ["deps/c3w/linux/**"],
       "linked-libraries" : ["vulkan"]
     },
     "linux-aarch64" : {
-      "sources" : [
-        "deps/c3w/linux/main.c3",
-        "deps/c3w/linux/wayland.c3",
-        "deps/c3w/linux/xdg_shell.c3",
-        "deps/c3w/linux/x11.c3",
-        "deps/c3w/linux/unified.c3"
-      ],
+      "sources" : ["deps/c3w/linux/**"],
       "linked-libraries" : ["vulkan"]
     },
     "windows-x64" : {
-      "sources" : ["deps/c3w/win32/main.c3"],
+      "sources" : ["deps/c3w/win32/**"],
       "linked-libraries" : ["vulkan", "user32.lib", "gdi32.lib", "kernel32.lib"]
     }
   }

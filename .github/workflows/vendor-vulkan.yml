@@ -57,9 +57,16 @@ jobs:
           # macOS links the loader in statically, so an app has no Vulkan dylib
           # dependency at all -- the one platform with no system Vulkan to fall
           # back on. APPLE_STATIC_LOADER is macOS-only.
+          #
+          # CMAKE_OSX_DEPLOYMENT_TARGET must be set explicitly: unset, cmake stamps
+          # every object with the runner's own macOS version, and ld then warns
+          # once per object ("built for newer macOS version than being linked")
+          # on every build of cui and of any app using cui.c3l, because c3c links
+          # with a floor of 11.0. 11.0 is that floor -- the loader needs nothing
+          # newer.
           EXTRA=""
           if [ "${{ matrix.target }}" = "macos-aarch64" ]; then
-            EXTRA="-D APPLE_STATIC_LOADER=ON -D CMAKE_OSX_ARCHITECTURES=arm64"
+            EXTRA="-D APPLE_STATIC_LOADER=ON -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=11.0"
           fi
           cmake -S . -B build -D CMAKE_BUILD_TYPE=Release -D UPDATE_DEPS=ON $EXTRA
           cmake --build build --config Release -j
@@ -68,6 +75,10 @@ jobs:
           case "${{ matrix.target }}" in
             macos-aarch64)
               find build -name 'libvulkan*.a' -exec cp {} out/${{ matrix.target }}/libvulkan.a \;
+              # Every object must claim 11.0, or the deployment target above did
+              # not take and the archive warns on every link. Cheaper to fail here.
+              MINOS=$(otool -l out/${{ matrix.target }}/libvulkan.a | grep -o 'minos [0-9.]*' | sort -u)
+              [ "$MINOS" = "minos 11.0" ] || { echo "unexpected deployment target: $MINOS"; exit 1; }
               ;;
             linux-x64)
               # The real file, not the symlink chain: zip does not carry symlinks

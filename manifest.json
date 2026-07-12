@@ -1,9 +1,5 @@
 {
-  // The manifest of the released cui.c3l -- not used when building this repo, which
-  // reads project.json and each dependency manifest in lib/. The c3w platform folders
-  // are globbed on purpose: listing their files by hand let window.c3l add linux/xkb.c3
-  // without this list following, and the artifact then failed to compile on Linux --
-  // caught only by the release verify job. Keep them globs.
+
   "provides" : "cui",
   "sources" : [
     "src/**",

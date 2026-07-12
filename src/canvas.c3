@@ -3,8 +3,10 @@ import std::collections::list;
 import std::math;
 import std::math::matrix;
 
-// SDF primitive kinds, dispatched in the fragment shader. The values are the
-// GPU contract: they must match the KIND_* constants in shader.slang.
+<*
+ SDF primitive kinds, dispatched in the fragment shader. The values are the GPU
+ contract: they must match the KIND_* constants in shader.slang.
+*>
 constdef DrawingKind : inline uint
 {
     RECT = 0,
@@ -14,16 +16,26 @@ constdef DrawingKind : inline uint
     SHADOW = 4,
 }
 
-// Opaque texture handle referenced by drawings; 0 = untextured. Handles come
-// from the backend that consumes the canvas — with the built-in renderer,
-// from cui::vulkan Renderer.load_image / load_pixels. The value is a 1-based
-// index into the backend's sampler array (shader binding 1).
+<*
+ Opaque texture handle referenced by drawings; 0 = untextured. Handles come from
+ the backend that consumes the canvas — with the built-in renderer, from
+ `cui::vulkan` `Renderer.load_image` / `load_pixels`. The value is a 1-based
+ index into the sampler array of the backend (shader binding 1).
+*>
 typedef Texture = int;
+
+<*
+ The untextured handle: a drawing carrying this samples no image.
+*>
 const Texture NO_TEXTURE = (Texture)0;
 
-// One GPU-side primitive. Field order and sizes must match struct Drawing in
-// shader.slang (scalar layout): keep 4-byte fields in groups of four so the
-// Vec2/Vec4 members land on the same offsets on both sides.
+<*
+ One GPU-side primitive, produced by Painter and consumed by the renderer.
+
+ Field order and sizes must match `struct Drawing` in shader.slang (scalar
+ layout): keep 4-byte fields in groups of four so the Vec2/Vec4 members land on
+ the same offsets on both sides.
+*>
 struct Drawing {
     DrawingKind kind;
     int texture;            // Texture handle as raw int; 0 = untextured
@@ -47,25 +59,33 @@ struct Drawing {
     uint reserved2;
 }
 
-// One clip region, in absolute PRE-transform UI pixels: the fragment shader
-// compares the UI-space position a drawing was emitted at, so a clip travels
-// with any palette transform applied on top (Flutter-consistent) instead of
-// staying screen-fixed. Read by the shader as two raw float4s per entry — no
-// matrices, no structs (see the BDA note in shader.slang).
+<*
+ One clip region, in absolute PRE-transform UI pixels: the fragment shader
+ compares the UI-space position a drawing was emitted at, so a clip travels with
+ any palette transform applied on top (Flutter-consistent) instead of staying
+ screen-fixed. Read by the shader as two raw float4s per entry — no matrices, no
+ structs (see the BDA note in shader.slang).
+*>
 struct ClipEntry {
     Vec4 rect;              // {min.x, min.y, max.x, max.y}
     Vec4 radii;             // per-corner px {TL, TR, BR, BL}
 }
 
-// Slot 0 = "no clip". The shader early-outs on clip_id == 0; the huge rect is
-// belt and braces.
+<*
+ Slot 0 = "no clip". The shader early-outs on `clip_id == 0`; the huge rect is
+ belt and braces.
+*>
 const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = {} };
 
-// Everything the renderer consumes per frame: the retained display list, the
-// transform palette and the clip list. Slot 0 of the palette is always
-// identity; elements without their own transform inherit whatever slot their
-// ancestor uses. The clip list is rebuilt on every emit (clip rects depend on
-// absolute origins); slot 0 is always NO_CLIP_ENTRY.
+<*
+ Everything the renderer consumes per frame: the retained display list, the
+ transform palette and the clip list.
+
+ Slot 0 of the palette is always identity; elements without their own transform
+ inherit whatever slot their ancestor uses. The clip list is rebuilt on every
+ emit (clip rects depend on absolute origins); slot 0 is always `NO_CLIP_ENTRY`.
+ The `*_dirty` flags tell the backend which of the three buffers to re-upload.
+*>
 struct Canvas {
     List{Drawing} drawings;
     List{Matrix4f} transforms;
@@ -75,6 +95,10 @@ struct Canvas {
     bool clips_dirty;
 }
 
+<*
+ Seeds the identity transform and the no-clip entry in slot 0 of each list.
+ Called by `new_ui`.
+*>
 fn void Canvas.init(&self)
 {
     self.transforms.push(matrix::IDENTITY4);
@@ -84,6 +108,9 @@ fn void Canvas.init(&self)
     self.clips_dirty = true;
 }
 
+<*
+ Frees the three lists. Called by `Ui.free`.
+*>
 fn void Canvas.free(&self)
 {
     self.drawings.free();

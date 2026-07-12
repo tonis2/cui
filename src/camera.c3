@@ -1,30 +1,57 @@
-// Projection/view math for the cui shader's uniform block. Vulkan-free, so
-// embedding engines can reuse it to produce the exact matrices the shader
-// expects (upload transposed — see cui::ShaderUniforms in shader.c3).
+<*
+ Projection/view math for the uniform block of the cui shader. Vulkan-free, so
+ embedding engines can reuse it to produce the exact matrices the shader expects
+ (upload transposed — see `cui::ShaderUniforms` in shader.c3).
+*>
 module cui::camera;
 import std::math;
 import std::io;
 
+<*
+ Degrees to radians.
+
+ @param value : `The angle in degrees.`
+ @return `The angle in radians.`
+*>
 fn float radians(float value) {
     return value * (float)math::PI / 180;
 }
 
+<*
+ The matrices a camera hands the shader, already transposed for upload.
+*>
 struct UniformData {
     Matrix4f projection;
     Matrix4f view;
     Vec3 eye;
 }
 
+<*
+ An orbit camera: an eye looking at a target, with pitch/yaw and a zoom along the
+ view axis. UI rendering uses it through `ui_view`, which makes canvas pixels map
+ one-to-one to screen pixels.
+*>
 struct Camera {
     Vec3 target;
     Vec3 eye;
     Matrix4f perspective;
-    Matrix4f view;    
+    Matrix4f view;
     float pitch;
     float yaw;
     float zoom_value;
 }
 
+<*
+ Creates a camera with its perspective and view matrices built.
+
+ @param target : `The point the camera looks at.`
+ @param eye : `The camera position.`
+ @param aspect : `Viewport aspect ratio (width / height).`
+ @param view : `Vertical field of view, in degrees.`
+ @param min_zoom : `Near plane distance.`
+ @param max_zoom : `Far plane distance.`
+ @return `The camera.`
+*>
 fn Camera new(Vec3 target = {0.0, 0.0, 0.0}, Vec3 eye = {0.0, 0.0, 0.0}, float aspect = 0.8, float view = 45, float min_zoom = 0.1, float max_zoom = 500) {
     return {
         target,
@@ -37,6 +64,13 @@ fn Camera new(Vec3 target = {0.0, 0.0, 0.0}, Vec3 eye = {0.0, 0.0, 0.0}, float a
     };
 }
 
+<*
+ Orbits the eye around the target. Pitch is clamped to ±89° so the view never
+ flips through the pole.
+
+ @param x_offset : `Yaw change, in degrees.`
+ @param y_offset : `Pitch change, in degrees.`
+*>
 fn void Camera.rotate (Camera* self, float x_offset, float y_offset) {
     self.yaw += x_offset;
     self.pitch += y_offset;
@@ -58,20 +92,32 @@ fn void Camera.rotate (Camera* self, float x_offset, float y_offset) {
     self.view.m23 = self.zoom_value;
 }
 
+<*
+ Moves the eye along the view axis. Ignored when it would push the camera through
+ the target.
+
+ @param value : `The zoom delta; negative moves closer.`
+*>
 fn void Camera.zoom(Camera* self, float value) {
     if (self.zoom_value + value > 0) return;
     self.zoom_value += value;
     self.view.m23 += value;
 }
 
-// View matrix for UI rendering: the camera's view with a compensating scale
-// baked in. The raw perspective maps the unit z=0 plane to f/aspect (x) and
-// f (y) in clip space instead of exactly 2.0, so drawings land at ~94% / ~121%
-// of their pixel coordinates. Scaling by 2/P[0][0] and 2/P[1][1] cancels that:
-// canvas coordinates become pixel-exact while model transforms keep their
-// perspective depth (w still varies once a transform rotates off the plane).
-// The scale is composed innermost (applied before the camera transform),
-// which in this storage means scaling the view's first two columns.
+<*
+ View matrix for UI rendering: the camera view with a compensating scale baked
+ in, so canvas pixels land exactly on screen pixels.
+
+ The raw perspective maps the unit z=0 plane to f/aspect (x) and f (y) in clip
+ space instead of exactly 2.0, so drawings would land at ~94% / ~121% of their
+ pixel coordinates. Scaling by 2/P[0][0] and 2/P[1][1] cancels that: canvas
+ coordinates become pixel-exact while model transforms keep their perspective
+ depth (w still varies once a transform rotates off the plane). The scale is
+ composed innermost (applied before the camera transform), which in this storage
+ means scaling the first two columns of the view.
+
+ @return `The view matrix to upload for UI rendering.`
+*>
 fn Matrix4f Camera.ui_view(&self)
 {
     float sx = 2.0f / self.perspective.m00;     // = 2 * aspect / f
@@ -88,6 +134,11 @@ fn Matrix4f Camera.ui_view(&self)
     return v;
 }
 
+<*
+ The camera matrices, transposed and ready for `ShaderUniforms`.
+
+ @return `Projection, view and eye position.`
+*>
 fn UniformData Camera.matrix(Camera self) {
     return {
         self.perspective.transpose(),
@@ -96,6 +147,14 @@ fn UniformData Camera.matrix(Camera self) {
     };
 }
 
+<*
+ A look-at view matrix.
+
+ @param eye : `The camera position.`
+ @param target : `The point to look at.`
+ @param up : `The up axis.`
+ @return `The view matrix.`
+*>
 fn Matrix4f matrix_look_at(Vec3 eye, Vec3 target, Vec3 up)
 {
 	Vec3 vz = (eye - target).normalize();
@@ -110,6 +169,15 @@ fn Matrix4f matrix_look_at(Vec3 eye, Vec3 target, Vec3 up)
 	};
 }
 
+<*
+ A perspective projection matrix.
+
+ @param fov : `Vertical field of view, in radians.`
+ @param aspect_ratio : `Viewport width / height.`
+ @param near : `Near plane distance.`
+ @param far : `Far plane distance.`
+ @return `The projection matrix.`
+*>
 fn Matrix4f perspective(float fov, float aspect_ratio, float near, float far)
 {
 	float f = (float)math::tan(math::PI * 0.5 - 0.5 * fov);
@@ -124,6 +192,17 @@ fn Matrix4f perspective(float fov, float aspect_ratio, float near, float far)
 }
 
 
+<*
+ An orthographic projection matrix.
+
+ @param left : `Left plane.`
+ @param right : `Right plane.`
+ @param bottom : `Bottom plane.`
+ @param top : `Top plane.`
+ @param near : `Near plane.`
+ @param far : `Far plane.`
+ @return `The projection matrix.`
+*>
 fn Matrix4f ortho(float left, float right, float bottom, float top, float near, float far)
 {
     float width = right - left;
@@ -143,6 +222,13 @@ fn Matrix4f ortho(float left, float right, float bottom, float top, float near, 
 }
 
 
+<*
+ A rotation matrix around an arbitrary axis.
+
+ @param axis : `The axis to rotate around; normalized internally.`
+ @param angle : `The rotation, in degrees.`
+ @return `The rotation matrix.`
+*>
 fn Matrix4f matrixRotation(Vec3 axis, float angle)
 {
     Vec3 norm_axis = axis.normalize();

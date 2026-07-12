@@ -28,6 +28,14 @@
 *.so.*
 *.dylib
 
+# ...except the Vulkan libraries the release artifact ships, which are committed
+# on purpose (see vulkan/README.md). Without these exceptions the rules above --
+# *.a, *.lib, *.so, *.dylib -- would silently drop them from a commit.
+!vulkan/**/*.a
+!vulkan/**/*.lib
+!vulkan/**/*.so
+!vulkan/**/*.dylib
+
 # Executables
 *.exe
 *.out
@@ -55,7 +63,7 @@ dkms.conf
 # serves it — so only the raw docgen output at the repo root is ignored.
 /docs.html
 
-# Release packaging: the .c3l artifact and the vendored dependency tree staged
-# into it. Both are built by .github/workflows/release.yml.
+# Release packaging: the .c3l artifact and the staging tree assembled into it.
+# Both are built by .github/workflows/release.yml.
 /cui.c3l
-/deps
+/pkg

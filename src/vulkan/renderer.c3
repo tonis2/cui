@@ -14,6 +14,7 @@
 *>
 module cui::vulkan;
 import std::io;
+import std::os::env;
 import std::collections::list;
 import std::math;
 import std::time;
@@ -25,6 +26,40 @@ import cui::camera;
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
+
+<*
+ The Vulkan driver cui ships for macOS, which is the one platform with no system
+ Vulkan at all. Linux and Windows are absent on purpose: there the driver is
+ bound to the GPU and the kernel module, so the machine's own is the only correct
+ one — and it is always already installed. See vk::driver.
+*>
+const String BUNDLED_DRIVER @private = "libvulkan_kosmickrisp.dylib";
+
+<*
+ Where cui looks for the driver it ships, most preferred first: an explicit
+ `$CUI_VULKAN_DRIVER` override, next to the running executable (where a
+ distributed app keeps it), then the folder c3c unpacks a .c3l into (so a fresh
+ `c3c run` works straight after downloading cui.c3l).
+
+ Finding nothing is not an error: the loader then discovers an installed driver
+ itself, which is what happens when developing against a system Vulkan SDK.
+
+ @return? vk::DRIVER_NOT_LOADED : `No bundled driver — fall back to the loader's own discovery.`
+*>
+fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @private
+{
+	String[3] candidates;
+	usz count = 0;
+
+	if (try override = std::os::env::tget_var("CUI_VULKAN_DRIVER")) candidates[count++] = override;
+	if (try exe = std::os::env::executable_path())
+	{
+		if (try dir = exe.path_tdirname()) candidates[count++] = string::tformat("%s/%s", dir, BUNDLED_DRIVER);
+	}
+	candidates[count++] = string::tformat("build/unpacked_c3l/cui.c3l/macos-aarch64/%s", BUNDLED_DRIVER);
+
+	return vk::findDriver(candidates[:count]);
+}
 
 <*
  Upper bound on a frame delta, in seconds. A stall — or waking from an on-demand
@@ -164,10 +199,27 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     device_extensions.push_all({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
     extensions.push_all({"VK_KHR_surface"});
 
+    // VK_KHR_portability_enumeration is implemented by the Vulkan loader, not by the
+    // driver. A build that links a driver directly (no loader) does not advertise it,
+    // so request it -- and the matching instance flag -- only when it is present.
+    bool portability = false;
+
     // Surface extensions per-platform / backend (replaces glfw::getRequiredExtensions)
     $switch (env::OS_TYPE):
         $case MACOS:
-            extensions.push_all({"VK_EXT_metal_surface", "VK_KHR_portability_enumeration"});
+            extensions.push("VK_EXT_metal_surface");
+            ZStringList portability_probe;
+            portability_probe.push("VK_KHR_portability_enumeration");
+            if (catch vk::checkInstanceExtensionSupport(portability_probe))
+            {
+                portability = false;
+            }
+            else
+            {
+                portability = true;
+                extensions.push("VK_KHR_portability_enumeration");
+            }
+            portability_probe.free();
         $case WIN32:
             extensions.push_all({"VK_KHR_win32_surface"});
         $case LINUX:
@@ -183,7 +235,30 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
      extensions.push("VK_EXT_debug_utils");
     }
 
-    vk::checkInstanceExtensionSupport(extensions)!;
+    // If cui ships a driver (macOS), hand it straight to the loader rather than
+    // relying on a system installation that may not exist. Both halves must hold:
+    // a driver we can open, and a loader new enough to accept one.
+    vk::DirectDriverLoadingInfoLUNARG bundled_driver;
+    vk::DirectDriverLoadingListLUNARG bundled_drivers;
+    bool direct_driver = false;
+
+    if (try icd = find_bundled_driver())
+    {
+        if (vk::supportsDirectDriverLoading())
+        {
+            bundled_driver = vk::directDriverInfo(icd);
+            bundled_drivers = vk::directDriverList(&bundled_driver, 1);
+            extensions.push(vk::DIRECT_DRIVER_LOADING_EXTENSION_NAME);
+            direct_driver = true;
+        }
+    }
+
+    // Only meaningful against drivers the loader has already discovered: instance
+    // extensions are enumerated before the instance exists, so a driver supplied at
+    // create time is invisible here -- with nothing installed, even VK_KHR_surface
+    // reads as unsupported. vkCreateInstance validates the list against the bundled
+    // driver instead.
+    if (!direct_driver) vk::checkInstanceExtensionSupport(extensions)!;
 
     ApplicationInfo app_info = {
       .pApplicationName = "TEST",
@@ -195,13 +270,17 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
     InstanceCreateInfo instance_info = vk::instanceCreateInfo()
     .setApplicationInfo(&app_info)
-    .setFlags(env::os_is_darwin() ? vk::InstanceCreateFlagBits.INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : (vk::InstanceCreateFlags)0)
+    .setFlags(portability ? vk::InstanceCreateFlagBits.INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : (vk::InstanceCreateFlags)0)
     .setEnabledExtensionNames(extensions.array_view());
 
     if (enable_debug) {
       instance_info.enabledLayerCount = (uint)validations.len();
       instance_info.ppEnabledLayerNames = (char*)validations.entries;
     }
+
+    // Chained last: bundled_drivers must outlive the create call, and it does --
+    // it lives in this frame, as does the instance_info it hangs off.
+    if (direct_driver) instance_info.pNext = &bundled_drivers;
 
     Instance instance = instance_info.build()!;
     vk::loadExtensions(instance);
@@ -211,7 +290,13 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     }
 
     // Create surface
-    renderer.surface = (SurfaceKHR)window.create_vk_surface(instance)!;
+    // Hand the window our vkGetInstanceProcAddr rather than letting it hunt for a
+    // Vulkan dylib: with the loader linked in statically there is no dylib to find,
+    // and its symbols are hidden from dlsym.
+    renderer.surface = (SurfaceKHR)window.create_vk_surface(
+        instance,
+        (c3w::VkGetInstanceProcAddrFn)&vk::getInstanceProcAddr
+    )!;
 
     // Pick a physical device + graphics queue
     vk::DeviceSelection selection = vk::selectPhysicalDevice(instance, renderer.surface, device_extensions)!;

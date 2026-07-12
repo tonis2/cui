@@ -105,8 +105,10 @@ editing `src/shaders/shader.slang`.
 
 Every version tag (`v0.1.0`, …) publishes a **self-contained `cui.c3l`** on the
 [releases page](https://github.com/tonis2/cui/releases/latest). The Vulkan
-bindings, windowing and image loaders are vendored inside it, so it is the only
-file you need — drop it into your library folder and depend on `cui` alone:
+bindings, windowing, image loaders and the Vulkan libraries themselves are
+vendored inside it — one artifact for macOS, Linux and Windows, and **no Vulkan
+SDK to install**. It is the only file you need: drop it into your library folder
+and depend on `cui` alone:
 
 ```json
 {
@@ -121,6 +123,12 @@ file you need — drop it into your library folder and depend on `cui` alone:
   }
 }
 ```
+
+On macOS the Vulkan loader is linked in statically and a driver (KosmicKrisp)
+ships inside the artifact, so an app runs with nothing installed at all. On Linux
+and Windows the bundled library is used only to link — at runtime the machine's
+own loader and GPU driver are used, since a driver is bound to the GPU and cannot
+be shipped. See [vulkan/README.md](vulkan/README.md).
 
 To work on cui itself, clone with `--recurse-submodules` instead — the
 dependencies live in `lib/` as submodules.

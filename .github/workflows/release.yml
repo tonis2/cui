@@ -14,7 +14,149 @@ env:
   C3C_VERSION: v0.8.2
 
 jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.name }}
+          submodules: recursive
+
+      - name: Build cui.c3l
+        # Nothing is compiled or downloaded here: the Vulkan libraries are
+        # committed under vulkan/ (refresh them with the vendor-vulkan workflow),
+        # so a release is just a zip of files that were tested as-is.
+        #
+        # One artifact serves every platform. A .c3l holds a directory per target
+        # and c3c adds the matching one to the linker search path, so the same
+        # cui.c3l builds a macOS, Linux or Windows app -- with no Vulkan SDK.
+        run: |
+          set -e
+          mkdir -p pkg/deps/vk pkg/deps/image pkg/deps/c3w
+          cp -R src pkg/src
+          cp manifest.json pkg/
+
+          # vk, c3w and image are vendored in, so a consumer depends on "cui" alone.
+          cp -R lib/vulkan.c3l/vk/. pkg/deps/vk/
+          cp -R lib/image.c3l/src/. pkg/deps/image/
+          cp -R lib/window.c3l/main.c3 \
+                lib/window.c3l/darwin \
+                lib/window.c3l/linux \
+                lib/window.c3l/win32 pkg/deps/c3w/
+
+          # vulkan/ mirrors the .c3l's target-directory layout. Copied target by
+          # target: a trailing-slash "cp -R vulkan/*/ pkg/" means different things
+          # to GNU and BSD cp, and README.md must not land in the artifact.
+          # Missing files fail the release rather than shipping an artifact that
+          # cannot link on some platform.
+          mkdir -p pkg/macos-aarch64 pkg/linux-x64 pkg/windows-x64
+          cp vulkan/macos-aarch64/* pkg/macos-aarch64/
+          cp vulkan/linux-x64/*     pkg/linux-x64/
+          cp vulkan/windows-x64/*   pkg/windows-x64/
+          test -f pkg/macos-aarch64/libvulkan.a
+          test -f pkg/macos-aarch64/libvulkan_kosmickrisp.dylib
+          test -f pkg/linux-x64/libvulkan.so
+          test -f pkg/windows-x64/vulkan.lib
+
+          cd pkg && zip -qr ../cui.c3l . && cd ..
+          unzip -l cui.c3l | grep -E 'macos-aarch64|linux-x64|windows-x64'
+
+      - name: Upload cui.c3l
+        uses: actions/upload-artifact@v4
+        with:
+          name: cui.c3l
+          path: cui.c3l
+          if-no-files-found: error
+
+  # Prove the artifact links on every platform before publishing it. A broken
+  # manifest or a stale Vulkan library fails the release instead of shipping a
+  # .c3l nobody can build against. Building is the whole test -- the runners have
+  # no GPU, so nothing is run.
+  verify:
+    needs: package
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Fetch cui.c3l
+        uses: actions/download-artifact@v4
+        with:
+          name: cui.c3l
+          path: consumer/lib
+
+      - name: Install C3
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   curl -fsSL "https://github.com/c3lang/c3c/releases/download/${C3C_VERSION}/c3-linux.tar.gz" -o c3.tgz && tar xzf c3.tgz ;;
+            macOS)   curl -fsSL "https://github.com/c3lang/c3c/releases/download/${C3C_VERSION}/c3-macos.zip"    -o c3.zip && unzip -q c3.zip ;;
+            Windows) curl -fsSL "https://github.com/c3lang/c3c/releases/download/${C3C_VERSION}/c3-windows.zip"  -o c3.zip && unzip -q c3.zip ;;
+          esac
+          chmod +x c3/c3c || true
+          echo "$PWD/c3" >> "$GITHUB_PATH"
+
+      - name: Consumer project depending on cui alone
+        shell: bash
+        run: |
+          mkdir -p consumer/src
+          cat > consumer/project.json <<'EOF'
+          {
+            "langrev": "1",
+            "warnings": [ "no-unused" ],
+            "dependency-search-paths": [ "lib" ],
+            "dependencies": [ "cui" ],
+            "sources": [ "src/**" ],
+            "output": "build",
+            "targets": { "smoke": { "type": "executable" } }
+          }
+          EOF
+          # Referencing the renderer forces vk and c3w to compile AND the platform's
+          # Vulkan library to link -- which is exactly what is being verified.
+          cat > consumer/src/main.c3 <<'EOF'
+          module smoke;
+          import cui;
+          import cui::widgets;
+          import cui::vulkan;
+
+          fn int main()
+          {
+          	void* renderer_entry = (void*)&cui::vulkan::new;
+          	Constraints c = { .min = { 0, 0 }, .max = { 320, 240 } };
+          	Rectangle r = { .size = { 10, 10 } };
+          	return renderer_entry == null ? 1 : (int)cui::clamp_size(r.size, c).x;
+          }
+          EOF
+
+      - name: Build against cui.c3l
+        shell: bash
+        working-directory: consumer
+        run: c3c build smoke
+
+      - name: No Vulkan dylib dependency (macOS)
+        if: runner.os == 'macOS'
+        working-directory: consumer
+        run: |
+          # The loader is linked in statically, so a macOS app must not reference
+          # any Vulkan dylib -- that is what makes it run with nothing installed.
+          if otool -L build/smoke | grep -iE 'vulkan|moltenvk'; then
+            echo "unexpected Vulkan dylib dependency"; exit 1
+          fi
+          echo "self-contained: no Vulkan dylib dependency"
+
   release:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release, and push the regenerated docs
@@ -32,26 +174,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Build the release from the tagged commit, whichever way we were
-          # triggered. Dependencies live in lib/*.c3l as submodules; docgen has
-          # to compile them. Full history so the docs commit can land on main.
+          # Build the docs from the tagged commit. Dependencies live in lib/*.c3l
+          # as submodules; docgen has to compile them. Full history so the docs
+          # commit can land on main.
           ref: ${{ steps.tag.outputs.name }}
           submodules: recursive
           fetch-depth: 0
 
-      - name: Build cui.c3l
-        # Self-contained: vk, c3w and image are vendored into deps/ so a consumer
-        # drops one file into lib/ and depends on "cui" alone. The paths staged
-        # here are the ones manifest.json globs.
-        run: |
-          mkdir -p deps/vk deps/image deps/c3w
-          cp -R lib/vulkan.c3l/vk/. deps/vk/
-          cp -R lib/image.c3l/src/. deps/image/
-          cp -R lib/window.c3l/main.c3 \
-                lib/window.c3l/darwin \
-                lib/window.c3l/linux \
-                lib/window.c3l/win32 deps/c3w/
-          zip -qr cui.c3l ./src ./deps manifest.json
+      - name: Fetch cui.c3l
+        uses: actions/download-artifact@v4
+        with:
+          name: cui.c3l
 
       - name: Install C3
         run: |

@@ -1,7 +1,17 @@
-// Reference backend: standalone window + swapchain renderer for cui. Engines
-// with their own device and frame loop implement the same steps against the
-// exports in src/shader.c3 instead (see "Embedding in a Vulkan engine" in
-// README.md); this file doubles as the worked example.
+<*
+ Reference backend: a standalone window + swapchain renderer for cui.
+
+ Create one with `new`, then drive it with `frame(ui)` — it polls input,
+ dispatches to the widgets, flushes the Ui, records the canvas as one instanced
+ draw and presents:
+
+     `Renderer renderer = vulkan::new(window_size)!!;`
+     `while (renderer.frame(ui)!!) { }`
+
+ Engines with their own device and frame loop implement the same steps against
+ the exports in src/shader.c3 instead (see "Embedding in a Vulkan engine" in
+ README.md); this module doubles as the worked example.
+*>
 module cui::vulkan;
 import std::io;
 import std::collections::list;
@@ -16,20 +26,25 @@ import cui::camera;
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
 
-// dt is clamped to this so a stall — or waking from an on-demand sleep after
-// minutes idle — can't hand animations one enormous step. Also the usual
-// spiral-of-death guard.
+<*
+ Upper bound on a frame delta, in seconds. A stall — or waking from an on-demand
+ sleep after minutes idle — must not hand animations one enormous step. Also the
+ usual spiral-of-death guard.
+*>
 const float MAX_FRAME_DT = 0.1;
 
-// How the reference frame loop paces itself:
-//   CONTINUOUS  redraw every frame, poll input, run at the display's refresh
-//               rate (FIFO present) forever. Lowest latency; a core stays busy.
-//               Right when something is always animating.
-//   ON_DEMAND   after a frame, if nothing scheduled another (ui.frame_requested
-//               is clear), block for input — the thread sleeps at 0% CPU until
-//               the user does something. Right for mostly-static desktop UIs.
-//               A running animation keeps scheduling frames, so it still plays
-//               smoothly; the loop only sleeps once everything settles.
+<*
+ How the reference frame loop paces itself.
+
+ - CONTINUOUS — redraw every frame, poll input, run at the refresh rate of the
+   display (FIFO present) forever. Lowest latency; a core stays busy. Right when
+   something is always animating.
+ - ON_DEMAND — after a frame, if nothing scheduled another (`ui.frame_requested`
+   is clear), block for input: the thread sleeps at 0% CPU until the user does
+   something. Right for mostly-static desktop UIs. A running animation keeps
+   scheduling frames, so it still plays smoothly; the loop only sleeps once
+   everything settles.
+*>
 enum LoopMode
 {
     CONTINUOUS,
@@ -43,6 +58,11 @@ const INITIAL_DRAWINGS = 64;
 const INITIAL_TRANSFORMS = 16;
 const INITIAL_CLIPS = 16;
 
+<*
+ The window, the Vulkan device and everything the frame loop needs. Owns the
+ three device-address buffers the shader reads (drawings, transforms, clips) and
+ the texture array. Create with `new`, release with `free`.
+*>
 struct Renderer {
 	Camera camera;
 	Vec2 window_size;
@@ -94,6 +114,15 @@ struct Renderer {
 }
 
 
+<*
+ Opens a window and brings up the whole Vulkan stack for it: instance, device,
+ swapchain, buffers and pipeline.
+
+ @param window_size : `The window content size in pixels; also the root constraints for the Ui.`
+ @param enable_debug : `Turn on the Vulkan validation layers and the debug messenger.`
+ @param loop_mode : `Whether frame() redraws continuously or sleeps until input arrives.`
+ @return `The renderer, ready for frame().`
+*>
 fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopMode loop_mode = CONTINUOUS) {
 
 	ZStringList validations;
@@ -356,27 +385,45 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 }
 
 
-// Uploads an image file (png/jpg) to the GPU and returns the handle to
-// reference it with (RectStyle.texture). Textures can be loaded at any time;
-// ones loaded between frames become valid on the next frame() call (the
-// pipeline is rebuilt for the new sampler count at the top of a frame).
+<*
+ Uploads an image file (png/jpg) to the GPU and returns the handle to reference
+ it with (`RectStyle.texture` / `CircleStyle.texture`).
+
+ Textures can be loaded at any time; ones loaded between frames become valid on
+ the next `frame()` call (the pipeline is rebuilt for the new sampler count at the
+ top of a frame).
+
+ @param path : `Path to a png or jpg file.`
+ @return `The texture handle.`
+*>
 fn cui::Texture? Renderer.load_image(&self, String path)
 {
     self.textures.loadPath(path, &self.allocator, self.graphics_queue)!;
     return (cui::Texture)self.textures.len();
 }
 
-// Same, from raw RGBA8 pixels (e.g. a generated atlas).
+<*
+ Uploads raw RGBA8 pixels (a generated atlas, say) and returns the handle to
+ reference them with.
+
+ @param rgba : `Tightly packed RGBA8 pixels, width * height * 4 bytes.`
+ @param width : `Image width in pixels.`
+ @param height : `Image height in pixels.`
+ @require rgba.len >= (usz)width * height * 4 : `The pixel buffer is smaller than width * height * 4 bytes.`
+ @return `The texture handle.`
+*>
 fn cui::Texture? Renderer.load_pixels(&self, char[] rgba, uint width, uint height)
 {
     self.textures.load_rgba(rgba, width, height, &self.allocator, self.graphics_queue)!;
     return (cui::Texture)self.textures.len();
 }
 
-// (Re)creates the descriptor layout and pipeline for the current texture
-// count. Runs before the first frame and again whenever load_image grew the
-// texture array; the GPU is idled first since in-flight frames still use the
-// old pipeline.
+<*
+ (Re)creates the descriptor layout and pipeline for the current texture count.
+
+ Runs before the first frame and again whenever `load_image` grew the texture
+ array; the GPU is idled first, since in-flight frames still use the old pipeline.
+*>
 fn void? Renderer.rebuild_pipeline(&self)
 {
     if (self.pipeline_texture_count > 0) {
@@ -449,6 +496,11 @@ fn void? Renderer.rebuild_pipeline(&self)
     self.pipeline_texture_count = self.textures.len();
 }
 
+<*
+ Idles the GPU, then tears down everything `new` created: buffers, textures,
+ swapchain, pipeline, device, window. The Ui is separate — free it with
+ `Ui.free`.
+*>
 fn void Renderer.free(&self) {
     self.device.waitIdle();
     if (self.enable_debug) self.debug_messenger.free(self.instance);
@@ -485,10 +537,16 @@ fn void Renderer.free(&self) {
 }
 
 
-// Grows a device-address buffer to fit `needed` bytes, doubling so growth is
-// rare. The GPU is idled first: frames in flight may still read the old
-// buffer. Callers re-push the new address every frame, so nothing else needs
-// to know the buffer moved.
+<*
+ Grows a device-address buffer to fit `needed` bytes, doubling so growth is rare.
+
+ The GPU is idled first: frames in flight may still read the old buffer. Callers
+ re-push the new address every frame, so nothing else needs to know the buffer
+ moved.
+
+ @param buffer : `The buffer to grow in place. Freed and reallocated when it is too small.`
+ @param needed : `The size the next upload needs, in bytes.`
+*>
 fn void? Renderer.ensure_buffer_capacity(&self, vk::Memory* buffer, sz needed)
 {
     if (needed <= buffer.size) return;
@@ -507,8 +565,14 @@ fn void? Renderer.ensure_buffer_capacity(&self, vk::Memory* buffer, sz needed)
     )!;
 }
 
-// c3w's EventMap mixes keyboard keys and mouse buttons; buttons feed
-// InputFrame.buttons, everything else becomes a cui::Key.
+<*
+ Whether a c3w event key is really a mouse button. The EventMap of c3w mixes
+ keyboard keys and mouse buttons; buttons feed `InputFrame.buttons`, everything
+ else becomes a `cui::Key`.
+
+ @param key : `The c3w event key.`
+ @return `True for mouse buttons and wheel events.`
+*>
 fn bool is_mouse_key(c3w::EventKey key)
 {
     switch (key) {
@@ -525,6 +589,12 @@ fn bool is_mouse_key(c3w::EventKey key)
     }
 }
 
+<*
+ Maps a `cui::Cursor` to the c3w shape the window manager understands.
+
+ @param cursor : `The cursor cui resolved for this frame.`
+ @return `The matching c3w cursor shape.`
+*>
 fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
 {
     switch (cursor) {
@@ -540,18 +610,26 @@ fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
     }
 }
 
-// Runs one frame: poll input → dispatch to widgets → flush → record → present.
-// Returns false when the user asked to quit (ESCAPE or window close). The app
-// owns the loop; per-frame logic goes in the body, reading ui.input directly:
-//
-//     while (renderer.frame(ui)!!)
-//     {
-//         // app/game logic — mutations made here render on the next call
-//     }
-//
-// In ON_DEMAND mode the call blocks for input when nothing scheduled a frame,
-// so the loop body only runs when frames do — a game simulation that must tick
-// every iteration wants CONTINUOUS.
+<*
+ Runs one frame: poll input, dispatch to the widgets, flush the Ui, record the
+ canvas and present.
+
+ The app owns the loop; per-frame logic goes in the body, reading `ui.input`
+ directly:
+
+     `while (renderer.frame(ui)!!)`
+     `{`
+     `    // app/game logic — mutations made here render on the next call`
+     `}`
+
+ In ON_DEMAND mode the call blocks for input when nothing scheduled a frame, so
+ the loop body only runs when frames do — a game simulation that must tick every
+ iteration wants CONTINUOUS.
+
+ @param ui : `The Ui to drive. Its size tracks the window across resizes.`
+ @require ui != null : `frame() needs a Ui.`
+ @return `False when the user asked to quit (ESCAPE or window close).`
+*>
 fn bool? Renderer.frame(&self, Ui* ui)
 {
     Canvas* canvas = &ui.canvas;

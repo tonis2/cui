@@ -20,36 +20,31 @@
       "type": "executable",
       "sources": [ "src/**", "test/main.c3" ],
       "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["/usr/local/lib"],
-      "link-args": ["-rpath", "/usr/local/lib"]
+      "linker-search-paths": ["vulkan/linux-x64"]
     },
     "layout": {
       "type": "executable",
       "sources": [ "src/**", "test/layout.c3" ],
       "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["/usr/local/lib"],
-      "link-args": ["-rpath", "/usr/local/lib"]
+      "linker-search-paths": ["vulkan/linux-x64"]
     },
     "composite": {
       "type": "executable",
       "sources": [ "src/**", "test/composite.c3" ],
       "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["/usr/local/lib"],
-      "link-args": ["-rpath", "/usr/local/lib"]
+      "linker-search-paths": ["vulkan/linux-x64"]
     },
     "scroll": {
       "type": "executable",
       "sources": [ "src/**", "test/scroll.c3" ],
       "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["/usr/local/lib"],
-      "link-args": ["-rpath", "/usr/local/lib"]
+      "linker-search-paths": ["vulkan/linux-x64"]
     },
     "unittest": {
       "type": "executable",
       "sources": [ "src/**" ],
       "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["/usr/local/lib"],
-      "link-args": ["-rpath", "/usr/local/lib"]
+      "linker-search-paths": ["vulkan/linux-x64"]
     }
   },
   "cpu": "generic",

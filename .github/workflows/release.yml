@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*" # e.g. v0.1.0 — releases are cut from tags, not from every push
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build the release from, e.g. v0.1.0"
+        required: true
+
+env:
+  C3C_VERSION: v0.8.2
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release, and push the regenerated docs
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Build the release from the tagged commit, whichever way we were
+          # triggered. Dependencies live in lib/*.c3l as submodules; docgen has
+          # to compile them. Full history so the docs commit can land on main.
+          ref: ${{ steps.tag.outputs.name }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build cui.c3l
+        # Self-contained: vk, c3w and image are vendored into deps/ so a consumer
+        # drops one file into lib/ and depends on "cui" alone. The paths staged
+        # here are the ones manifest.json globs.
+        run: |
+          mkdir -p deps/vk deps/image deps/c3w
+          cp -R lib/vulkan.c3l/vk/. deps/vk/
+          cp -R lib/image.c3l/src/. deps/image/
+          cp -R lib/window.c3l/main.c3 \
+                lib/window.c3l/darwin \
+                lib/window.c3l/linux \
+                lib/window.c3l/win32 deps/c3w/
+          zip -qr cui.c3l ./src ./deps manifest.json
+
+      - name: Install C3
+        run: |
+          curl -fsSL "https://github.com/c3lang/c3c/releases/download/${C3C_VERSION}/c3-linux.tar.gz" -o c3.tar.gz
+          tar xzf c3.tar.gz
+          echo "$PWD/c3" >> "$GITHUB_PATH"
+
+      - name: Generate API docs
+        run: |
+          # docgen always writes ./docs.html, ignoring -o. Path mode ignores
+          # project.json dependencies, so the libs are passed explicitly --
+          # without them src/vulkan/renderer.c3 fails to compile and no page is
+          # written at all. docgen then embeds EVERY compiled module: vk alone is
+          # 5.3 MB of a 7 MB page, std another 2 MB, cui's own modules 120 KB.
+          # There is no flag to exclude them, so trim the embedded JSON after.
+          c3c docgen --libdir lib --lib vk --lib c3w --lib image src
+          python3 scripts/trim_docs.py docs.html cui
+          # Park it outside the worktree: the next step switches branches.
+          cp docs.html "$RUNNER_TEMP/index.html"
+
+      - name: Publish docs to main
+        # The tag checkout is a detached HEAD, so the docs commit is made on main
+        # explicitly. GitHub Pages serves main's /docs folder.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          mkdir -p docs
+          cp "$RUNNER_TEMP/index.html" docs/index.html
+          if [ -n "$(git status --porcelain docs)" ]; then
+            git add docs
+            git commit -m "docs: API reference for ${{ steps.tag.outputs.name }} [skip ci]"
+            git push origin main
+          else
+            echo "docs unchanged"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: cui.c3l
+          generate_release_notes: true

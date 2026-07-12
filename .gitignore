@@ -51,5 +51,11 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Generated API docs (c3c docgen)
-docs.html
+# Generated API docs (c3c docgen). docs/index.html IS committed — GitHub Pages
+# serves it — so only the raw docgen output at the repo root is ignored.
+/docs.html
+
+# Release packaging: the .c3l artifact and the vendored dependency tree staged
+# into it. Both are built by .github/workflows/release.yml.
+/cui.c3l
+/deps

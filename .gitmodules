@@ -1,9 +1,9 @@
 [submodule "lib/image.c3l"]
 	path = lib/image.c3l
-	url = git@github.com:tonis2/image.c3.git
+	url = https://github.com/tonis2/image.c3.git
 [submodule "lib/vulkan.c3l"]
 	path = lib/vulkan.c3l
-	url = git@github.com:tonis2/Vulkan.c3.git
+	url = https://github.com/tonis2/Vulkan.c3.git
 [submodule "lib/window.c3l"]
 	path = lib/window.c3l
-	url = git@github.com:tonis2/Window.c3.git
+	url = https://github.com/tonis2/Window.c3.git

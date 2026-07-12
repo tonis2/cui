@@ -101,3 +101,27 @@ Shaders are written in [Slang](https://shader-slang.org/). A prebuilt
 `shader.spv` is checked in; rebuild it with `c3c build shaders` only after
 editing `src/shaders/shader.slang`.
 
+## Using cui in your project
+
+Every version tag (`v0.1.0`, …) publishes a **self-contained `cui.c3l`** on the
+[releases page](https://github.com/tonis2/cui/releases/latest). The Vulkan
+bindings, windowing and image loaders are vendored inside it, so it is the only
+file you need — drop it into your library folder and depend on `cui` alone:
+
+```json
+{
+  "dependency-search-paths": [ "lib" ],
+  "dependencies": [ "cui" ],
+  "targets": {
+    "app": {
+      "type": "executable",
+      "linked-libraries": [ "vulkan" ],
+      "linker-search-paths": [ "/usr/local/lib" ]
+    }
+  }
+}
+```
+
+To work on cui itself, clone with `--recurse-submodules` instead — the
+dependencies live in `lib/` as submodules.
+

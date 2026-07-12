@@ -435,8 +435,8 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 	// below in this same call instead.
 	if (elem.children.len() == 1)
 	{
-		Color color = ((Vec4)self.thumb_color).w > 0 ? self.thumb_color : THUMB_COLOR_DEFAULT;
-		Element* thumb = elem.ui.@node((ScrollThumb){ .color = color });
+		Color color    = ((Vec4)self.thumb_color).w > 0 ? self.thumb_color : THUMB_COLOR_DEFAULT;
+		Element* thumb = elem.ui.@node((ScrollThumb) { .color = color });
 		thumb.parent = elem;
 		elem.children.push(thumb);
 	}
@@ -459,14 +459,14 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 
 	// Thumb: proportional length, shown only on overflow.
 	ScrollThumb* thumb = elem.children[1].widget_as(ScrollThumb);
-	bool show = max_scroll > 0;
+	bool show          = max_scroll > 0;
 	if (thumb.visible != show)
 	{
 		thumb.visible = show;
 		elem.children[1].request_paint(); // safe: the paint pass runs after layout
 	}
-	float track = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
-	float len = show ? math::clamp(track * (viewport.y / content.y), THUMB_MIN, track) : 0;
+	float track     = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
+	float len       = show ? math::clamp(track * (viewport.y / content.y), THUMB_MIN, track) : 0;
 	Vec2 thumb_size = { show ? THUMB_WIDTH : 0, len };
 	elem.layout_child(1, { .min = thumb_size, .max = thumb_size });
 	self.place_thumb(elem, viewport, max_scroll);
@@ -485,9 +485,9 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 fn void Scroll.place_thumb(&self, Element* elem, Vec2 viewport, float max_scroll)
 {
 	Element* thumb = elem.children[1];
-	float track = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
-	float travel = math::max(track - thumb.size.y, 0.0f);
-	float y = THUMB_MARGIN + (max_scroll > 0 ? travel * (self.scroll_offset / max_scroll) : 0);
+	float track    = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
+	float travel   = math::max(track - thumb.size.y, 0.0f);
+	float y        = THUMB_MARGIN + (max_scroll > 0 ? travel * (self.scroll_offset / max_scroll) : 0);
 	thumb.offset = { viewport.x - THUMB_WIDTH - THUMB_MARGIN, y };
 }
 
@@ -506,7 +506,7 @@ fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	if (max_scroll <= 0) return false;
 
 	// Wheel up (positive) moves the content down: offset shrinks.
-	float step = self.step > 0 ? self.step : SCROLL_STEP_DEFAULT;
+	float step   = self.step > 0 ? self.step : SCROLL_STEP_DEFAULT;
 	float target = math::clamp(self.scroll_offset - event.scroll * step, 0.0f, max_scroll);
 	if (target == self.scroll_offset) return false; // at a limit: let ancestors scroll
 

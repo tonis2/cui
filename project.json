@@ -3,7 +3,12 @@
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
-  "dependencies": ["vk", "c3w", "image"],
+
+  // vulkanlibs is not code: it is the Vulkan library cui ships for each platform
+  // (lib/vulkanlibs.c3l/README.md). c3c links the one matching what is being built,
+  // so a clone builds and runs with no Vulkan SDK installed. To use a Vulkan of your
+  // own instead, point "linker-search-paths" at it and build with -D SYSTEM_VULKAN.
+  "dependencies": ["vk", "c3w", "image", "vulkanlibs"],
   "features": [],
   "version": "0.1.0",
   "sources": [ "src/**" ],
@@ -18,33 +23,23 @@
     },
     "ui": {
       "type": "executable",
-      "sources": [ "src/**", "test/main.c3" ],
-      "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["vulkan/linux-x64"]
+      "sources": [ "src/**", "test/main.c3" ]
     },
     "layout": {
       "type": "executable",
-      "sources": [ "src/**", "test/layout.c3" ],
-      "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["vulkan/linux-x64"]
+      "sources": [ "src/**", "test/layout.c3" ]
     },
     "composite": {
       "type": "executable",
-      "sources": [ "src/**", "test/composite.c3" ],
-      "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["vulkan/linux-x64"]
+      "sources": [ "src/**", "test/composite.c3" ]
     },
     "scroll": {
       "type": "executable",
-      "sources": [ "src/**", "test/scroll.c3" ],
-      "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["vulkan/linux-x64"]
+      "sources": [ "src/**", "test/scroll.c3" ]
     },
     "unittest": {
       "type": "executable",
-      "sources": [ "src/**" ],
-      "linked-libraries": ["vulkan"],
-      "linker-search-paths": ["vulkan/linux-x64"]
+      "sources": [ "src/**" ]
     }
   },
   "cpu": "generic",

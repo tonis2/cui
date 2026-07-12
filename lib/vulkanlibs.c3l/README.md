@@ -1,9 +1,12 @@
 # Bundled Vulkan libraries
 
-One `cui.c3l` builds an app on every platform: a `.c3l` holds a directory per
-target, and c3c adds the matching one to the linker search path. This folder
-mirrors that layout, so cutting a release is a plain copy — no toolchains, no
-downloads, and the binaries shipped are exactly the ones that were tested.
+A library with no code in it: a manifest, and a directory of Vulkan binaries per
+target. c3c links whichever directory matches what is being built, which is what
+lets cui build on any platform from one committed set of libraries.
+
+The released `cui.c3l` carries the same directories, because a `.c3l` is exactly
+this shape — so cutting a release is a plain copy. No toolchains, no downloads, and
+the binaries shipped are the ones that were tested.
 
 | Path | Purpose | Version |
 | --- | --- | --- |
@@ -13,6 +16,26 @@ downloads, and the binaries shipped are exactly the ones that were tested.
 | `windows-x64/vulkan.lib` | Vulkan import library, **link time only** | Vulkan-Loader `vulkan-sdk-1.4.350.1` |
 
 Together these mean a consumer needs **no Vulkan SDK** on any platform.
+
+## How they get linked
+
+By default, and with no configuration on either side — building cui, or building an
+app against `cui.c3l`. c3c puts the target directory of a library on the linker
+search path, and the manifest names `vulkan` for that target; the directory it picks
+is the one matching what is being built.
+
+This is why the choice is not made in project.json: it has no per-OS sections, and
+listing every directory under `linker-search-paths` does not work either, because
+each linker scans its own name patterns across all of them, finds another platform
+library called `libvulkan` and fails to parse it. A library with a directory per
+target is the mechanism c3c has for precisely this.
+
+## Using your own Vulkan instead
+
+Point `linker-search-paths` in project.json at your own Vulkan: it wins, because a
+search path from the project is searched before the directory inside a library. Add
+`-D SYSTEM_VULKAN` and cui also stops loading the driver it ships, leaving the
+installed loader to find an installed driver as it normally would.
 
 ## Why macOS is different
 
@@ -39,6 +62,7 @@ own discovery — a system Vulkan install — when it finds nothing:
 2. next to the running executable, where a distributed app keeps it
 3. the folder c3c unpacks a `.c3l` into, so `c3c run` works straight after
    downloading `cui.c3l`
+4. this folder, so the examples in the cui repository run from a clone
 
 An app shipping a macOS binary to other machines should copy the dylib next to
 its executable (2), the way a game ships its runtime libraries.
@@ -46,8 +70,9 @@ its executable (2), the way a game ships its runtime libraries.
 ## Refreshing these
 
 Run the **Vendor Vulkan libraries** workflow (Actions → run manually, giving a
-Vulkan-Loader tag), download the `vulkan-libs` artifact, unzip it over this
-folder, and commit.
+Vulkan-Loader tag), download the `vulkan-libs` artifact, unzip it over this folder,
+and commit. Note `gh run download` refuses to overwrite files that already
+exist, so download to an empty directory and copy from there.
 
 They cannot simply be downloaded from anywhere:
 

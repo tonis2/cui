@@ -1,6 +1,6 @@
 # CUI
 
-GPU-rendered retained-mode UI library for C3, inspired by Flutter.
+GPU-rendered retained-mode UI library for C3.
 
 Widgets form a retained element tree with cached layout and paint. Every drawing
 is an SDF primitive — rounded rects, circles, ellipses, lines, arcs, shadows,

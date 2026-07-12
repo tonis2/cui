@@ -34,8 +34,8 @@ jobs:
 
       - name: Build cui.c3l
         # Nothing is compiled or downloaded here: the Vulkan libraries are
-        # committed under vulkan/ (refresh them with the vendor-vulkan workflow),
-        # so a release is just a zip of files that were tested as-is.
+        # committed under lib/vulkanlibs.c3l/ (refresh them with the vendor-vulkan
+        # workflow), so a release is just a zip of files that were tested as-is.
         #
         # One artifact serves every platform. A .c3l holds a directory per target
         # and c3c adds the matching one to the linker search path, so the same
@@ -54,15 +54,16 @@ jobs:
                 lib/window.c3l/linux \
                 lib/window.c3l/win32 pkg/deps/c3w/
 
-          # vulkan/ mirrors the .c3l's target-directory layout. Copied target by
-          # target: a trailing-slash "cp -R vulkan/*/ pkg/" means different things
-          # to GNU and BSD cp, and README.md must not land in the artifact.
-          # Missing files fail the release rather than shipping an artifact that
-          # cannot link on some platform.
+          # lib/vulkanlibs.c3l is itself a library with a directory per target -- the
+          # same layout cui.c3l needs -- so the Vulkan libraries are copied straight
+          # across. Target by target: a trailing-slash "cp -R x/*/ pkg/" means
+          # different things to GNU and BSD cp, and neither README.md nor
+          # manifest.json must land in the artifact. Missing files fail the release
+          # rather than shipping something that cannot link on some platform.
           mkdir -p pkg/macos-aarch64 pkg/linux-x64 pkg/windows-x64
-          cp vulkan/macos-aarch64/* pkg/macos-aarch64/
-          cp vulkan/linux-x64/*     pkg/linux-x64/
-          cp vulkan/windows-x64/*   pkg/windows-x64/
+          cp lib/vulkanlibs.c3l/macos-aarch64/* pkg/macos-aarch64/
+          cp lib/vulkanlibs.c3l/linux-x64/*     pkg/linux-x64/
+          cp lib/vulkanlibs.c3l/windows-x64/*   pkg/windows-x64/
           test -f pkg/macos-aarch64/libvulkan.a
           test -f pkg/macos-aarch64/libvulkan_kosmickrisp.dylib
           test -f pkg/linux-x64/libvulkan.so

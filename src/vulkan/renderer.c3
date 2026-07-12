@@ -14,7 +14,6 @@
 *>
 module cui::vulkan;
 import std::io;
-import std::os::env;
 import std::collections::list;
 import std::math;
 import std::time;
@@ -26,40 +25,6 @@ import cui::camera;
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
-
-<*
- The Vulkan driver cui ships for macOS, which is the one platform with no system
- Vulkan at all. Linux and Windows are absent on purpose: there the driver is
- bound to the GPU and the kernel module, so the machine's own is the only correct
- one — and it is always already installed. See vk::driver.
-*>
-const String BUNDLED_DRIVER @private = "libvulkan_kosmickrisp.dylib";
-
-<*
- Where cui looks for the driver it ships, most preferred first: an explicit
- `$CUI_VULKAN_DRIVER` override, next to the running executable (where a
- distributed app keeps it), then the folder c3c unpacks a .c3l into (so a fresh
- `c3c run` works straight after downloading cui.c3l).
-
- Finding nothing is not an error: the loader then discovers an installed driver
- itself, which is what happens when developing against a system Vulkan SDK.
-
- @return? vk::DRIVER_NOT_LOADED : `No bundled driver — fall back to the loader's own discovery.`
-*>
-fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @private
-{
-	String[3] candidates;
-	usz count = 0;
-
-	if (try override = std::os::env::tget_var("CUI_VULKAN_DRIVER")) candidates[count++] = override;
-	if (try exe = std::os::env::executable_path())
-	{
-		if (try dir = exe.path_tdirname()) candidates[count++] = string::tformat("%s/%s", dir, BUNDLED_DRIVER);
-	}
-	candidates[count++] = string::tformat("build/unpacked_c3l/cui.c3l/macos-aarch64/%s", BUNDLED_DRIVER);
-
-	return vk::findDriver(candidates[:count]);
-}
 
 <*
  Upper bound on a frame delta, in seconds. A stall — or waking from an on-demand

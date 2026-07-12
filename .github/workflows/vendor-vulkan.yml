@@ -1,6 +1,7 @@
 name: Vendor Vulkan libraries
 
-# Run by hand, rarely — only to refresh the Vulkan libraries under vulkan/.
+# Run by hand, rarely — only to refresh the Vulkan libraries under
+# lib/vulkanlibs.c3l/.
 #
 # Those libraries are committed to the repository on purpose, so that cutting a
 # release is nothing but zipping files: no toolchains, no package installs, no
@@ -13,8 +14,8 @@ name: Vendor Vulkan libraries
 #   - only the Linux .so is available prebuilt, and building it here keeps all
 #     three pinned to one loader version
 #
-# Download the `vulkan-libs` artifact this produces, unzip it over vulkan/, and
-# commit. See vulkan/README.md.
+# Download the `vulkan-libs` artifact this produces, unzip it over
+# lib/vulkanlibs.c3l/, and commit. See lib/vulkanlibs.c3l/README.md.
 
 on:
   workflow_dispatch:
@@ -91,7 +92,7 @@ jobs:
           path: out/
           if-no-files-found: error
 
-  # One zip to unpack over vulkan/, rather than three to assemble by hand.
+  # One zip to unpack over lib/vulkanlibs.c3l/, not three to assemble by hand.
   collect:
     needs: build
     runs-on: ubuntu-latest
@@ -104,7 +105,7 @@ jobs:
 
       - name: Show what to commit
         run: |
-          echo "Unzip this over vulkan/ and commit:"
+          echo "Unzip this over lib/vulkanlibs.c3l/ and commit:"
           find staging -type f -exec ls -la {} \;
 
       - uses: actions/upload-artifact@v4

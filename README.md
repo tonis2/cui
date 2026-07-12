@@ -115,20 +115,24 @@ and depend on `cui` alone:
   "dependency-search-paths": [ "lib" ],
   "dependencies": [ "cui" ],
   "targets": {
-    "app": {
-      "type": "executable",
-      "linked-libraries": [ "vulkan" ],
-      "linker-search-paths": [ "/usr/local/lib" ]
-    }
+    "app": { "type": "executable" }
   }
 }
 ```
+
+No `linked-libraries`, no `linker-search-paths`: the artifact carries a directory
+per platform, and c3c links the right one for whatever you build.
 
 On macOS the Vulkan loader is linked in statically and a driver (KosmicKrisp)
 ships inside the artifact, so an app runs with nothing installed at all. On Linux
 and Windows the bundled library is used only to link — at runtime the machine's
 own loader and GPU driver are used, since a driver is bound to the GPU and cannot
-be shipped. See [vulkan/README.md](vulkan/README.md).
+be shipped.
+
+To use a Vulkan of your own instead, point `linker-search-paths` at it (a project
+search path is searched before the one inside a `.c3l`) and build with
+`-D SYSTEM_VULKAN`, which also stops cui loading its bundled driver. See
+[lib/vulkanlibs.c3l/README.md](lib/vulkanlibs.c3l/README.md).
 
 To work on cui itself, clone with `--recurse-submodules` instead — the
 dependencies live in `lib/` as submodules.

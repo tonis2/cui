@@ -985,8 +985,8 @@ fn void Element.set_transform(&self, Matrix4f transform)
 		self.transform_slot = ui.alloc_transform_slot();
 		ui.paint_pending = true;
 	}
-	// Stored as-is: the shader reads the palette as raw float4 rows matching
-	// Matrix4f's row-major storage (see shader.slang PushData).
+	// Stored as-is: the shader reads the palette as raw float4s matching
+	// Matrix4f's column-major storage (see shader.slang PushData).
 	ui.canvas.transforms[self.transform_slot] = transform;
 	ui.canvas.transforms_dirty = true;
 	ui.frame_requested = true;

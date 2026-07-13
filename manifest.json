@@ -12,7 +12,6 @@
     "macos-x64" : {
       "sources" : ["deps/c3w/darwin/**"],
       "linked-libraries" : [
-        "vulkan",
         "CoreFoundation.framework",
         "Cocoa.framework",
         "Metal.framework",
@@ -24,7 +23,6 @@
     "macos-aarch64" : {
       "sources" : ["deps/c3w/darwin/**"],
       "linked-libraries" : [
-        "vulkan",
         "CoreFoundation.framework",
         "Cocoa.framework",
         "Metal.framework",
@@ -35,15 +33,15 @@
     },
     "linux-x64" : {
       "sources" : ["deps/c3w/linux/**"],
-      "linked-libraries" : ["vulkan"]
+      "linked-libraries" : []
     },
     "linux-aarch64" : {
       "sources" : ["deps/c3w/linux/**"],
-      "linked-libraries" : ["vulkan"]
+      "linked-libraries" : []
     },
     "windows-x64" : {
       "sources" : ["deps/c3w/win32/**"],
-      "linked-libraries" : ["vulkan", "user32.lib", "gdi32.lib", "kernel32.lib"]
+      "linked-libraries" : ["user32.lib", "gdi32.lib", "kernel32.lib"]
     }
   }
 }

@@ -6,7 +6,7 @@
 *.ko
 *.obj
 *.elf
-
+.DS_Store
 # Linker output
 *.ilk
 *.map
@@ -27,14 +27,6 @@
 *.so
 *.so.*
 *.dylib
-
-# ...except the Vulkan libraries the release artifact ships, which are committed
-# on purpose (see lib/vulkanlibs.c3l/README.md). Without these exceptions the rules
-# above -- *.a, *.lib, *.so, *.dylib -- would silently drop them from a commit.
-!lib/vulkanlibs.c3l/**/*.a
-!lib/vulkanlibs.c3l/**/*.lib
-!lib/vulkanlibs.c3l/**/*.so
-!lib/vulkanlibs.c3l/**/*.dylib
 
 # Executables
 *.exe

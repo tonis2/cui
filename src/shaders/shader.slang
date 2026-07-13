@@ -34,6 +34,7 @@ static const uint KIND_ELLIPSE = 1;
 static const uint KIND_LINE = 2;
 static const uint KIND_ARC = 3;
 static const uint KIND_SHADOW = 4;
+static const uint KIND_GLYPH = 5;
 
 static const float TAU = 6.28318530718;
 
@@ -200,6 +201,21 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         shadow.a *= 1.0 - smoothstep(-blur, blur, sd_round_box(p, half_size - blur, item.params));
         shadow.a *= clip_factor(item, input.tex_pos);
         return shadow;
+    }
+    case KIND_GLYPH:
+    {
+        // params = SDF atlas UV rect; the sampled value maps distance with
+        // 0.5 at the glyph edge, higher inside. fwidth-derived band width
+        // keeps the edge ~1 screen px under any quad size or transform
+        // (the fixed 1px band below assumes untransformed pixel space).
+        if (item.tex_id <= 0) return float4(0.0);
+        float2 uv = item.params.xy + input.tex_pos * (item.params.zw - item.params.xy);
+        float sd = textures[item.tex_id - 1].Sample(uv).r;
+        float band = max(fwidth(sd), 1e-4);
+        float4 text = item.color;
+        text.a *= smoothstep(0.5 - band, 0.5 + band, sd);
+        text.a *= clip_factor(item, input.tex_pos);
+        return text;
     }
     default: // KIND_RECT
         dist = sd_round_box(p, half_size, item.params);

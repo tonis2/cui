@@ -14,6 +14,7 @@ constdef DrawingKind : inline uint
     LINE = 2,
     ARC = 3,
     SHADOW = 4,
+    GLYPH = 5,
 }
 
 <*
@@ -50,6 +51,7 @@ struct Drawing {
                             //   ELLIPSE      radii in xy
                             //   LINE         endpoints {a.x, a.y, b.x, b.y}, quad-centered
                             //   ARC          {radius, start, sweep, -}
+                            //   GLYPH        SDF atlas UV rect {u0, v0, u1, v1}
     Vec4 color;
     Vec4 border_color;
 

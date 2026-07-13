@@ -89,6 +89,7 @@ struct Renderer {
 
 	DescriptorImages textures;
     DescriptorImageInfo depth_texture;
+    vk::Image atlas_image;      // the Ui's glyph atlas, once created (see sync_text)
 
     SemaphoreList wait_semaphores;
     SemaphoreList signal_semaphores;
@@ -547,6 +548,37 @@ fn void? Renderer.rebuild_pipeline(&self)
 }
 
 <*
+ Keeps the GPU copy of the Ui's glyph atlas in step with the CPU one.
+
+ Before `flush` (with `creating` true): once the Ui has fonts, the atlas
+ texture is created up front — paint caches drawings with the texture handle
+ baked in, so the handle must exist before the first `Painter.text` runs.
+ After `flush` (`creating` false): re-upload the pixels whenever glyph baking
+ marked them dirty, so glyphs painted this frame are sampled this frame.
+
+ @param ui : `The Ui whose text system to sync.`
+ @param creating : `True for the pre-flush texture-creation step.`
+*>
+fn void? Renderer.sync_text(&self, Ui* ui, bool creating)
+{
+    cui::TextSystem* text = &ui.text;
+    if (creating) {
+        if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0) {
+            self.textures.load_atlas(text.atlas, text.atlas_width, text.atlas_height,
+                &self.allocator, self.graphics_queue, &self.atlas_image)!;
+            text.texture = (cui::Texture)self.textures.len();
+            text.dirty = false;
+        }
+        return;
+    }
+    if (text.dirty && text.texture != cui::NO_TEXTURE) {
+        vulkan::update_atlas_image(self.atlas_image, text.atlas, text.atlas_width, text.atlas_height,
+            false, &self.allocator, self.graphics_queue)!;
+        text.dirty = false;
+    }
+}
+
+<*
  Idles the GPU, then tears down everything `new` created: buffers, textures,
  swapchain, pipeline, device, window. The Ui is separate — free it with
  `Ui.free`.
@@ -555,6 +587,7 @@ fn void Renderer.free(&self) {
     self.device.waitIdle();
     if (self.enable_debug) self.debug_messenger.free(self.instance);
 
+    self.adopt_buffers();
     self.uniform_buffer.free();
     self.canvas_buffer.free();
     self.transform_buffer.free();
@@ -661,6 +694,22 @@ fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
 }
 
 <*
+ Re-points the four owned buffers' allocator references at this Renderer.
+
+ `new()` builds the Renderer as a local and returns it by value, so the
+ `&renderer.allocator` each vk::Memory captured at creation dangles once the
+ struct is copied out. Freeing through that stale pointer (buffer growth,
+ shutdown) reads a garbage device. Called wherever a free may follow.
+*>
+fn void Renderer.adopt_buffers(&self)
+{
+    self.canvas_buffer.allocator = &self.allocator;
+    self.transform_buffer.allocator = &self.allocator;
+    self.clip_buffer.allocator = &self.allocator;
+    self.uniform_buffer.allocator = &self.allocator;
+}
+
+<*
  Runs one frame: poll input, dispatch to the widgets, flush the Ui, record the
  canvas and present.
 
@@ -683,10 +732,7 @@ fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
 fn bool? Renderer.frame(&self, Ui* ui)
 {
     Canvas* canvas = &ui.canvas;
-
-    // First frame, or textures were added since: (re)build the pipeline
-    // so the sampler-array binding matches the texture count.
-    if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
+    self.adopt_buffers();
 
     // Sleep decision, made at the top of the frame so it sees everything since
     // the last frame began — input handlers, update() hooks, AND app code run
@@ -735,6 +781,17 @@ fn bool? Renderer.frame(&self, Ui* ui)
         self.applied_cursor = ui.cursor;
         self.window.set_cursor(cursor_shape(ui.cursor));
     }
+
+    // Flush (build/layout/paint/emit) runs before command recording so glyphs
+    // baked during paint can be uploaded — and the pipeline rebuilt for a new
+    // atlas texture — inside the same frame.
+    self.sync_text(ui, true)!;
+    ui.flush();
+    self.sync_text(ui, false)!;
+
+    // First frame, or textures were added since: (re)build the pipeline
+    // so the sampler-array binding matches the texture count.
+    if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
 
     Fence frame_fence = self.frame_fences[self.frame_index];
     Semaphore wait_semaphore = self.wait_semaphores[self.frame_index];
@@ -823,8 +880,6 @@ fn bool? Renderer.frame(&self, Ui* ui)
         .setImageInfo(self.textures.array_view()),
     };
     vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
-
-    ui.flush();
 
     // Re-upload only what changed since the last frame, growing the
     // buffers to whatever the UI actually produced.

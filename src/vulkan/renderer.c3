@@ -161,6 +161,11 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         name: APP_NAME
     )!;
 
+    // Bind the Vulkan loader before anything asks Vulkan a question: every
+    // command is a runtime-loaded pointer, and this is what loads the first of
+    // them (see vendored.c3).
+    init_loader()!;
+
     validations.push_all({"VK_LAYER_KHRONOS_validation"});
     device_extensions.push_all({"VK_KHR_swapchain", "VK_KHR_push_descriptor", "VK_KHR_dynamic_rendering"});
     extensions.push_all({"VK_KHR_surface"});
@@ -249,7 +254,6 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     if (direct_driver) instance_info.pNext = &bundled_drivers;
 
     Instance instance = instance_info.build()!;
-    vk::loadExtensions(instance);
 
     if (enable_debug) {
      renderer.debug_messenger = vk::setupDebugMessenger(instance)!;
@@ -257,11 +261,11 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
     // Create surface
     // Hand the window our vkGetInstanceProcAddr rather than letting it hunt for a
-    // Vulkan dylib: with the loader linked in statically there is no dylib to find,
-    // and its symbols are hidden from dlsym.
+    // Vulkan dylib: the loader cui found (possibly its own bundled one) is not
+    // necessarily the one a bare dlopen would land on.
     renderer.surface = (SurfaceKHR)window.create_vk_surface(
         instance,
-        (c3w::VkGetInstanceProcAddrFn)&vk::getInstanceProcAddr
+        (c3w::VkGetInstanceProcAddrFn)vk::getInstanceProcAddr
     )!;
 
     // Pick a physical device + graphics queue
@@ -298,6 +302,10 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 		.setEnabledExtensionNames(device_extensions.array_view())
 		.setNext(&device_features)
 		.build(physical_device)!;
+
+	// Rebind device-level commands through vkGetDeviceProcAddr: calls then
+	// dispatch straight into the driver instead of through the loader.
+	vk::loadDeviceCommands(device);
 
 	graphics_queue.handle = device.getQueue(graphics_queue.index);
 

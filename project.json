@@ -4,11 +4,8 @@
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
 
-  // vulkanlibs is not code: it is the Vulkan library cui ships for each platform
-  // (lib/vulkanlibs.c3l/README.md). c3c links the one matching what is being built,
-  // so a clone builds and runs with no Vulkan SDK installed. To use a Vulkan of your
-  // own instead, point "linker-search-paths" at it and build with -D SYSTEM_VULKAN.
-  "dependencies": ["vk", "c3w", "image", "vulkanlibs", "font"],
+
+  "dependencies": ["vk", "c3w", "image", "font"],
   "features": [],
   "version": "0.1.0",
   "sources": [ "src/**" ],

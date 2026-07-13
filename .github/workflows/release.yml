@@ -202,7 +202,7 @@ jobs:
           # written at all. docgen then embeds EVERY compiled module: vk alone is
           # 5.3 MB of a 7 MB page, std another 2 MB, cui's own modules 120 KB.
           # There is no flag to exclude them, so trim the embedded JSON after.
-          c3c docgen --libdir lib --lib vk --lib c3w --lib image src
+          c3c docgen --libdir lib --lib vk --lib c3w --lib image --lib font src
           python3 scripts/trim_docs.py docs.html cui
           # Park it outside the worktree: the next step switches branches.
           cp docs.html "$RUNNER_TEMP/index.html"

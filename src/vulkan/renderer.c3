@@ -144,14 +144,13 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 		device_extensions.free();
 	}
 
-    // Slang's cbuffer matrix layout expects column-major bytes relative to
-    // Matrix4f's row-major storage, so matrices are uploaded transposed
-    // (verified against the SPIR-V: clip w collapses to 0 otherwise).
+    // Slang's cbuffer matrix layout expects column-major bytes, which is exactly
+    // how Matrix4f stores them, so the matrices go up as-is.
     // ui_view() bakes in the scale that makes canvas coordinates pixel-exact
     // under the perspective projection.
     ShaderUniforms uniform_data = {
-        renderer.camera.perspective.transpose(),
-        renderer.camera.ui_view().transpose(),
+        renderer.camera.perspective,
+        renderer.camera.ui_view(),
         window_size
     };
 

@@ -30,9 +30,10 @@ const ZString SHADER_FRAGMENT_ENTRY = "fragmentMain";
 <*
  Uniform block at descriptor set 0, binding 0 (scalar layout, 136 bytes).
 
- The cbuffer of the shader reads matrices as column-major bytes relative to how
- `cui::camera` fills Matrix4f, so upload both matrices with `.transpose()`
- (verified against the SPIR-V: clip w collapses to 0 otherwise).
+ The cbuffer of the shader reads matrices as column-major bytes, which is how
+ Matrix4f already stores them, so both matrices are uploaded as-is. Build them
+ with `std::math::matrix` (as `cui::camera` does) and no transpose is needed
+ anywhere; a matrix filled row-major collapses clip w to 0.
 *>
 struct ShaderUniforms
 {

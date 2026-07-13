@@ -7,3 +7,6 @@
 [submodule "lib/window.c3l"]
 	path = lib/window.c3l
 	url = https://github.com/tonis2/Window.c3.git
+[submodule "lib/font.c3l"]
+	path = lib/font.c3l
+	url = https://github.com/tonis2/font.c3.git

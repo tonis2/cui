@@ -8,12 +8,13 @@
   // (lib/vulkanlibs.c3l/README.md). c3c links the one matching what is being built,
   // so a clone builds and runs with no Vulkan SDK installed. To use a Vulkan of your
   // own instead, point "linker-search-paths" at it and build with -D SYSTEM_VULKAN.
-  "dependencies": ["vk", "c3w", "image", "vulkanlibs"],
+  "dependencies": ["vk", "c3w", "image", "vulkanlibs", "font"],
   "features": [],
   "version": "0.1.0",
   "sources": [ "src/**" ],
   "test-sources": [ "test/unit/**" ],
   "output": "build",
+  "script-dir": "./",
   "targets": {
     "shaders": {
       "type": "prepare",
@@ -36,6 +37,10 @@
     "scroll": {
       "type": "executable",
       "sources": [ "src/**", "test/scroll.c3" ]
+    },
+    "text": {
+      "type": "executable",
+      "sources": [ "src/**", "test/text.c3" ]
     },
     "unittest": {
       "type": "executable",

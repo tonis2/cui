@@ -139,6 +139,134 @@ fn void? DescriptorImages.load_rgba(&self, char[] rgba, uint width, uint height,
     self.push(texture);
 }
 
+<*
+ Creates the dynamic glyph-atlas texture: single-channel R8 with linear
+ filtering (an SDF must be sampled with interpolation), TRANSFER_DST so its
+ contents can be re-uploaded as glyphs are baked in. The vk::Image is returned
+ through `out_image` for those later `update_atlas_image` calls.
+*>
+fn void? DescriptorImages.load_atlas(&self, char[] pixels, uint width, uint height, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, vk::Image* out_image) {
+    vk::Device device = allocator.device;
+
+    Format image_format = FORMAT_R8_UNORM;
+    DescriptorImageInfo texture = { .imageLayout = IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+
+    vk::Image texture_image = vk::imageCreateInfo()
+        .setImageType(IMAGE_TYPE_2D)
+        .setExtent({.width = width, .height = height, .depth = 1 })
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(SAMPLE_COUNT_1_BIT)
+        .setUsage(IMAGE_USAGE_TRANSFER_DST_BIT | IMAGE_USAGE_SAMPLED_BIT)
+        .setInitialLayout(IMAGE_LAYOUT_UNDEFINED)
+        .setTiling(IMAGE_TILING_OPTIMAL)
+        .setFormat(image_format)
+        .build(device)!;
+
+    vk::create_image_buffer(texture_image, allocator, MEMORY_PROPERTY_DEVICE_LOCAL_BIT)!;
+
+    update_atlas_image(texture_image, pixels, width, height, true, allocator, queue)!;
+
+    texture.sampler = vk::samplerCreateInfo()
+                        .setMagFilter(FILTER_LINEAR)
+                        .setMinFilter(FILTER_LINEAR)
+                        .setAddressModeU(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                        .setAddressModeV(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                        .setAddressModeW(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                        .setMipLodBias(0.0)
+                        .setMinLod(0.0)
+                        .setMaxLod(1.0)
+                        .setMaxAnisotropy(1.0)
+                        .setAnisotropyEnable(vk::FALSE)
+                        .setBorderColor(BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+                        .build(device)!;
+
+    texture.imageView = vk::imageViewCreateInfo()
+                    .setViewType(IMAGE_VIEW_TYPE_2D)
+                    .setFormat(image_format)
+                    .setSubresourceRange({
+                        .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+                        .baseMipLevel = 0,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1,
+                        .levelCount = 1,
+                    })
+                    .setImage(texture_image)
+                    .build(device)!;
+
+    self.push(texture);
+    *out_image = texture_image;
+}
+
+<*
+ (Re)uploads the full pixel contents of an atlas image created by `load_atlas`.
+ `first` selects the source barrier: UNDEFINED right after creation, otherwise
+ the shader-read layout every update leaves the image in.
+*>
+fn void? update_atlas_image(vk::Image image, char[] pixels, uint width, uint height, bool first, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
+    vk::Device device = allocator.device;
+
+    vk::Memory stage = vk::new_buffer(
+        allocator,
+        usage: BUFFER_USAGE_TRANSFER_SRC_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        data: pixels.ptr,
+        data_size: (sz)width * height,
+    )!;
+    defer stage.free();
+
+    device.@single_time_command(queue; CommandBuffer command_buffer) {
+        vk::ImageMemoryBarrier2 transfer_barrier = {
+            .sType = STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .image = image,
+            .srcStageMask = first ? PIPELINE_STAGE_2_TOP_OF_PIPE_BIT : PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dstStageMask = PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+            .srcAccessMask = first ? (vk::AccessFlags2)0 : ACCESS_2_SHADER_READ_BIT,
+            .dstAccessMask = ACCESS_2_TRANSFER_WRITE_BIT,
+            .oldLayout = first ? IMAGE_LAYOUT_UNDEFINED : IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout = IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .subresourceRange = {
+                .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfo().setImageMemoryBarriers({ transfer_barrier }));
+
+        BufferImageCopy copy_region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {.width = width, .height = height, .depth = 1 }
+        };
+
+        vk::cmdCopyBufferToImage(
+            command_buffer,
+            stage.buffer,
+            image,
+            IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &copy_region
+        );
+
+        vk::ImageMemoryBarrier2 finalize_barrier = vk::transferBarrier(
+            image,
+            IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+        vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfo().setImageMemoryBarriers({ finalize_barrier }));
+    }!;
+}
+
 fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, Vec2 size, vk::Format format) {
     vk::Device device = allocator.device;
 

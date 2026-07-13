@@ -238,6 +238,7 @@ struct Ui
 {
 	Element* root;
 	Canvas canvas;
+	TextSystem text; // fonts + glyph atlas backing Painter.text (text.c3)
 	Vec2 size; // root constraints, usually the window size
 
 	// Interactivity state, maintained by Ui.process_input (input.c3).
@@ -284,6 +285,7 @@ fn Ui* new_ui(Vec2 size)
 	Ui* ui = mem::new(Ui);
 	ui.size = size;
 	ui.canvas.init();
+	ui.text.init();
 	return ui;
 }
 
@@ -301,6 +303,7 @@ fn void Ui.free(&self)
 	self.build_stack.free();
 	self.held_keys.free();
 	self.canvas.free();
+	self.text.free();
 	mem::free(self);
 }
 

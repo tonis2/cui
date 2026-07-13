@@ -42,13 +42,14 @@ jobs:
         # cui.c3l builds a macOS, Linux or Windows app -- with no Vulkan SDK.
         run: |
           set -e
-          mkdir -p pkg/deps/vk pkg/deps/image pkg/deps/c3w
+          mkdir -p pkg/deps/vk pkg/deps/image pkg/deps/c3w pkg/deps/font
           cp -R src pkg/src
           cp manifest.json pkg/
 
-          # vk, c3w and image are vendored in, so a consumer depends on "cui" alone.
+          # vk, c3w, image and font are vendored in, so a consumer depends on "cui" alone.
           cp -R lib/vulkan.c3l/vk/. pkg/deps/vk/
           cp -R lib/image.c3l/src/. pkg/deps/image/
+          cp -R lib/font.c3l/src/. pkg/deps/font/
           cp -R lib/window.c3l/main.c3 \
                 lib/window.c3l/darwin \
                 lib/window.c3l/linux \

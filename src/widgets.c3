@@ -624,3 +624,41 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return false;
 	}
 }
+
+<*
+ A single line of SDF text, sized by its font metrics: width = the kerned
+ advance of the string, height = ascent - descent. Load a font first with
+ `Ui.load_font`; see `cui::TextStyle` for the field semantics.
+
+     ui.@node((Label){ .text = "Hello", .size = 20, .color = { 1, 1, 1, 1 } })
+*>
+struct Label (Widget)
+{
+	String text; // borrowed; must outlive the element (a literal is ideal)
+	FontId font; // from Ui.load_font; 0 = the first loaded font
+	float size; // em size in px; 0 uses cui::DEFAULT_TEXT_SIZE
+	Color color; // text color — the zero default is fully transparent
+}
+
+<*
+ Sizes the label to its measured text, clamped into the constraints.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The constraints to fit into.`
+ @return `The measured text size, clamped.`
+*>
+fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	return cui::clamp_size(elem.ui.text.measure(self.font, self.text, self.size), constraints);
+}
+
+<*
+ Paints the line at the element origin.
+
+ @param elem : `The element this widget is attached to.`
+ @param painter : `The painter collecting this element's drawings.`
+*>
+fn void Label.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	painter.text({ 0, 0 }, self.text, { .font = self.font, .size = self.size, .color = self.color });
+}

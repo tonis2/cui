@@ -119,7 +119,7 @@ struct Renderer {
  Opens a window and brings up the whole Vulkan stack for it: instance, device,
  swapchain, buffers and pipeline.
 
- @param window_size : `The window content size in logical pixels; also the root constraints for the Ui. On a HiDPI display the framebuffer is larger by the window's scale.`
+ @param window_size : `The window content size in points; also the root constraints for the Ui. On a retina display the framebuffer is larger by the backing scale — everything renders at the display's native pixel density.`
  @param enable_debug : `Turn on the Vulkan validation layers and the debug messenger.`
  @param loop_mode : `Whether frame() redraws continuously or sleeps until input arrives.`
  @return `The renderer, ready for frame().`

@@ -65,8 +65,8 @@ const INITIAL_CLIPS = 16;
 *>
 struct Renderer {
 	Camera camera;
-	Vec2 window_size;
-    Extent2D extent;
+	Vec2 window_size;   // logical pixels: UI coordinates, root constraints, mouse
+    Extent2D extent;    // physical pixels: window_size * the window's scale
 
 	c3w::Window window;
     Clock frame_clock;
@@ -119,7 +119,7 @@ struct Renderer {
  Opens a window and brings up the whole Vulkan stack for it: instance, device,
  swapchain, buffers and pipeline.
 
- @param window_size : `The window content size in pixels; also the root constraints for the Ui.`
+ @param window_size : `The window content size in logical pixels; also the root constraints for the Ui. On a HiDPI display the framebuffer is larger by the window's scale.`
  @param enable_debug : `Turn on the Vulkan validation layers and the debug messenger.`
  @param loop_mode : `Whether frame() redraws continuously or sleeps until input arrives.`
  @return `The renderer, ready for frame().`
@@ -319,7 +319,16 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
 	vk::Format depth_format = vk::findDepthFormat(features: FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, device: physical_device);
     SurfaceFormatKHR format = {.format = FORMAT_B8G8R8A8_UNORM, .colorSpace = COLOR_SPACE_SRGB_NONLINEAR_KHR};
-    renderer.extent = {.width = (uint)window_size.x, .height = (uint)window_size.y };
+
+    // Framebuffer at physical pixels: on a HiDPI output (Wayland scale > 1) the
+    // window spans window_size logical units but scale times as many pixels, so
+    // the swapchain, depth buffer and viewport are sized up by the window's
+    // scale. Everything UI-facing stays logical — the shader's resolution
+    // uniform, root constraints and mouse coordinates are untouched — the
+    // drawings simply rasterize at the higher density, which is what makes SDF
+    // text pixel-sharp instead of compositor-upscaled.
+    float scale = window.get_scale();
+    renderer.extent = {.width = (uint)(window_size.x * scale), .height = (uint)(window_size.y * scale) };
 
     // Create swapchain
     uint min_images = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
@@ -334,7 +343,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
       .setImageFormat(format.format)
       .setSurface(renderer.surface)
       .setImageArrayLayers(1)
-      .setImageExtent({ .width = (uint)window_size.x, .height = (uint)window_size.y });
+      .setImageExtent(renderer.extent);
 
     renderer.swapchain = swapchain_info.build(device)!;
     renderer.swapchain_images = renderer.swapchain.getImages(device, swapchain_info.minImageCount)!;
@@ -373,7 +382,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
     }.init()!;
 
-    renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, window_size, depth_format)!;
+    renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, { renderer.extent.width, renderer.extent.height }, depth_format)!;
     renderer.depth_format = depth_format;
 
     // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
@@ -866,7 +875,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
 
     vk::cmdBeginRenderingKHR(command_buffer, &rendering_info);
 
-    vk::Viewport viewport = { .width = self.window_size.x, .height = self.window_size.y, .minDepth = 0.0, .maxDepth = 1.0, .y = 0, .x = 0 };
+    vk::Viewport viewport = { .width = (float)self.extent.width, .height = (float)self.extent.height, .minDepth = 0.0, .maxDepth = 1.0, .y = 0, .x = 0 };
     vk::Rect2D scissor = { .extent = self.extent, .offset = { .x = 0, .y = 0 }};
     vk::cmdSetViewport(command_buffer, 0, 1, &viewport);
     vk::cmdSetScissor(command_buffer, 0, 1, &scissor);

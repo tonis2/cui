@@ -55,7 +55,17 @@ dkms.conf
 # serves it — so only the raw docgen output at the repo root is ignored.
 /docs.html
 
-# Release packaging: the .c3l artifact and the staging tree assembled into it.
-# Both are built by .github/workflows/release.yml.
+# Release packaging: the .c3l artifact, built by .github/workflows/release.yml
+# straight from the working tree (no staging directory).
 /cui.c3l
-/pkg
+
+# vk is the one dependency that is NOT a submodule and NOT vendored into the
+# artifact: vulkan.c3l ships the macOS loader + driver and locates them relative
+# to its own sources, so it has to be installed by the consumer. Building cui
+# itself needs a copy here too — download the rolling release into lib/:
+#
+#     curl -fsSL https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l -o lib/vulkan.c3l
+#
+# c3c reads a .c3l as either a zip or a directory, so the downloaded file works
+# as-is. Never commit it.
+/lib/vulkan.c3l

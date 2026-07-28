@@ -3,13 +3,13 @@
   "provides" : "cui",
   "sources" : [
     "src/**",
-    "deps/image/**",
-    "deps/font/**",
-    "deps/c3w/main.c3"
+    "lib/image.c3l/src/**",
+    "lib/font.c3l/src/**",
+    "lib/window.c3l/main.c3"
   ],
   "targets" : {
     "macos-x64" : {
-      "sources" : ["deps/c3w/darwin/**"],
+      "sources" : ["lib/window.c3l/darwin/**"],
       "linked-libraries" : [
         "CoreFoundation.framework",
         "Cocoa.framework",
@@ -20,7 +20,7 @@
       ]
     },
     "macos-aarch64" : {
-      "sources" : ["deps/c3w/darwin/**"],
+      "sources" : ["lib/window.c3l/darwin/**"],
       "linked-libraries" : [
         "CoreFoundation.framework",
         "Cocoa.framework",
@@ -31,15 +31,15 @@
       ]
     },
     "linux-x64" : {
-      "sources" : ["deps/c3w/linux/**"],
+      "sources" : ["lib/window.c3l/linux/**"],
       "linked-libraries" : []
     },
     "linux-aarch64" : {
-      "sources" : ["deps/c3w/linux/**"],
+      "sources" : ["lib/window.c3l/linux/**"],
       "linked-libraries" : []
     },
     "windows-x64" : {
-      "sources" : ["deps/c3w/win32/**"],
+      "sources" : ["lib/window.c3l/win32/**"],
       "linked-libraries" : ["user32.lib", "gdi32.lib", "kernel32.lib"]
     }
   }

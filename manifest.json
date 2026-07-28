@@ -3,7 +3,6 @@
   "provides" : "cui",
   "sources" : [
     "src/**",
-    "deps/vk/**",
     "deps/image/**",
     "deps/font/**",
     "deps/c3w/main.c3"

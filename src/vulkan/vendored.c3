@@ -11,12 +11,16 @@
  machine's own loader and driver are used, since a driver is bound to the GPU
  and cannot be shipped.
 
- vk's default candidate paths already cover the executable directory, an
- unpacked `vulkan.c3l`, a checkout of this repository, and a system SDK. What
- this file adds is cui's own two locations: explicit `$CUI_VULKAN_*` overrides,
- and the released `cui.c3l`, which carries the same `macos-aarch64/` directory
- (release.yml copies it across) so a consumer of cui alone still gets both
- dylibs.
+ Finding those two files is vulkan.c3l's own job, and it needs no help: besides
+ the executable directory and a system SDK, its last candidate is built from
+ `$$FILEPATH` (`vk::c3l_root`), the compile-time path of its own source — so it
+ locates its `macos-aarch64/` directory wherever the library ended up, whether
+ that is a submodule under `lib/`, a downloaded `vulkan.c3l` c3c unpacked, or a
+ plain clone. cui therefore ships no Vulkan binaries of its own; a consumer
+ installs `vulkan.c3l` next to `cui.c3l` and both are found.
+
+ All this file adds is the `$CUI_VULKAN_*` overrides, for pointing a build at a
+ loader or driver of your own without rebuilding.
 
  See lib/vulkan.c3l/README.md.
 *>
@@ -34,21 +38,18 @@ import vk;
 const bool SYSTEM_VULKAN @private = $feature(SYSTEM_VULKAN);
 
 <*
- Bind the Vulkan loader. cui's own candidates come first — a `$CUI_VULKAN_LOADER`
- override, then the loader inside an unpacked cui.c3l — and vk::init falls
- through to its defaults (executable directory, vulkan.c3l locations, a system
- SDK) when neither exists.
+ Bind the Vulkan loader. A `$CUI_VULKAN_LOADER` override comes first; without
+ one, vk::init works through its own defaults — the executable directory, the
+ `macos-aarch64/` directory vulkan.c3l ships, and a system SDK.
 
  @return? vk::LOADER_NOT_FOUND : `No loader anywhere — neither bundled nor installed.`
 *>
 fn void? init_loader() @if(env::DARWIN && !SYSTEM_VULKAN)
 {
-	String[2] candidates;
+	String[1] candidates;
 	usz count = 0;
 
 	if (try override = env::tget_var("CUI_VULKAN_LOADER")) candidates[count++] = override;
-	// Relative to the working directory, which for `c3c run` is the project root.
-	candidates[count++] = "build/unpacked_c3l/cui.c3l/macos-aarch64/libvulkan.1.dylib";
 
 	return vk::init(candidates[:count]);
 }
@@ -66,9 +67,8 @@ fn void? init_loader() @if(!env::DARWIN || SYSTEM_VULKAN)
 }
 
 <*
- The driver for the instance's pNext chain, preferring cui's own candidates —
- a `$CUI_VULKAN_DRIVER` override, then an unpacked cui.c3l — and falling back
- to the locations vulkan.c3l ships its driver in.
+ The driver for the instance's pNext chain: a `$CUI_VULKAN_DRIVER` override when
+ one is set, otherwise the driver vulkan.c3l ships, found in its own directory.
 
  Finding nothing is not an error: the loader then discovers an installed driver
  itself, which is what happens when developing against a system Vulkan SDK.
@@ -77,13 +77,10 @@ fn void? init_loader() @if(!env::DARWIN || SYSTEM_VULKAN)
 *>
 fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @if(env::DARWIN && !SYSTEM_VULKAN)
 {
-	String[2] candidates;
-	usz count = 0;
-
-	if (try override = env::tget_var("CUI_VULKAN_DRIVER")) candidates[count++] = override;
-	candidates[count++] = "build/unpacked_c3l/cui.c3l/macos-aarch64/libvulkan_kosmickrisp.dylib";
-
-	if (try icd = vk::findDriver(candidates[:count])) return icd;
+	if (try override = env::tget_var("CUI_VULKAN_DRIVER"))
+	{
+		if (try icd = vk::loadDriver(override)) return icd;
+	}
 	return vk::findBundledDriver();
 }
 

@@ -199,9 +199,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Build the docs from the tagged commit. Dependencies live in lib/*.c3l
-          # as submodules; docgen has to compile them. Full history so the docs
-          # commit can land on main.
+          # Build the docs from the tagged commit. c3w, image and font live in
+          # lib/*.c3l as submodules and docgen has to compile them; vk is not a
+          # submodule and is downloaded in the next step. Full history so the
+          # docs commit can land on main.
           ref: ${{ steps.tag.outputs.name }}
           submodules: recursive
           fetch-depth: 0
@@ -216,6 +217,12 @@ jobs:
           curl -fsSL "https://github.com/c3lang/c3c/releases/download/${C3C_VERSION}/c3-linux.tar.gz" -o c3.tar.gz
           tar xzf c3.tar.gz
           echo "$PWD/c3" >> "$GITHUB_PATH"
+
+      - name: Fetch vulkan.c3l
+        # vk is not a submodule (see the packaging job), but docgen still has to
+        # compile src/vulkan/*.c3, so install it the same way a consumer does.
+        # c3c reads a .c3l as a zip, so the downloaded file needs no unpacking.
+        run: curl -fsSL "$VULKAN_C3L_URL" -o lib/vulkan.c3l
 
       - name: Generate API docs
         run: |

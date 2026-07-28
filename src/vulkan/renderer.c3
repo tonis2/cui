@@ -51,6 +51,33 @@ enum LoopMode
     ON_DEMAND,
 }
 
+<*
+ Records app-owned draws into the frame, inside cui's render pass and before the
+ UI is drawn over them. Set it on `Renderer.scene` (with `Renderer.scene_ctx` as
+ the context pointer) and it runs once per `frame()`.
+
+ This is the seam for 3D content under a cui interface. The depth attachment
+ cui binds and clears every frame is never touched by cui's own pipeline
+ (`enable_depth = false`), so a pipeline built with `enable_depth = true` and
+ `RenderState.depth_format = Renderer.depth_format` gets correct occlusion for
+ free, and the UI then composites on top untested. Build that pipeline against
+ the Renderer's own `device`, `allocator`, `graphics_queue` and `extent` — one
+ device, one swapchain, one render pass.
+
+ The hook runs after `process_input`, so it sees this frame's input: update the
+ camera at the top of it rather than in the frame loop body, which runs after
+ the recording and would lag by a frame.
+
+ Viewport and scissor are set before it and restored after, so scissoring to a
+ sub-rect is safe. Any other dynamic state it changes is its own to restore;
+ cui re-binds its pipeline, descriptors and push constants unconditionally.
+
+ @param ctx : `Renderer.scene_ctx, verbatim.`
+ @param cmd : `The frame's command buffer, inside a begun render pass.`
+ @param extent : `The framebuffer size in physical pixels.`
+*>
+alias SceneRecorder = fn void?(void* ctx, CommandBuffer cmd, Extent2D extent);
+
 // Initial GPU buffer capacities. Buffers are sized by what the UI actually
 // draws: whenever an upload outgrows its buffer, the buffer is reallocated at
 // the next power of two (see ensure_buffer_capacity).
@@ -74,6 +101,11 @@ struct Renderer {
     List{cui::Key} key_scratch;
     LoopMode loop_mode;
 
+    SceneRecorder scene;    // null = UI only, the default
+    void* scene_ctx;        // passed to scene, untouched by cui
+    float[4] clear_color;
+    bool quit_on_escape;    // clear it to bind ESCAPE yourself
+
 	Instance instance;
 	DebugUtilsMessengerEXT debug_messenger;
 	PhysicalDevice physical_device;
@@ -89,7 +121,16 @@ struct Renderer {
 
 	DescriptorImages textures;
     DescriptorImageInfo depth_texture;
-    vk::Image atlas_image;      // the Ui's glyph atlas, once created (see sync_text)
+
+    // A DescriptorImageInfo is sampler + view only, so the images behind them
+    // have to be owned separately or nothing can destroy them. Parallel to
+    // `textures`, and the swapchain's images are deliberately absent: those
+    // belong to the swapchain.
+    vk::ImageList texture_images;
+    vk::Image depth_image;
+    vk::Image atlas_image;      // the Ui's glyph atlas, once created (see sync_text);
+                                // owned by texture_images, this is a bare handle
+                                // for update_atlas_image
 
     SemaphoreList wait_semaphores;
     SemaphoreList signal_semaphores;
@@ -122,9 +163,12 @@ struct Renderer {
  @param window_size : `The window content size in points; also the root constraints for the Ui. On a retina display the framebuffer is larger by the backing scale — everything renders at the display's native pixel density.`
  @param enable_debug : `Turn on the Vulkan validation layers and the debug messenger.`
  @param loop_mode : `Whether frame() redraws continuously or sleeps until input arrives.`
- @return `The renderer, ready for frame().`
+ @param clear_color : `RGBA the color attachment is cleared to each frame.`
+ @param quit_on_escape : `Whether ESCAPE ends the frame loop. Clear it when the app binds ESCAPE itself — a 3D viewport usually wants it for cancel/deselect.`
+ @return `The renderer, ready for frame(). Set its scene/scene_ctx fields to draw under the UI.`
 *>
-fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopMode loop_mode = CONTINUOUS) {
+fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopMode loop_mode = CONTINUOUS,
+                 float[4] clear_color = {0.0, 0.0, 0.0, 1.0}, bool quit_on_escape = true) {
 
 	ZStringList validations;
 	ZStringList extensions;
@@ -136,6 +180,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         .window_size = window_size,
         .enable_debug = enable_debug,
         .loop_mode = loop_mode,
+        .clear_color = clear_color,
+        .quit_on_escape = quit_on_escape,
     };
 
 	defer {
@@ -382,13 +428,15 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
     }.init()!;
 
-    renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, { renderer.extent.width, renderer.extent.height }, depth_format)!;
+    renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, { renderer.extent.width, renderer.extent.height }, depth_format, &renderer.depth_image)!;
     renderer.depth_format = depth_format;
 
     // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
     // never empty; user images get their handles from load_image/load_pixels.
     char[4] white_pixel = { 255, 255, 255, 255 };
-    renderer.textures.load_rgba(white_pixel[..], 1, 1, &renderer.allocator, graphics_queue)!;
+    vk::Image white_image;
+    renderer.textures.load_rgba(white_pixel[..], 1, 1, &renderer.allocator, graphics_queue, &white_image)!;
+    renderer.texture_images.push(white_image);
 
     // Uniform buffer (host visible) - uploaded at creation
     renderer.uniform_buffer = vk::new_buffer(
@@ -465,7 +513,9 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 *>
 fn cui::Texture? Renderer.load_image(&self, String path)
 {
-    self.textures.loadPath(path, &self.allocator, self.graphics_queue)!;
+    vk::Image image;
+    self.textures.loadPath(path, &self.allocator, self.graphics_queue, &image)!;
+    self.texture_images.push(image);
     return (cui::Texture)self.textures.len();
 }
 
@@ -481,7 +531,9 @@ fn cui::Texture? Renderer.load_image(&self, String path)
 *>
 fn cui::Texture? Renderer.load_pixels(&self, char[] rgba, uint width, uint height)
 {
-    self.textures.load_rgba(rgba, width, height, &self.allocator, self.graphics_queue)!;
+    vk::Image image;
+    self.textures.load_rgba(rgba, width, height, &self.allocator, self.graphics_queue, &image)!;
+    self.texture_images.push(image);
     return (cui::Texture)self.textures.len();
 }
 
@@ -582,6 +634,7 @@ fn void? Renderer.sync_text(&self, Ui* ui, bool creating)
         if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0) {
             self.textures.load_atlas(text.atlas, text.atlas_width, text.atlas_height,
                 &self.allocator, self.graphics_queue, &self.atlas_image)!;
+            self.texture_images.push(self.atlas_image);
             text.texture = (cui::Texture)self.textures.len();
             text.dirty = false;
         }
@@ -608,13 +661,24 @@ fn void Renderer.free(&self) {
     self.canvas_buffer.free();
     self.transform_buffer.free();
     self.clip_buffer.free();
+
+    // Teardown is strictly inside-out, and each step here outlives the one
+    // before it: a view reads an image, an image is bound to allocator memory.
+    // Views and samplers...
+    foreach (&texture : self.textures) texture.free(self.device);
+    self.depth_texture.free(self.device);
+    // ...then the images they read...
+    foreach (image : self.texture_images) image.free(self.device);
+    self.depth_image.free(self.device);
+    // ...then the memory those images are bound to.
     self.textures.free();
+    self.texture_images.free();
     self.allocator.free();
 
-    self.swapchain.free(self.device);
-    self.depth_texture.free(self.device);
-
+    // Swapchain image views are created from images the swapchain owns, so they
+    // have to go before the swapchain does.
     foreach (view : self.swapchain_views) view.free(self.device);
+    self.swapchain.free(self.device);
 
     self.swapchain_images.free();
     self.swapchain_views.free();
@@ -758,7 +822,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
     bool wait_for_events = self.loop_mode == LoopMode.ON_DEMAND && !ui.frame_requested;
 
     c3w::EventMap event_map = self.window.getEvent(wait_for_events);
-    if (event_map.is_pressed(ESCAPE) || self.window.should_close()) return false;
+    if ((self.quit_on_escape && event_map.is_pressed(ESCAPE)) || self.window.should_close()) return false;
 
     // Anything from here on that schedules work (input handlers, update hooks,
     // app code before the next call) re-sets frame_requested; clear it first so
@@ -831,7 +895,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
         .setStoreOp(ATTACHMENT_STORE_OP_STORE)
         .setLoadOp(ATTACHMENT_LOAD_OP_CLEAR)
         .setClearValue({
-            .color = { .float32 = { 0.0, 0.0, 0.0, 1.0 }}
+            .color = { .float32 = self.clear_color }
         })
     })
     .setDepthAttachment(&&vk::renderingAttachmentInfo()
@@ -879,6 +943,16 @@ fn bool? Renderer.frame(&self, Ui* ui)
     vk::Rect2D scissor = { .extent = self.extent, .offset = { .x = 0, .y = 0 }};
     vk::cmdSetViewport(command_buffer, 0, 1, &viewport);
     vk::cmdSetScissor(command_buffer, 0, 1, &scissor);
+
+    // App-owned 3D content goes into the depth buffer cui's own pipeline never
+    // touches; the UI below composites over whatever it left behind. Viewport
+    // and scissor are restored after, so the hook may scissor to a sub-rect.
+    if (self.scene)
+    {
+        self.scene(self.scene_ctx, command_buffer, self.extent)!;
+        vk::cmdSetViewport(command_buffer, 0, 1, &viewport);
+        vk::cmdSetScissor(command_buffer, 0, 1, &scissor);
+    }
 
     vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
 

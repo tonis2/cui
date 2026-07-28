@@ -84,8 +84,6 @@ while (renderer.frame(ui)!!)
 
 ## Running the examples
 
-Install [C3](https://c3-lang.org/) and the Vulkan SDK (on macOS a Vulkan-on-Metal
-driver such as KosmicKrisp or MoltenVK is required).
 
 ```
 c3c run ui         # textured cards animated through the transform palette
@@ -138,11 +136,17 @@ at all — and that is why they are not duplicated into `cui.c3l`. On Linux and
 Windows the machine's own loader and GPU driver are used, since a driver is
 bound to the GPU and cannot be shipped.
 
-To use a Vulkan of your own instead, build with `-D SYSTEM_VULKAN`: cui then
-skips its bundled loader and driver, and the installed loader discovers an
-installed driver as it normally would. See
-[lib/vulkan.c3l/README.md](lib/vulkan.c3l/README.md).
 
-To work on cui itself, clone with `--recurse-submodules` instead — the
-dependencies live in `lib/` as submodules.
+To work on cui itself, clone with `--recurse-submodules` — c3w, image and font
+live in `lib/` as submodules. `vk` is the exception: it is neither a submodule
+nor vendored into the release, because `vulkan.c3l` ships the macOS loader and
+driver and finds them relative to its own sources. Install it the same way a
+consumer does:
 
+```sh
+curl -fsSL https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l \
+  -o lib/vulkan.c3l
+```
+
+c3c reads a `.c3l` as either a zip or a directory, so the downloaded file works
+as-is; it is gitignored.

@@ -9,7 +9,10 @@ alias DescriptorImages = List{DescriptorImageInfo};
 
 faultdef FILE_NOT_FOUND;
 
-fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
+<*
+ @param out_image : `Receives the created image, which the caller then owns: a DescriptorImageInfo carries only the sampler and the view, so nothing else can destroy it.`
+*>
+fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, vk::Image* out_image = null) {
     image::Image img;
     if (path.ends_with(".png")) {
         img = image::png::load_file(path)!;
@@ -23,10 +26,13 @@ fn void? DescriptorImages.loadPath(&self, String path, vk::MemoryAllocator* allo
 
     char[] rgba = img.to_rgba();
     defer alloc::free(mem, rgba);
-    self.load_rgba(rgba, img.width, img.height, allocator, queue)!;
+    self.load_rgba(rgba, img.width, img.height, allocator, queue, out_image)!;
 }
 
-fn void? DescriptorImages.load_rgba(&self, char[] rgba, uint width, uint height, vk::MemoryAllocator* allocator, vk::DeviceQueue queue) {
+<*
+ @param out_image : `Receives the created image, which the caller then owns: a DescriptorImageInfo carries only the sampler and the view, so nothing else can destroy it.`
+*>
+fn void? DescriptorImages.load_rgba(&self, char[] rgba, uint width, uint height, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, vk::Image* out_image = null) {
     vk::Device device = allocator.device;
 
     Format image_format = FORMAT_R8G8B8A8_UNORM;
@@ -137,6 +143,7 @@ fn void? DescriptorImages.load_rgba(&self, char[] rgba, uint width, uint height,
                     .build(device)!;
 
     self.push(texture);
+    if (out_image) *out_image = texture_image;
 }
 
 <*
@@ -267,7 +274,10 @@ fn void? update_atlas_image(vk::Image image, char[] pixels, uint width, uint hei
     }!;
 }
 
-fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, Vec2 size, vk::Format format) {
+<*
+ @param out_image : `Receives the created image, which the caller then owns: a DescriptorImageInfo carries only the sampler and the view, so nothing else can destroy it.`
+*>
+fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allocator, vk::DeviceQueue queue, Vec2 size, vk::Format format, vk::Image* out_image = null) {
     vk::Device device = allocator.device;
 
     self.imageLayout = IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -341,6 +351,8 @@ fn void? DescriptorImageInfo.createDepthTexture(&self, vk::MemoryAllocator* allo
             &imageMemoryBarrier
         );
     }!;
+
+    if (out_image) *out_image = depth_image;
 }
 
 // One pipeline stage; several stages may share the same spirv blob when it is

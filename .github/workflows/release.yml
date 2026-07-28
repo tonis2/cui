@@ -38,7 +38,16 @@ jobs:
 
       - name: Build cui.c3l
         # Nothing is compiled or downloaded here: a release is just a zip of the
-        # files that were tested as-is.
+        # files that were tested as-is. The checkout above already installed
+        # c3w, image and font as submodules, so the artifact is the working tree
+        # with the noise stripped out -- no staging copy, and no reshaping.
+        #
+        # The zip therefore has the SAME layout as a git clone, which is the
+        # point: manifest.json names lib/window.c3l/... and lib/image.c3l/...,
+        # and those paths resolve identically whether cui is consumed as a
+        # downloaded zip or as a source submodule. (c3c reads a .c3l as either.)
+        # An earlier layout flattened them into deps/, and a clone could not
+        # build against its own manifest.
         #
         # One artifact serves every platform, and every byte of it is source:
         # nothing links against Vulkan -- the vk bindings dlopen the loader at
@@ -46,30 +55,37 @@ jobs:
         # locates them relative to its own sources (vk::c3l_root, from the
         # compile-time $$FILEPATH), so a copy inside cui.c3l would sit somewhere
         # that macro never looks; a consumer installs vulkan.c3l alongside this
-        # artifact instead.
+        # artifact instead. That is also why vk is not a submodule: nothing in
+        # this job should be able to sweep it in.
         run: |
           set -e
-          mkdir -p pkg/deps/image pkg/deps/c3w pkg/deps/font
-          cp -R src pkg/src
-          cp manifest.json pkg/
-
           # c3w, image and font are vendored in -- they are pure source with
           # nothing to find at runtime. vk is not: see above.
-          cp -R lib/image.c3l/src/. pkg/deps/image/
-          cp -R lib/font.c3l/src/. pkg/deps/font/
-          cp -R lib/window.c3l/main.c3 \
-                lib/window.c3l/darwin \
-                lib/window.c3l/linux \
-                lib/window.c3l/win32 pkg/deps/c3w/
-
-          cd pkg && zip -qr ../cui.c3l . && cd ..
+          #
+          # Excluded: git metadata, each submodule's own project.json (a
+          # consumer builds through manifest.json; a stray project.json in the
+          # tree is confusing at best), and their test/docs/wasm trees, which are
+          # 4x the artifact in image fixtures alone -- 712K vs 168K.
+          zip -qr cui.c3l manifest.json LICENSE README.md src lib \
+            -x '*.git*' '*/project.json' '*/test/*' '*/docs/*' '*/wasm/*'
 
           # A vendored copy of either would be the bug this layout removes: the
           # bindings would compile from a path with no macos-aarch64/ beside it,
-          # and the dylibs would be duplicated where nothing opens them.
-          if unzip -l cui.c3l | grep -iE 'deps/vk/|\.dylib'; then
+          # and the dylibs would be duplicated where nothing opens them. vk is no
+          # longer a submodule, so this guard now catches a stray local download
+          # rather than a packaging mistake -- keep it either way.
+          if unzip -l cui.c3l | grep -iE 'vulkan\.c3l/|\.dylib'; then
             echo "cui.c3l must not carry the vk bindings or the Vulkan dylibs"; exit 1
           fi
+
+          # The manifest is only as good as the paths behind it: a missing source
+          # tree here is a broken release that would otherwise reach the verify
+          # job as a confusing compile error.
+          for p in manifest.json src/shaders/shader.spv lib/window.c3l/main.c3 \
+                   lib/window.c3l/linux lib/window.c3l/darwin lib/window.c3l/win32 \
+                   lib/image.c3l/src lib/font.c3l/src; do
+            unzip -l cui.c3l | grep -q " $p" || { echo "missing from artifact: $p"; exit 1; }
+          done
 
       - name: Upload cui.c3l
         uses: actions/upload-artifact@v4

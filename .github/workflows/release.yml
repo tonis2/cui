@@ -66,8 +66,12 @@ jobs:
           # consumer builds through manifest.json; a stray project.json in the
           # tree is confusing at best), and their test/docs/wasm trees, which are
           # 4x the artifact in image fixtures alone -- 712K vs 168K.
+          # lib/vulkan.c3l is excluded rather than merely asserted against: CI
+          # never has it, but a developer running this same command locally does
+          # (building cui itself needs it there), and 3 MB of loader + driver is
+          # exactly what must not ship. The guard below stays as the assertion.
           zip -qr cui.c3l manifest.json LICENSE README.md src lib \
-            -x '*.git*' '*/project.json' '*/test/*' '*/docs/*' '*/wasm/*'
+            -x '*.git*' '*/project.json' '*/test/*' '*/docs/*' '*/wasm/*' 'lib/vulkan.c3l/*'
 
           # A vendored copy of either would be the bug this layout removes: the
           # bindings would compile from a path with no macos-aarch64/ beside it,

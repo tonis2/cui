@@ -103,31 +103,40 @@ editing `src/shaders/shader.slang`.
 
 ## Using cui in your project
 
-Every version tag (`v0.1.0`, …) publishes a **self-contained `cui.c3l`** on the
-[releases page](https://github.com/tonis2/cui/releases/latest). The Vulkan
-bindings, windowing, image loaders and the Vulkan libraries themselves are
-vendored inside it — one artifact for macOS, Linux and Windows, and **no Vulkan
-SDK to install**. It is the only file you need: drop it into your library folder
-and depend on `cui` alone:
+You need two files, downloaded from two places:
+
+1. **`cui.c3l`** — from cui's own [releases page](https://github.com/tonis2/cui/releases/latest),
+   published on every version tag (`v0.1.0`, …). The windowing, image and font
+   libraries are vendored inside it.
+2. **`vulkan.c3l`** — from [Vulkan.c3's releases](https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l),
+   a rolling `latest`. It carries the Vulkan bindings and, for macOS, the loader
+   and driver themselves.
+
+Drop both into your library folder — one pair for macOS, Linux and Windows, and
+**no Vulkan SDK to install**:
 
 ```json
 {
   "dependency-search-paths": [ "lib" ],
-  "dependencies": [ "cui" ],
+  "dependencies": [ "cui", "vk" ],
   "targets": {
     "app": { "type": "executable" }
   }
 }
 ```
 
+(`vk` is what `vulkan.c3l` provides — c3c resolves a dependency by the
+manifest's `provides`, not by the file name.)
+
 No `linked-libraries`, no `linker-search-paths`: nothing links against Vulkan.
 Every command is resolved at runtime (volk-style), so building needs no Vulkan
 anything, on any platform.
 
-On macOS a loader and a driver (KosmicKrisp) ship inside the artifact and cui
-finds them itself at runtime, so an app runs with nothing installed at all. On
-Linux and Windows the machine's own loader and GPU driver are used, since a
-driver is bound to the GPU and cannot be shipped.
+On macOS a loader and a driver (KosmicKrisp) ship inside `vulkan.c3l`, which
+locates them relative to its own sources, so an app runs with nothing installed
+at all — and that is why they are not duplicated into `cui.c3l`. On Linux and
+Windows the machine's own loader and GPU driver are used, since a driver is
+bound to the GPU and cannot be shipped.
 
 To use a Vulkan of your own instead, build with `-D SYSTEM_VULKAN`: cui then
 skips its bundled loader and driver, and the installed loader discovers an

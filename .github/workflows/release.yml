@@ -12,6 +12,10 @@ on:
 
 env:
   C3C_VERSION: v0.8.2
+  # The Vulkan bindings a consumer installs next to cui.c3l. Vulkan.c3 publishes
+  # a rolling "latest" release; it carries the macOS loader + driver dylibs and
+  # finds them itself, which is why cui.c3l ships neither.
+  VULKAN_C3L_URL: https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l
 
 jobs:
   package:
@@ -33,22 +37,24 @@ jobs:
           submodules: recursive
 
       - name: Build cui.c3l
-        # Nothing is compiled or downloaded here: the Vulkan dylibs are committed
-        # in the vulkan.c3l submodule (its vendor-vulkan workflow refreshes the
-        # loader), so a release is just a zip of files that were tested as-is.
+        # Nothing is compiled or downloaded here: a release is just a zip of the
+        # files that were tested as-is.
         #
-        # One artifact serves every platform. Nothing links against Vulkan -- the
-        # vk bindings dlopen the loader at runtime -- so the only binaries shipped
-        # are the macOS loader + driver dylibs, found through cui::vulkan's
-        # candidate paths. Linux and Windows use the machine's own loader.
+        # One artifact serves every platform, and every byte of it is source:
+        # nothing links against Vulkan -- the vk bindings dlopen the loader at
+        # runtime. The macOS loader + driver dylibs are vulkan.c3l's to ship. It
+        # locates them relative to its own sources (vk::c3l_root, from the
+        # compile-time $$FILEPATH), so a copy inside cui.c3l would sit somewhere
+        # that macro never looks; a consumer installs vulkan.c3l alongside this
+        # artifact instead.
         run: |
           set -e
-          mkdir -p pkg/deps/vk pkg/deps/image pkg/deps/c3w pkg/deps/font
+          mkdir -p pkg/deps/image pkg/deps/c3w pkg/deps/font
           cp -R src pkg/src
           cp manifest.json pkg/
 
-          # vk, c3w, image and font are vendored in, so a consumer depends on "cui" alone.
-          cp -R lib/vulkan.c3l/vk/. pkg/deps/vk/
+          # c3w, image and font are vendored in -- they are pure source with
+          # nothing to find at runtime. vk is not: see above.
           cp -R lib/image.c3l/src/. pkg/deps/image/
           cp -R lib/font.c3l/src/. pkg/deps/font/
           cp -R lib/window.c3l/main.c3 \
@@ -56,17 +62,14 @@ jobs:
                 lib/window.c3l/linux \
                 lib/window.c3l/win32 pkg/deps/c3w/
 
-          # vulkan.c3l carries the macOS loader + driver dylibs in a per-target
-          # directory -- the same layout cui.c3l needs -- so they are copied
-          # straight across. Missing files fail the release rather than shipping
-          # something that cannot run on macOS.
-          mkdir -p pkg/macos-aarch64
-          cp lib/vulkan.c3l/macos-aarch64/* pkg/macos-aarch64/
-          test -f pkg/macos-aarch64/libvulkan.1.dylib
-          test -f pkg/macos-aarch64/libvulkan_kosmickrisp.dylib
-
           cd pkg && zip -qr ../cui.c3l . && cd ..
-          unzip -l cui.c3l | grep -E 'macos-aarch64'
+
+          # A vendored copy of either would be the bug this layout removes: the
+          # bindings would compile from a path with no macos-aarch64/ beside it,
+          # and the dylibs would be duplicated where nothing opens them.
+          if unzip -l cui.c3l | grep -iE 'deps/vk/|\.dylib'; then
+            echo "cui.c3l must not carry the vk bindings or the Vulkan dylibs"; exit 1
+          fi
 
       - name: Upload cui.c3l
         uses: actions/upload-artifact@v4
@@ -75,8 +78,9 @@ jobs:
           path: cui.c3l
           if-no-files-found: error
 
-  # Prove the artifact builds on every platform before publishing it. A broken
-  # manifest fails the release instead of shipping a .c3l nobody can build
+  # Prove the artifact builds on every platform before publishing it, against the
+  # released vulkan.c3l a consumer would actually pair it with -- so a mismatch
+  # between the two fails the release instead of shipping a .c3l nobody can build
   # against. Building is the whole test -- the runners have no GPU, so nothing
   # is run. No Vulkan SDK is installed on any runner: nothing links against
   # Vulkan, which is itself part of what is being verified.
@@ -94,6 +98,10 @@ jobs:
           name: cui.c3l
           path: consumer/lib
 
+      - name: Fetch vulkan.c3l
+        shell: bash
+        run: curl -fsSL "$VULKAN_C3L_URL" -o consumer/lib/vulkan.c3l
+
       - name: Install C3
         shell: bash
         run: |
@@ -105,16 +113,18 @@ jobs:
           chmod +x c3/c3c || true
           echo "$PWD/c3" >> "$GITHUB_PATH"
 
-      - name: Consumer project depending on cui alone
+      - name: Consumer project depending on cui + vk
         shell: bash
         run: |
           mkdir -p consumer/src
+          # "vk" is what vulkan.c3l provides -- c3c resolves a dependency by the
+          # manifest's "provides", not by the file name.
           cat > consumer/project.json <<'EOF'
           {
             "langrev": "1",
             "warnings": [ "no-unused" ],
             "dependency-search-paths": [ "lib" ],
-            "dependencies": [ "cui" ],
+            "dependencies": [ "cui", "vk" ],
             "sources": [ "src/**" ],
             "output": "build",
             "targets": { "smoke": { "type": "executable" } }
@@ -147,8 +157,8 @@ jobs:
         working-directory: consumer
         run: |
           # The loader is dlopened at runtime, never linked, so a macOS app must
-          # not reference any Vulkan dylib -- the bundled loader + driver are
-          # found through cui::vulkan's candidate paths instead.
+          # not reference any Vulkan dylib -- the loader + driver vulkan.c3l
+          # bundles are found through its own candidate paths instead.
           if otool -L build/smoke | grep -iE 'vulkan|moltenvk'; then
             echo "unexpected Vulkan dylib dependency"; exit 1
           fi

@@ -111,7 +111,9 @@ const Color BLUE  = { 0.5, 0.5, 0.5, 1.0 };
  - `update` — called every frame with the frame's dt — for animations and
    polling `ui.input`; mutate state then `request_paint()`.
  - `unmount` — free whatever the widget allocated; called when its element
-   leaves the tree. The widget struct itself stays caller-owned.
+   leaves the tree. The widget struct itself stays caller-owned. Takes the
+   element like every other hook, so a widget can still reach `inherit` on the
+   way out and release symmetrically with what it acquired.
 
  The built-in implementations (Rectangle, Column, Row, Stack, Padding, Clip,
  Scroll, Button) live in module `cui::widgets`; apps write their own against
@@ -126,7 +128,7 @@ interface Widget
 	fn void on_hover(Element* elem, bool entered) @optional;
 	fn bool on_key(Element* elem, KeyEvent event) @optional;
 	fn void update(Element* elem, float dt) @optional;
-	fn void unmount() @optional;
+	fn void unmount(Element* elem) @optional;
 }
 
 <*
@@ -283,6 +285,10 @@ struct Ui
 	sz scope_floor;
 	Element* scoped_root;
 
+	// Embedder state, reachable by type from anywhere in the tree — see
+	// `Ui.provide` / `Element.inherit`. Every slot is borrowed.
+	List{any} context;
+
 	bool build_pending;
 	bool layout_pending;
 	bool paint_pending;
@@ -309,6 +315,64 @@ fn Ui* new_ui(Vec2 size)
 }
 
 <*
+ Makes a value reachable by type from anywhere in the tree.
+
+ Every widget hook receives an `Element*`, and every element holds `Ui* ui`, so
+ a value provided here is one hop away from any point in the tree without the
+ embedder threading a pointer through the struct literal that built the widget.
+ That is what lets this library ship *interactive* widgets at all: a Button has
+ to call back into the app, and cui has no app type to name.
+
+ This is not the way a widget should reach state it owns and mutates. A field
+ of the right type is checked by the compiler; a lookup here is checked at
+ runtime and raises NOT_PROVIDED when the embedder forgot. For a callback
+ context or a theme — uniform across the tree, provided once at startup, read
+ far more than written — that trade is fine, and the failure is loud on the
+ first interaction. For the widget holding the document, take the pointer as a
+ field and let a missing one fail to compile.
+
+ Providing the same type twice is an override rather than a duplicate:
+ `inherit` searches newest-first, so swapping a theme at runtime is a push.
+
+ @param value : `Borrowed — must outlive the Ui. Pass a pointer; it converts to any.`
+*>
+fn void Ui.provide(&self, any value)
+{
+	self.context.push(value);
+}
+
+<*
+ The fault `inherit` raises when nothing in the tree provided the type — so a
+ lookup asserts with `!!` or degrades with `if (try v = elem.inherit(T))`.
+*>
+faultdef NOT_PROVIDED;
+
+<*
+ The provided value of a type. See `Ui.provide`.
+
+ Prefer `Element.inherit` at call sites; see the note there.
+
+ A fault rather than a null, matching `find` / `find_id` above — this is the
+ same kind of question (ask the tree for something that may not be there) and
+ it should fail the same way. It also decides how the mistake reads: `!!` on a
+ missing provider panics naming NOT_PROVIDED at the call site, where a returned
+ null would segfault one line later inside the caller's own code, pointing at
+ the wrong thing entirely.
+
+ @param $Type : `The provided type itself, not its pointer — inherit(AppState).`
+ @return `Pointer to the provided value.`
+ @return? NOT_PROVIDED
+*>
+macro Ui.inherit(&self, $Type)
+{
+	foreach_r (slot : self.context)
+	{
+		if (try $Type* hit = anycast(slot, $Type)) return hit;
+	}
+	return NOT_PROVIDED~;
+}
+
+<*
  Releases the tree (running every widget's `unmount`), the canvas and the Ui
  itself. Widget structs passed by pointer stay caller-owned.
 *>
@@ -321,6 +385,7 @@ fn void Ui.free(&self)
 	self.free_transform_slots.free();
 	self.build_stack.free();
 	self.held_keys.free();
+	self.context.free(); // the list; the values in it are the embedder's
 	self.canvas.free();
 	self.text.free();
 	mem::free(self);
@@ -376,6 +441,22 @@ macro Element.widget_as(&self, $Type)
 {
 	return ($Type*)((any)self.widget).ptr;
 }
+
+<*
+ The embedder value of a type, as seen from this element. See `Ui.provide`.
+
+ Prefer this over `elem.ui.inherit` even though they are the same call today.
+ Every provider currently lives on the Ui, so the lookup cannot depend on where
+ in the tree it was made — but a themed subtree or a scoped locale would put
+ providers on elements, and this is the call that would then start walking
+ parents. Written this way, that change is confined to this macro; written the
+ other way it is every call site in every app.
+
+ @param $Type : `The provided type itself, not its pointer.`
+ @return `Pointer to the provided value.`
+ @return? NOT_PROVIDED
+*>
+macro Element.inherit(&self, $Type) => self.ui.inherit($Type);
 
 <*
  The fault `find` / `find_id` (and the `get_widget` twins built on them) raise
@@ -874,7 +955,7 @@ fn void Ui.unmount(&self, Element* element)
 fn void Ui.release(&self, Element* element)
 {
 	foreach (child : element.children) self.release(child);
-	if (&element.widget.unmount) element.widget.unmount();
+	if (&element.widget.unmount) element.widget.unmount(element);
 	if (element.owns_widget) mem::free(((any)element.widget).ptr);
 	if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
 	if (self.hovered == element) self.hovered = null;

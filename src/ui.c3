@@ -97,7 +97,9 @@ const Color BLUE  = { 0.5, 0.5, 0.5, 1.0 };
  - `layout` — given constraints, return own size; lay out children through
    `elem.layout_child` / `elem.place_child`. Omitted: a build widget delegates
    to its built subtree; otherwise children get loose constraints and keep their
-   offsets, and the size fills the constraints.
+   offsets, and the size fills the constraints. Also where the declarative
+   element properties are set: `elem.cursor`, `elem.clips` / `clip_radii`, and
+   `elem.ignores_pointer`.
  - `paint` — emit primitives in element-local coordinates. Omitted: the element
    draws nothing itself (pure container).
  - `on_mouse` — press/release/move/scroll, hit-tested and bubbling: the deepest
@@ -208,6 +210,23 @@ struct Element
 	// emit pass; hit testing reads it
 	Cursor cursor; // preferred pointer shape while hovered
 	// (DEFAULT = defer to ancestors)
+
+	// Transparent to hit testing: the pointer passes straight through this
+	// element to whatever is painted behind it. Children are unaffected — they
+	// are tested first and hit normally — so a transparent container still
+	// delivers events to interactive descendants.
+	//
+	// Set from layout(), like cursor and clips. Widgets that paint decoration
+	// over an interactive surface want it: without it, a Label overlaid on a
+	// viewport wins the hit test (deepest rect containing the point, whether or
+	// not it handles anything) and events bubble to its PARENTS, never to the
+	// sibling underneath — so the label becomes a dead zone, and it also takes
+	// the cursor down to ARROW because cursor resolution walks ancestors too.
+	//
+	// Deliberately opt-in rather than "skip elements with no handlers": a
+	// modal scrim, a disabled overlay and a drag blocker are all exactly an
+	// element that handles nothing and must block everything.
+	bool ignores_pointer;
 
 	// Paint cache, in element-local coordinates. Emitting shifts copies by the
 	// absolute origin, so a moved-but-clean element never re-paints.

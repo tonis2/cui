@@ -631,6 +631,12 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  `Ui.load_font`; see `cui::TextStyle` for the field semantics.
 
      ui.@node((Label){ .text = "Hello", .size = 20, .color = { 1, 1, 1, 1 } })
+
+ A label is **transparent to the pointer**: it is decoration, and its rect is
+ usually much larger than the ink in it. Overlay one on a viewport or put one
+ inside a Button and the clicks, hover and cursor go to what is underneath, as
+ they would in Flutter. Wrap it in a Button (or any widget with `on_mouse`) to
+ make text clickable.
 *>
 struct Label (Widget)
 {
@@ -641,7 +647,8 @@ struct Label (Widget)
 }
 
 <*
- Sizes the label to its measured text, clamped into the constraints.
+ Sizes the label to its measured text, clamped into the constraints, and marks
+ it transparent to hit testing.
 
  @param elem : `The element this widget is attached to.`
  @param constraints : `The constraints to fit into.`
@@ -649,6 +656,7 @@ struct Label (Widget)
 *>
 fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
+	elem.ignores_pointer = true;
 	return cui::clamp_size(elem.ui.text.measure(self.font, self.text, self.size), constraints);
 }
 

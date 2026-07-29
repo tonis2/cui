@@ -30,6 +30,61 @@ fn void hit_test_picks_topmost() @test
 	test::eq(under.enters, 0);
 }
 
+<*
+ A pointer-transparent element does not win the hit test, even though it is
+ painted last and its rect contains the point.
+
+ This is the case that bites: hit testing picks the topmost rect whether or not
+ that widget handles anything, and events bubble to PARENTS — so decoration
+ overlaid on an interactive sibling used to make a dead zone. `Label` sets
+ `ignores_pointer` for exactly this reason.
+*>
+fn void ignores_pointer_falls_through() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	EventRecord under, over;
+	Element* a = ui.@node((EventProbe){ .pref = {100, 50}, .rec = &under });
+	Element* b = ui.@node((EventProbe){ .pref = {60, 30}, .rec = &over, .transparent = true });
+	ui.build(ui.@node((Stack){}, a, b));         // both at the origin; b paints last
+	ui.flush();
+
+	cui_tests::frame(ui, {10, 10});              // inside both rects
+	test::@check(ui.hovered == a);               // the transparent one is skipped
+	test::eq(under.enters, 1);
+	test::eq(over.enters, 0);
+
+	cui_tests::frame(ui, {10, 10}, left: true);
+	test::eq(under.presses, 1);
+	test::eq(over.presses, 0);
+}
+
+<*
+ Transparency applies to the element itself, not its subtree: children are hit
+ tested before the parent, so an interactive child of a transparent container
+ still gets its events.
+*>
+fn void ignores_pointer_keeps_children_hittable() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	EventRecord outer, inner;
+	Element* child = ui.@node((EventProbe){ .pref = {40, 20}, .rec = &inner });
+	Element* parent = ui.@node((EventProbe){ .pref = {100, 50}, .rec = &outer, .transparent = true }, child);
+	ui.build(ui.@node((Stack){}, parent));
+	ui.flush();
+
+	cui_tests::frame(ui, {10, 10});              // over the child
+	test::@check(ui.hovered == child);
+	test::eq(inner.enters, 1);
+
+	cui_tests::frame(ui, {80, 40});              // inside the parent, outside the child
+	test::@check(ui.hovered != parent);          // the parent itself stays transparent
+	test::eq(outer.enters, 0);
+}
+
 fn void hover_enter_leave() @test
 {
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);

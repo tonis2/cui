@@ -146,7 +146,8 @@ Hit testing picks the **topmost rect containing the point**, whether or not that
 widget handles anything, and events then bubble to its *parents* — never to a
 sibling underneath. So decoration laid over an interactive surface blocks it,
 the same way a `<span>` over a `<canvas>` does. Widgets opt out by setting
-`elem.ignores_pointer` from `layout()`; `Label`
+`elem.ignores_pointer` from `layout()`; `Label` already does, and children stay
+hittable either way.
 
 ## Clipping
 

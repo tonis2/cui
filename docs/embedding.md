@@ -142,6 +142,12 @@ button level-states, scroll, typed text, held keys as `cui::Key` X11 codes — a
 call `ui.process_input(frame, dt)`. Apply `ui.cursor` to the OS pointer if it
 changed.
 
+Hit testing picks the **topmost rect containing the point**, whether or not that
+widget handles anything, and events then bubble to its *parents* — never to a
+sibling underneath. So decoration laid over an interactive surface blocks it,
+the same way a `<span>` over a `<canvas>` does. Widgets opt out by setting
+`elem.ignores_pointer` from `layout()`; `Label`
+
 ## Clipping
 
 `Drawing.clip_id` indexes `canvas.clips`; 0 means unclipped. Clip rects are

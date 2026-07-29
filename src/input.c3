@@ -406,7 +406,8 @@ fn void Ui.dispatch_key(&self, KeyEvent event)
 
 <*
  The deepest element whose rect contains the point, searched in reverse paint
- order so the visually-topmost one wins.
+ order so the visually-topmost one wins — skipping any element that set
+ `ignores_pointer` from its layout.
 
  Uses the absolute origins stored by the last emit. Two documented
  simplifications: transform-palette matrices (`set_transform`) are NOT applied to
@@ -446,6 +447,11 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 		Element* hit = self.hit_test_element(child, point);
 		if (hit) return hit;
 	}
+
+	// Children first, then self — so `ignores_pointer` makes only this element
+	// transparent, and its interactive descendants still get their events.
+	if (element.ignores_pointer) return null;
+
 	if (local.x >= 0 && local.y >= 0 && local.x < element.size.x && local.y < element.size.y)
 	{
 		return element;

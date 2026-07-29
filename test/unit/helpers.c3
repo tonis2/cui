@@ -74,10 +74,12 @@ struct EventProbe (Widget)
 {
 	Vec2 pref;
 	EventRecord* rec;
+	bool transparent; // sets elem.ignores_pointer from layout(), like Label does
 }
 
 fn Vec2 EventProbe.layout(&self, Element* elem, Constraints c) @dynamic
 {
+	elem.ignores_pointer = self.transparent;
 	Vec2 size = cui::clamp_size(self.pref, c);
 	if (elem.children.len() > 0)
 	{

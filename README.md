@@ -116,7 +116,7 @@ while (renderer.frame(ui)!!)
 | `cui` | The core: element tree, the `Widget` interface, the `Canvas` output, and the GPU binding contract. No Vulkan or windowing dependency. |
 | `cui::widgets` | Built-ins: `Rectangle`, `Column`, `Row`, `Stack`, `Padding`, `Clip`, `Scroll`, `Button`. Apps use these or implement `Widget` themselves. |
 | `cui::camera` | Projection/view helpers producing the matrices the shader expects. Pure math. |
-| `cui::vulkan` | A standalone reference renderer (window, swapchain, frame loop) used by the examples. Engines with their own Vulkan device skip it — see [docs/embedding.md](docs/embedding.md). |
+| `cui::vulkan` | Two things. `CanvasPass` draws a `Canvas` into a command buffer you supply — no window, no swapchain, no frame loop — and is what an engine with its own Vulkan device uses. `Renderer` is a standalone host built on it (window, swapchain, input, frame loop) and is what the examples use. See [docs/embedding.md](docs/embedding.md). |
 
 ## Working on cui itself
 

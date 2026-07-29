@@ -8,9 +8,13 @@
      `Renderer renderer = vulkan::new(window_size)!!;`
      `while (renderer.frame(ui)!!) { }`
 
- Engines with their own device and frame loop implement the same steps against
- the exports in src/shader.c3 instead (see "Embedding in a Vulkan engine" in
- README.md); this module doubles as the worked example.
+ This is a *host*: a window, a swapchain, an input pump and a frame loop wrapped
+ around one `CanvasPass`, which is where all the actual interface drawing lives.
+ An engine that already has a device and a frame loop skips Renderer entirely and
+ drives a CanvasPass from its own — see canvas_pass.c3 and docs/embedding.md.
+
+ The split is the point: the fiddly half of embedding cui is shared code both
+ sides run, not a page of documentation to reimplement and get subtly wrong.
 *>
 module cui::vulkan;
 import std::io;
@@ -80,20 +84,19 @@ enum LoopMode
 *>
 alias SceneRecorder = fn void?(void* ctx, CommandBuffer cmd, Extent2D extent);
 
-// Initial GPU buffer capacities. Buffers are sized by what the UI actually
-// draws: whenever an upload outgrows its buffer, the buffer is reallocated at
-// the next power of two (see ensure_buffer_capacity).
-const INITIAL_DRAWINGS = 64;
-const INITIAL_TRANSFORMS = 16;
-const INITIAL_CLIPS = 16;
-
 <*
- The window, the Vulkan device and everything the frame loop needs. Owns the
- three device-address buffers the shader reads (drawings, transforms, clips) and
- the texture array. Create with `new`, release with `free`.
+ The window, the Vulkan device and everything the frame loop needs — plus one
+ `CanvasPass`, which owns everything about drawing the interface itself.
+
+ Create with `new`, release with `free`.
 *>
 struct Renderer {
-	Camera camera;
+    // The interface itself. Everything about drawing a cui Canvas lives here —
+    // pipeline, buffers, textures — and nothing about windows or presentation
+    // does. An engine with its own device and frame loop skips Renderer and
+    // drives one of these directly; see canvas_pass.c3.
+    CanvasPass canvas;
+
 	Vec2 window_size;   // logical pixels: UI coordinates, root constraints, mouse
     Extent2D extent;    // physical pixels: window_size * the window's scale
 
@@ -114,35 +117,19 @@ struct Renderer {
 	vk::DeviceQueue graphics_queue;
 	Device device;
 
-	vk::Memory canvas_buffer;
-	vk::Memory transform_buffer;
-	vk::Memory clip_buffer;
-	vk::Memory uniform_buffer;
-
 	vk::MemoryAllocator allocator;
 
-	DescriptorImages textures;
+    // A DescriptorImageInfo is sampler + view only, so the image behind it has
+    // to be owned separately or nothing can destroy it. The swapchain's images
+    // are deliberately absent: those belong to the swapchain.
     DescriptorImageInfo depth_texture;
-
-    // A DescriptorImageInfo is sampler + view only, so the images behind them
-    // have to be owned separately or nothing can destroy them. Parallel to
-    // `textures`, and the swapchain's images are deliberately absent: those
-    // belong to the swapchain.
-    vk::ImageList texture_images;
     vk::Image depth_image;
-    vk::Image atlas_image;      // the Ui's glyph atlas, once created (see sync_text);
-                                // owned by texture_images, this is a bare handle
-                                // for update_atlas_image
 
     SemaphoreList wait_semaphores;
     SemaphoreList signal_semaphores;
     FenceList frame_fences;
 
-    RenderState pipeline;
-    DescriptorSetLayout descriptor_layout;
     vk::Format depth_format;
-    sz pipeline_texture_count;  // texture count the pipeline was built for;
-                                // 0 = not built yet (see rebuild_pipeline)
 
     CommandPool command_pool;
     CommandBufferList command_buffers;
@@ -186,7 +173,6 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
     Renderer renderer = {
         .frame_index = 0,
-        .camera = camera::new(eye: {0.0, 0.0, 1.0}, aspect: window_size.x / window_size.y, min_zoom: 0.1, max_zoom: 10),
         .window_size = window_size,
         .enable_debug = enable_debug,
         .loop_mode = loop_mode,
@@ -199,16 +185,6 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 		extensions.free();
 		device_extensions.free();
 	}
-
-    // Slang's cbuffer matrix layout expects column-major bytes, which is exactly
-    // how Matrix4f stores them, so the matrices go up as-is.
-    // ui_view() bakes in the scale that makes canvas coordinates pixel-exact
-    // under the perspective projection.
-    ShaderUniforms uniform_data = {
-        renderer.camera.perspective,
-        renderer.camera.ui_view(),
-        window_size
-    };
 
     // Create the window first; the Vulkan surface is created from it.
     c3w::Window window = c3w::new(
@@ -451,51 +427,11 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, { renderer.extent.width, renderer.extent.height }, depth_format, &renderer.depth_image)!;
     renderer.depth_format = depth_format;
 
-    // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
-    // never empty; user images get their handles from load_image/load_pixels.
-    char[4] white_pixel = { 255, 255, 255, 255 };
-    vk::Image white_image;
-    renderer.textures.load_rgba(white_pixel[..], 1, 1, &renderer.allocator, graphics_queue, &white_image)!;
-    renderer.texture_images.push(white_image);
-
-    // Uniform buffer (host visible) - uploaded at creation
-    renderer.uniform_buffer = vk::new_buffer(
-        &renderer.allocator,
-        usage: BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: &uniform_data,
-        data_size: ShaderUniforms::size,
-    )!;
-
-    // Retained display list + transform palette + clip list; re-uploaded only
-    // when the widget layer marks them dirty.
-    renderer.canvas_buffer = vk::new_buffer(
-        &renderer.allocator,
-        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: null,
-        data_size: Drawing::size * INITIAL_DRAWINGS,
-    )!;
-
-    renderer.transform_buffer = vk::new_buffer(
-        &renderer.allocator,
-        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: null,
-        data_size: Matrix4f::size * INITIAL_TRANSFORMS,
-    )!;
-
-    renderer.clip_buffer = vk::new_buffer(
-        &renderer.allocator,
-        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: null,
-        data_size: ClipEntry::size * INITIAL_CLIPS,
-    )!;
-
-    // The descriptor layout and pipeline are built lazily on the first frame
-    // (and rebuilt when textures are added) since the sampler-array binding is
-    // sized by the texture count — see rebuild_pipeline.
+    // Everything about drawing the interface, in one object the host merely
+    // owns. Built after the allocator and the depth texture because it borrows
+    // the first and has to match the format of the second.
+    renderer.canvas = new_canvas_pass(device, &renderer.allocator, graphics_queue,
+        format.format, depth_format, window_size)!;
 
     // Acquire semaphores and fences are per frame slot; render-finished
     // semaphores are per swapchain image so one is never re-signaled while a
@@ -524,19 +460,19 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
  Uploads an image file (png/jpg) to the GPU and returns the handle to reference
  it with (`RectStyle.texture` / `CircleStyle.texture`).
 
- Textures can be loaded at any time; ones loaded between frames become valid on
- the next `frame()` call (the pipeline is rebuilt for the new sampler count at the
- top of a frame).
+ Forwards to the CanvasPass, which is where the texture array lives.
 
  @param path : `Path to a png or jpg file.`
  @return `The texture handle.`
 *>
 fn cui::Texture? Renderer.load_image(&self, String path)
 {
-    vk::Image image;
-    self.textures.loadPath(path, &self.allocator, self.graphics_queue, &image)!;
-    self.texture_images.push(image);
-    return (cui::Texture)self.textures.len();
+    // adopt first: textures are usually loaded during setup, before the first
+    // frame() has re-pointed the pass at this Renderer's allocator, and new()
+    // returned the Renderer by value so the pass is still holding the address
+    // of the local it was built in.
+    self.canvas.adopt(&self.allocator);
+    return self.canvas.load_image(path);
 }
 
 <*
@@ -546,125 +482,12 @@ fn cui::Texture? Renderer.load_image(&self, String path)
  @param rgba : `Tightly packed RGBA8 pixels, width * height * 4 bytes.`
  @param width : `Image width in pixels.`
  @param height : `Image height in pixels.`
- @require rgba.len >= (usz)width * height * 4 : `The pixel buffer is smaller than width * height * 4 bytes.`
  @return `The texture handle.`
 *>
 fn cui::Texture? Renderer.load_pixels(&self, char[] rgba, uint width, uint height)
 {
-    vk::Image image;
-    self.textures.load_rgba(rgba, width, height, &self.allocator, self.graphics_queue, &image)!;
-    self.texture_images.push(image);
-    return (cui::Texture)self.textures.len();
-}
-
-<*
- (Re)creates the descriptor layout and pipeline for the current texture count.
-
- Runs before the first frame and again whenever `load_image` grew the texture
- array; the GPU is idled first, since in-flight frames still use the old pipeline.
-*>
-fn void? Renderer.rebuild_pipeline(&self)
-{
-    if (self.pipeline_texture_count > 0) {
-        self.device.waitIdle();
-        self.pipeline.free(self.device);    // also frees the descriptor layout
-    }
-
-    // Descriptor writes are rebuilt per-frame in frame() so the pBufferInfo /
-    // pImageInfo pointers reference data that is alive at record time.
-    self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
-    .setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
-    .setBindings({
-        {
-            .binding = 0,
-            .descriptorType = DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT
-        },
-        {
-            .binding = 1,
-            .descriptorType = DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = (uint)self.textures.len(),
-            .stageFlags = SHADER_STAGE_FRAGMENT_BIT
-        },
-    }).build(self.device)!;
-
-    self.pipeline = (RenderState) {
-        .descriptor_layout = self.descriptor_layout,
-        .shaders = {
-            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
-            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_FRAGMENT_ENTRY, .stage = SHADER_STAGE_FRAGMENT_BIT },
-        },
-        .cull_mode = CULL_MODE_NONE,
-        .front_face = FRONT_FACE_COUNTER_CLOCKWISE,
-        .topology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        .enable_depth = false,
-        .push_constants = {
-            {
-                .offset = 0,
-                .size = ShaderPushConstants::size,
-                .stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
-            },
-        },
-        .dynamic_states = {
-            DYNAMIC_STATE_VIEWPORT,
-            DYNAMIC_STATE_SCISSOR,
-        },
-        .blend_attachments = {
-            {
-                .colorWriteMask =
-                    COLOR_COMPONENT_R_BIT |
-                    COLOR_COMPONENT_G_BIT |
-                    COLOR_COMPONENT_B_BIT |
-                    COLOR_COMPONENT_A_BIT,
-                .blendEnable = vk::TRUE,
-                .srcColorBlendFactor = BLEND_FACTOR_SRC_ALPHA,
-                .dstColorBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .colorBlendOp = BLEND_OP_ADD,
-                .srcAlphaBlendFactor = BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .alphaBlendOp = BLEND_OP_ADD,
-            }
-        },
-        .color_attachments = {
-            FORMAT_B8G8R8A8_UNORM
-        },
-        .depth_format = self.depth_format
-    }.build(self.device)!;
-
-    self.pipeline_texture_count = self.textures.len();
-}
-
-<*
- Keeps the GPU copy of the Ui's glyph atlas in step with the CPU one.
-
- Before `flush` (with `creating` true): once the Ui has fonts, the atlas
- texture is created up front — paint caches drawings with the texture handle
- baked in, so the handle must exist before the first `Painter.text` runs.
- After `flush` (`creating` false): re-upload the pixels whenever glyph baking
- marked them dirty, so glyphs painted this frame are sampled this frame.
-
- @param ui : `The Ui whose text system to sync.`
- @param creating : `True for the pre-flush texture-creation step.`
-*>
-fn void? Renderer.sync_text(&self, Ui* ui, bool creating)
-{
-    cui::TextSystem* text = &ui.text;
-    if (creating) {
-        if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0) {
-            self.textures.load_atlas(text.atlas, text.atlas_width, text.atlas_height,
-                &self.allocator, self.graphics_queue, &self.atlas_image)!;
-            self.texture_images.push(self.atlas_image);
-            text.texture = (cui::Texture)self.textures.len();
-            text.dirty = false;
-        }
-        return;
-    }
-    if (text.dirty && text.texture != cui::NO_TEXTURE) {
-        vulkan::update_atlas_image(self.atlas_image, text.atlas, text.atlas_width, text.atlas_height,
-            false, &self.allocator, self.graphics_queue)!;
-        text.dirty = false;
-    }
+    self.canvas.adopt(&self.allocator);
+    return self.canvas.load_pixels(rgba, width, height);
 }
 
 <*
@@ -676,23 +499,15 @@ fn void Renderer.free(&self) {
     self.device.waitIdle();
     if (self.enable_debug) self.debug_messenger.free(self.instance);
 
-    self.adopt_buffers();
-    self.uniform_buffer.free();
-    self.canvas_buffer.free();
-    self.transform_buffer.free();
-    self.clip_buffer.free();
-
     // Teardown is strictly inside-out, and each step here outlives the one
     // before it: a view reads an image, an image is bound to allocator memory.
-    // Views and samplers...
-    foreach (&texture : self.textures) texture.free(self.device);
+    // The pass holds buffers and images of its own, so it goes before the
+    // allocator its memory came from.
+    self.canvas.adopt(&self.allocator);
+    self.canvas.free();
+
     self.depth_texture.free(self.device);
-    // ...then the images they read...
-    foreach (image : self.texture_images) image.free(self.device);
     self.depth_image.free(self.device);
-    // ...then the memory those images are bound to.
-    self.textures.free();
-    self.texture_images.free();
     self.allocator.free();
 
     // Swapchain image views are created from images the swapchain owns, so they
@@ -705,9 +520,6 @@ fn void Renderer.free(&self) {
 
     self.command_pool.free(self.device);
 
-    // RenderState.free also frees the descriptor layout it holds.
-    if (self.pipeline_texture_count > 0) self.pipeline.free(self.device);
-
     self.wait_semaphores.release(self.device);
     self.signal_semaphores.release(self.device);
     self.frame_fences.release(self.device);
@@ -719,34 +531,6 @@ fn void Renderer.free(&self) {
     self.window.free();
 }
 
-
-<*
- Grows a device-address buffer to fit `needed` bytes, doubling so growth is rare.
-
- The GPU is idled first: frames in flight may still read the old buffer. Callers
- re-push the new address every frame, so nothing else needs to know the buffer
- moved.
-
- @param buffer : `The buffer to grow in place. Freed and reallocated when it is too small.`
- @param needed : `The size the next upload needs, in bytes.`
-*>
-fn void? Renderer.ensure_buffer_capacity(&self, vk::Memory* buffer, sz needed)
-{
-    if (needed <= buffer.size) return;
-
-    sz new_size = buffer.size > 0 ? buffer.size : 1024;
-    while (new_size < needed) new_size *= 2;
-
-    self.device.waitIdle();
-    buffer.free();
-    *buffer = vk::new_buffer(
-        &self.allocator,
-        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: null,
-        data_size: new_size,
-    )!;
-}
 
 <*
  Whether a c3w event key is really a mouse button. The EventMap of c3w mixes
@@ -794,22 +578,6 @@ fn c3w::CursorShape cursor_shape(cui::Cursor cursor)
 }
 
 <*
- Re-points the four owned buffers' allocator references at this Renderer.
-
- `new()` builds the Renderer as a local and returns it by value, so the
- `&renderer.allocator` each vk::Memory captured at creation dangles once the
- struct is copied out. Freeing through that stale pointer (buffer growth,
- shutdown) reads a garbage device. Called wherever a free may follow.
-*>
-fn void Renderer.adopt_buffers(&self)
-{
-    self.canvas_buffer.allocator = &self.allocator;
-    self.transform_buffer.allocator = &self.allocator;
-    self.clip_buffer.allocator = &self.allocator;
-    self.uniform_buffer.allocator = &self.allocator;
-}
-
-<*
  Runs one frame: poll input, dispatch to the widgets, flush the Ui, record the
  canvas and present.
 
@@ -831,8 +599,9 @@ fn void Renderer.adopt_buffers(&self)
 *>
 fn bool? Renderer.frame(&self, Ui* ui)
 {
-    Canvas* canvas = &ui.canvas;
-    self.adopt_buffers();
+    // new() returns the Renderer by value, so every &self.allocator the pass's
+    // buffers captured at creation dangles once the struct is copied out.
+    self.canvas.adopt(&self.allocator);
 
     // Sleep decision, made at the top of the frame so it sees everything since
     // the last frame began — input handlers, update() hooks, AND app code run
@@ -882,16 +651,10 @@ fn bool? Renderer.frame(&self, Ui* ui)
         self.window.set_cursor(cursor_shape(ui.cursor));
     }
 
-    // Flush (build/layout/paint/emit) runs before command recording so glyphs
-    // baked during paint can be uploaded — and the pipeline rebuilt for a new
-    // atlas texture — inside the same frame.
-    self.sync_text(ui, true)!;
-    ui.flush();
-    self.sync_text(ui, false)!;
-
-    // First frame, or textures were added since: (re)build the pipeline
-    // so the sampler-array binding matches the texture count.
-    if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
+    // Flush and upload before any recording starts: this bakes glyphs, may grow
+    // a buffer (which idles the GPU) and may rebuild the pipeline for a new
+    // texture count — none of which belong in the middle of a command buffer.
+    self.canvas.upload(ui, self.window_size)!;
 
     Fence frame_fence = self.frame_fences[self.frame_index];
     Semaphore wait_semaphore = self.wait_semaphores[self.frame_index];
@@ -974,63 +737,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
         vk::cmdSetScissor(command_buffer, 0, 1, &scissor);
     }
 
-    vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
-
-    DescriptorBufferInfo[1] uniform_info = {
-        { .buffer = self.uniform_buffer.buffer, .offset = 0, .range = ShaderUniforms::size },
-    };
-    WriteDescriptorSet[2] descriptor_writes = {
-        vk::writeDescriptorSet()
-        .setDescriptorType(DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setDstBinding(0)
-        .setBufferInfo(uniform_info[..]),
-        vk::writeDescriptorSet()
-        .setDstBinding(1)
-        .setDescriptorType(DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setImageInfo(self.textures.array_view()),
-    };
-    vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
-
-    // Re-upload only what changed since the last frame, growing the
-    // buffers to whatever the UI actually produced.
-    sz draw_count = canvas.drawings.len();
-
-    if (canvas.drawings_dirty) {
-        if (draw_count > 0) {
-            self.ensure_buffer_capacity(&self.canvas_buffer, Drawing::size * draw_count)!;
-            self.canvas_buffer.upload(canvas.drawings.entries, Drawing::size * draw_count);
-        }
-        canvas.drawings_dirty = false;
-    }
-
-    if (canvas.transforms_dirty) {
-        sz transform_count = canvas.transforms.len();
-        if (transform_count > 0) {
-            self.ensure_buffer_capacity(&self.transform_buffer, Matrix4f::size * transform_count)!;
-            self.transform_buffer.upload(canvas.transforms.entries, Matrix4f::size * transform_count);
-        }
-        canvas.transforms_dirty = false;
-    }
-
-    if (canvas.clips_dirty) {
-        sz clip_count = canvas.clips.len();
-        if (clip_count > 0) {
-            self.ensure_buffer_capacity(&self.clip_buffer, ClipEntry::size * clip_count)!;
-            self.clip_buffer.upload(canvas.clips.entries, ClipEntry::size * clip_count);
-        }
-        canvas.clips_dirty = false;
-    }
-
-    ShaderPushConstants constant_data = {
-        .drawings = self.canvas_buffer.address,
-        .transforms = self.transform_buffer.address,
-        .clips = self.clip_buffer.address,
-    };
-    vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout, SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
-
-    // The whole canvas in one instanced draw; the vertex shader indexes
-    // drawings by SV_InstanceID.
-    if (draw_count > 0) vk::cmdDraw(command_buffer, 6, (uint)draw_count, 0, 0);
+    self.canvas.record(command_buffer, self.extent)!;
 
     vk::cmdEndRenderingKHR(command_buffer);
 

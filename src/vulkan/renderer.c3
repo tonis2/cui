@@ -22,6 +22,8 @@ import cui;
 import vk;
 import c3w;
 import cui::camera;
+import image;
+import image::png;
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
@@ -153,6 +155,14 @@ struct Renderer {
     uint frame_index;   // frame-in-flight slot, cycles mod MAX_FRAMES_IN_FLIGHT
 
     bool enable_debug;
+
+    // Pending screenshot, serviced by frame() while the image is still ours.
+    // The path is owned: request_screenshot is usually called from a key
+    // handler with a formatted path, which would be gone by the time the grab
+    // runs a frame later.
+    String screenshot_path;
+    bool screenshot_pending;
+    bool screenshot_supported;  // false when the surface refused TRANSFER_SRC
 }
 
 
@@ -378,9 +388,19 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
 
     // Create swapchain
     uint min_images = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
+
+    // TRANSFER_SRC lets request_screenshot copy a rendered image back to host
+    // memory. Masked against what the surface actually supports, so a surface
+    // that refuses it still gets a swapchain and only screenshots are lost.
+    ImageUsageFlags image_usage = IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if ((ImageUsageFlagBits)capabilities.supportedUsageFlags & IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        image_usage |= IMAGE_USAGE_TRANSFER_SRC_BIT;
+        renderer.screenshot_supported = true;
+    }
+
     SwapchainCreateInfoKHR swapchain_info = vk::swapchainCreateInfoKHR()
       .setMinImageCount(min_images)
-      .setImageUsage(IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+      .setImageUsage(image_usage)
       .setImageSharingMode(SHARING_MODE_EXCLUSIVE)
       .setCompositeAlpha(COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
       .setPresentMode(PRESENT_MODE_FIFO_KHR)
@@ -1014,6 +1034,14 @@ fn bool? Renderer.frame(&self, Ui* ui)
 
     vk::cmdEndRenderingKHR(command_buffer);
 
+    // Record any pending screenshot copy here, while the image is still ours to
+    // touch. Once queuePresentKHR below hands it over, it belongs to the
+    // presentation engine and reading it is a spec violation even where it
+    // happens to work.
+    vk::Memory readback;
+    bool grabbing = self.screenshot_pending;
+    if (grabbing) readback = self.record_screenshot_copy(command_buffer, next_image)!;
+
     ImageMemoryBarrier image_memory_end = vk::imageMemoryBarrier()
     .setSrcAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
     .setOldLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
@@ -1056,6 +1084,147 @@ fn bool? Renderer.frame(&self, Ui* ui)
 
     vk::queuePresentKHR(self.graphics_queue.handle, &present_info)!;
 
+    if (grabbing)
+    {
+        defer readback.free();
+        self.screenshot_pending = false;
+        // Wait for the copy to land. The readback buffer is not a presentable
+        // image, so reading it after the present is fine.
+        self.device.waitIdle();
+        self.write_screenshot(readback, self.screenshot_path)!;
+        self.screenshot_path.free(mem);
+        self.screenshot_path = "";
+    }
+
     self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
     return true;
+}
+
+<*
+ Raised when a screenshot is requested on a surface that refused TRANSFER_SRC.
+*>
+faultdef SCREENSHOT_UNSUPPORTED;
+
+<*
+ Write the next completed frame to `path` as a PNG.
+
+ The grab is serviced inside the next `frame()`, between the render pass ending
+ and the present, because a presentable image may only be touched between
+ vkAcquireNextImageKHR and vkQueuePresentKHR.
+
+ This reads the rendered image rather than grabbing the OS window, so the result
+ is exact: native framebuffer resolution, no title bar, no compositor colour
+ management, and identical frame for frame. That is what makes it usable for
+ before/after comparison and for checking a render from a script.
+
+ One request is outstanding at a time; a second call before the first is
+ serviced replaces it. `path` is copied.
+
+ @param path : `Where to write the PNG. Copied, so a temporary is fine.`
+*>
+fn void Renderer.request_screenshot(&self, String path)
+{
+    if (self.screenshot_path.len > 0) self.screenshot_path.free(mem);
+    self.screenshot_path = path.copy(mem);
+    self.screenshot_pending = true;
+}
+
+<*
+ Record the image-to-buffer copy into the frame's own command buffer.
+
+ The image arrives in COLOR_ATTACHMENT_OPTIMAL and is handed back in it, so
+ frame()'s usual present barrier still applies unchanged.
+*>
+fn vk::Memory? Renderer.record_screenshot_copy(&self, CommandBuffer command_buffer, uint image_index)
+{
+    if (!self.screenshot_supported) return SCREENSHOT_UNSUPPORTED~;
+
+    vk::Image source = self.swapchain_images[image_index];
+    ImageSubresourceRange range = {
+        .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+
+    vk::Memory readback = vk::new_buffer(
+        &self.allocator,
+        usage: BUFFER_USAGE_TRANSFER_DST_BIT,
+        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        data_size: (sz)self.extent.width * (sz)self.extent.height * 4,
+    )!;
+
+    ImageMemoryBarrier to_transfer = vk::imageMemoryBarrier()
+    .setSrcAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+    .setDstAccessMask(ACCESS_TRANSFER_READ_BIT)
+    .setOldLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    .setNewLayout(IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+    .setImage(source)
+    .setSubresourceRange(range);
+
+    vk::cmdPipelineBarrier(command_buffer,
+        PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, PIPELINE_STAGE_TRANSFER_BIT,
+        (DependencyFlags)0, 0, null, 0, null, 1, &to_transfer);
+
+    // rowLength/imageHeight 0 means tightly packed to imageExtent.
+    BufferImageCopy region = {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = { 0, 0, 0 },
+        .imageExtent = { self.extent.width, self.extent.height, 1 },
+    };
+    vk::cmdCopyImageToBuffer(command_buffer, source, IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &region);
+
+    ImageMemoryBarrier to_color = vk::imageMemoryBarrier()
+    .setSrcAccessMask(ACCESS_TRANSFER_READ_BIT)
+    .setDstAccessMask(ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+    .setOldLayout(IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+    .setNewLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    .setImage(source)
+    .setSubresourceRange(range);
+
+    vk::cmdPipelineBarrier(command_buffer,
+        PIPELINE_STAGE_TRANSFER_BIT, PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        (DependencyFlags)0, 0, null, 0, null, 1, &to_color);
+
+    return readback;
+}
+
+<*
+ Swizzle the mapped copy into RGBA and write the PNG.
+*>
+fn void? Renderer.write_screenshot(&self, vk::Memory readback, String path)
+{
+    sz byte_size = (sz)self.extent.width * (sz)self.extent.height * 4;
+
+    // The swapchain is created B8G8R8A8_UNORM, so the channels need swapping.
+    // Alpha is forced opaque: the UI shader writes real alpha there, and a
+    // half-transparent PNG of a finished frame is never what was wanted.
+    char* mapped = readback.data();
+    char[] pixels = mem::new_array(char, byte_size);
+    defer free(pixels);
+
+    for (sz i = 0; i < byte_size; i += 4) {
+        pixels[i]     = mapped[i + 2];
+        pixels[i + 1] = mapped[i + 1];
+        pixels[i + 2] = mapped[i];
+        pixels[i + 3] = 255;
+    }
+
+    image::Image picture = {
+        .width = self.extent.width,
+        .height = self.extent.height,
+        .bit_depth = 8,
+        .format = image::PixelFormat.RGBA,
+        .pixels = pixels,
+    };
+    return png::save_file(&picture, path);
 }

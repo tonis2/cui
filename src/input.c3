@@ -53,6 +53,8 @@ struct MouseEvent
 	Vec2 pos; // element-local position
 	Vec2 absolute; // position in UI coordinates
 	float scroll; // wheel delta, for SCROLL (positive = up)
+	float scroll_x; // horizontal wheel delta, for SCROLL (positive = right)
+	bool scroll_precise; // that scroll came from a trackpad, not a detented wheel
 }
 
 <*
@@ -225,6 +227,8 @@ struct Input
 	bool[3] pressed; // edge: went down this frame
 	bool[3] released; // edge: went up this frame
 	float scroll; // wheel delta this frame
+	float scroll_x; // horizontal wheel delta this frame
+	bool scroll_precise; // that scroll came from a trackpad, not a detented wheel
 	String text; // UTF-8 typed this frame (borrowed from embedder)
 	float time; // seconds since the Ui started processing input
 	float dt;
@@ -254,6 +258,14 @@ struct InputFrame
 	Vec2 mouse;
 	bool[3] buttons; // level state per MouseButton
 	float scroll;
+	float scroll_x;
+	// Whether this frame's scroll came from a trackpad or Magic Mouse rather
+	// than a wheel with detents. The two are not the same quantity in different
+	// units: a notch is about one unit, a trackpad flick is tens of points
+	// between two frames. Anything that scales a scroll — a 3D zoom especially —
+	// is calm under one device and violent under the other unless it can tell
+	// them apart. Embedders with no way to know leave it false.
+	bool scroll_precise;
 	String text;
 	Key[] keys_down;
 }
@@ -282,6 +294,8 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	input.mouse_delta = frame.mouse - input.mouse;
 	input.mouse = frame.mouse;
 	input.scroll = frame.scroll;
+	input.scroll_x = frame.scroll_x;
+	input.scroll_precise = frame.scroll_precise;
 	input.text = frame.text;
 	for (sz b = 0; b < 3; b++)
 	{
@@ -315,9 +329,17 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	// drags keep working when the pointer leaves the element.
 	Element* target = self.captured ? self.captured : hit;
 
-	if (input.scroll != 0 && target)
+	// Either axis is a scroll. A horizontal-only swipe on a trackpad moves
+	// nothing vertically, and gating on `scroll` alone would drop it entirely.
+	if ((input.scroll != 0 || input.scroll_x != 0) && target)
 	{
-		self.dispatch_mouse(target, { .kind = SCROLL, .absolute = input.mouse, .scroll = input.scroll });
+		self.dispatch_mouse(target, {
+			.kind = SCROLL,
+			.absolute = input.mouse,
+			.scroll = input.scroll,
+			.scroll_x = input.scroll_x,
+			.scroll_precise = input.scroll_precise,
+		});
 	}
 
 	for (sz b = 0; b < 3; b++)

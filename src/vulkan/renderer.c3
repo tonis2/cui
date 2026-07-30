@@ -642,6 +642,8 @@ fn bool? Renderer.frame(&self, Ui* ui)
             event_map.is_pressed(MIDDLE_MOUSE),
         },
         .scroll = self.window.get_scroll(),
+        .scroll_x = self.window.get_scroll_x(),
+        .scroll_precise = self.window.get_scroll_precise(),
         .text = self.window.get_text(),
         .keys_down = self.key_scratch.array_view(),
     }, dt);

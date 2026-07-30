@@ -93,7 +93,19 @@ fn Color Color.dim(self, float amount)
 }
 
 <*
- A widget is behavior attached to an Element. All methods are optional:
+ A widget is behavior attached to an Element. All methods are optional.
+
+ Sizing in particular is two tiers, and most widgets never write sizing code
+ at all. A struct carrying a `Vec2 size` field and no `layout` is sized by the
+ field: per axis, a set component is that many pixels and a zero component
+ fills what the parent offers — the same convention the built-in containers
+ use, so `{ 0, 40 }` inside a 400px Column is a 400×40 bar. Rectangle is the
+ worked example. The field is read live on every layout, so mutating it and
+ calling `request_layout` resizes the element. The detection happens in the
+ node macros, where the concrete type is still visible; a widget handed to
+ `Ui.mount` arrives type-erased, so give those a real `layout`. Everything the
+ field cannot say — a size measured from content, or children to place —
+ is `layout`. A widget with neither fills whatever it is offered.
 
  - `build` — compose this widget out of existing widgets: return a subtree made
    with `elem.ui.@node` — the framework attaches it as the element's single
@@ -105,10 +117,12 @@ fn Color Color.dim(self, float amount)
    that must survive a rebuild lives on the composite, not inside the built
    subtree. See test/composite.c3 and build.md.
  - `layout` — given constraints, return own size; lay out children through
-   `elem.layout_child` / `elem.place_child`. Omitted: a build widget delegates
-   to its built subtree; otherwise children get loose constraints and keep their
-   offsets, and the size fills the constraints. Also where the declarative
-   element properties are set: `elem.cursor`, `elem.clips` / `clip_radii`, and
+   `elem.layout_child` / `elem.place_child`. A content-sized leaf is one line:
+   `return cui::clamp_size(wanted, constraints);` — see Label. Omitted: a
+   build widget delegates to its built subtree; otherwise the size field or
+   the fill default decides, and children get loose constraints and keep
+   their offsets. Runs in the layout pass, so this is where the declarative
+   element properties are set: `elem.cursor`, `elem.clips` / `clip_radii`,
    `elem.ignores_pointer`.
  - `paint` — emit primitives in element-local coordinates. Omitted: the element
    draws nothing itself (pure container).
@@ -197,6 +211,13 @@ fn Vec2 clamp_size(Vec2 size, Constraints c)
 }
 
 <*
+ Reads a widget's `Vec2 size` field through the type-erased pointer the element
+ stores — the runtime half of the size-field convention. The node macros
+ instantiate one per widget type that qualifies.
+*>
+alias SizeGetter = fn Vec2(void* widget);
+
+<*
  One node of the retained tree: a widget's identity, its cached layout and its
  cached drawings. Elements are created by the node macros and recycled through
  a free-list, so an `Element*` stays valid for the lifetime of its Ui — holding
@@ -222,6 +243,12 @@ struct Element
 	// emit pass; hit testing reads it
 	Cursor cursor; // preferred pointer shape while hovered
 	// (DEFAULT = defer to ancestors)
+
+	// The size-field convention (see the Widget interface docs): reads the
+	// widget's `Vec2 size` field back out of the type-erased pointer. Set by
+	// the node macros at build time — the one place the concrete type is still
+	// known — and null for every widget that sizes itself another way.
+	SizeGetter auto_size;
 
 	// Transparent to hit testing: the pointer passes straight through this
 	// element to whatever is painted behind it. Children are unaffected — they
@@ -426,12 +453,48 @@ fn void Ui.free(&self)
 macro Element* Ui.@node(&self, widget, ...)
 {
 	$if @kindof(widget) == POINTER:
-		return self.attach_node(widget, false, ...$vaarg);
+		Element* element = self.attach_node(widget, false, ...$vaarg);
+		@detect_size_field($Typeof(*widget), element);
+		return element;
 	$else
 		var $Type = $Typeof(widget);
 		$Type* copy = mem::new($Type);
 		*copy = widget;
-		return self.attach_node(copy, true, ...$vaarg);
+		Element* element = self.attach_node(copy, true, ...$vaarg);
+		@detect_size_field($Type, element);
+		return element;
+	$endif
+}
+
+<*
+ The compile-time half of the size-field convention: a widget whose struct
+ carries a `Vec2 size` field and implements no `layout` is sized by that
+ field, with no layout code written. This macro runs where the node macros
+ still know the concrete type — the only place the field is visible at all,
+ since the element stores the widget behind the type-erased interface — and
+ plants a typed getter for the layout pass to call. The getter reads the live
+ field every layout, so mutating `size` and requesting layout resizes the
+ element.
+
+ An explicit `layout` opts out entirely: those widgets are sized by their
+ method and the field means whatever they say it means (the built-in
+ containers all keep `layout`, which is why their "0 = fill" fields never
+ collide with this).
+
+ @param $Type : `The concrete widget type.`
+ @param element : `The element just built for it.`
+*>
+macro void @detect_size_field($Type, Element* element) @private
+{
+	// $defined on a member access answers "does the type have this" without
+	// evaluating anything — the reflection-flavored twin of the @is_widget
+	// probe. Nested rather than one condition, so the $Typeof of the field
+	// only happens once the field is known to exist.
+	$if $defined((($Type*)null).size):
+		var $FieldType = $Typeof((($Type*)null).size);
+		$if $FieldType == Vec2 &&& !$defined((($Type*)null).layout):
+			element.auto_size = fn Vec2 (void* widget) => (($Type*)widget).size;
+		$endif
 	$endif
 }
 
@@ -1245,6 +1308,23 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 	{
 		size = element.widget.layout(element, constraints);
 	}
+	else if (element.auto_size)
+	{
+		// The size-field convention: the widget's `Vec2 size` field, read live
+		// through the getter the node macro planted. Per axis it means what it
+		// means on the built-in containers — a set component is that many
+		// pixels, a zero component fills whatever the parent offered — so a
+		// widget gets fixed, fill or a mix of the two with no layout code.
+		Vec2 wanted = element.auto_size(((any)element.widget).ptr);
+		size = clamp_size({
+			wanted.x > 0 ? wanted.x : constraints.max.x,
+			wanted.y > 0 ? wanted.y : constraints.max.y,
+		}, constraints);
+		foreach (child : element.children)
+		{
+			self.layout_element(child, { .min = { 0, 0 }, .max = size });
+		}
+	}
 	else if (&element.widget.build)
 	{
 		// Composite default: single-child passthrough — the built subtree
@@ -1252,19 +1332,17 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 		size = element.layout_child(0, constraints);
 		element.place_child(0, { 0, 0 });
 	}
-	else if (element.children.len() > 0)
+	else
 	{
-		// Default for layout-less containers: children get loose constraints
-		// and keep their offsets; the container fills the available space.
+		// A widget that says nothing about size fills what it is offered —
+		// children get loose constraints and keep their offsets. One rule for
+		// leaves and containers alike, and the same answer a zero size field
+		// gives, so "no sizing code" always means "inherit from the parent".
 		foreach (child : element.children)
 		{
 			self.layout_element(child, { .min = { 0, 0 }, .max = constraints.max });
 		}
 		size = constraints.max;
-	}
-	else
-	{
-		size = constraints.min;
 	}
 
 	if (!vec2_eq(size, element.size))

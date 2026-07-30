@@ -18,23 +18,15 @@ import cui;
 <*
  Leaf with a preferred size and an SDF rect style: fill, border and per-corner
  radii. The workhorse for cards, chips, bars and dividers.
+
+ It has no sizing method at all — the worked example of the size-field
+ convention: the `size` field is picked up by the node macros, a set component
+ is pixels and a zero component fills the parent, per axis.
 *>
 struct Rectangle (Widget)
 {
-	Vec2 size;
+	Vec2 size; // per axis: 0 = fill the available space
 	RectStyle style;
-}
-
-<*
- Takes its preferred size, clamped to the constraints.
-
- @param elem : `The element this widget is attached to.`
- @param constraints : `The size range offered by the parent.`
- @return `The size taken.`
-*>
-fn Vec2 Rectangle.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	return cui::clamp_size(self.size, constraints);
 }
 
 <*
@@ -103,10 +95,20 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	float content = 0;
 	float cross   = 0;
 
+	// A fixed size is what the children are offered, not just what this widget
+	// returns: a 400px-wide Column hands its children 400 as their max width,
+	// whatever it was offered itself. That top-down cap is what lets a
+	// fill-width child — a zero size field, a bare container — inherit the
+	// column's width instead of the window's.
+	Vec2 avail = {
+		self.size.x > 0 ? math::min(self.size.x, constraints.max.x) : constraints.max.x,
+		self.size.y > 0 ? math::min(self.size.y, constraints.max.y) : constraints.max.y,
+	};
+
 	for (sz i = 0; i < count; i++)
 	{
-		float remaining = math::max(constraints.max.y - content, 0.0f);
-		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { constraints.max.x, remaining } });
+		float remaining = math::max(avail.y - content, 0.0f);
+		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { avail.x, remaining } });
 		content += child_size.y;
 		if (i + 1 < count) content += self.gap;
 		cross = math::max(cross, child_size.x);
@@ -169,10 +171,17 @@ fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 	float content = 0;
 	float cross   = 0;
 
+	// Same top-down cap as Column: a fixed size is offered to the children, so
+	// fill-height children inherit a fixed-height Row rather than the window.
+	Vec2 avail = {
+		self.size.x > 0 ? math::min(self.size.x, constraints.max.x) : constraints.max.x,
+		self.size.y > 0 ? math::min(self.size.y, constraints.max.y) : constraints.max.y,
+	};
+
 	for (sz i = 0; i < count; i++)
 	{
-		float remaining = math::max(constraints.max.x - content, 0.0f);
-		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { remaining, constraints.max.y } });
+		float remaining = math::max(avail.x - content, 0.0f);
+		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { remaining, avail.y } });
 		content += child_size.x;
 		if (i + 1 < count) content += self.gap;
 		cross = math::max(cross, child_size.y);
@@ -539,7 +548,7 @@ alias OnClick = fn void(Ui* ui);
 *>
 struct Button (Widget)
 {
-	Vec2 size;
+	Vec2 size; // per axis: 0 = fill the available space
 	RectStyle style;
 	RectStyle hover_style; // used while hovered, if its color alpha > 0
 	RectStyle press_style; // used while held, if its color alpha > 0
@@ -549,16 +558,21 @@ struct Button (Widget)
 }
 
 <*
- Takes its preferred size and asks for the hand cursor while hovered.
+ Sized by the `size` field with the usual reading — a set component is pixels,
+ a zero component fills. Written out as a layout only because the hand cursor
+ has to be requested somewhere.
 
  @param elem : `The element this widget is attached to.`
  @param constraints : `The size range offered by the parent.`
- @return `The size taken.`
+ @return `The preferred size, clamped to the constraints.`
 *>
 fn Vec2 Button.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	elem.cursor = Cursor.POINTING_HAND;
-	return self.size.constrain(constraints);
+	return cui::clamp_size({
+		self.size.x > 0 ? self.size.x : constraints.max.x,
+		self.size.y > 0 ? self.size.y : constraints.max.y,
+	}, constraints);
 }
 
 <*
@@ -647,12 +661,11 @@ struct Label (Widget)
 }
 
 <*
- Sizes the label to its measured text, clamped into the constraints, and marks
- it transparent to hit testing.
+ Sizes the label to its measured text, and marks it transparent to hit testing.
 
  @param elem : `The element this widget is attached to.`
- @param constraints : `The constraints to fit into.`
- @return `The measured text size, clamped.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The measured text size, clamped to the constraints.`
 *>
 fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 {

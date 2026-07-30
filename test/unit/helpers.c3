@@ -143,7 +143,7 @@ struct UnmountProbe (Widget)
 	int* count;
 }
 
-fn void UnmountProbe.unmount(&self) @dynamic
+fn void UnmountProbe.unmount(&self, Element* elem) @dynamic
 {
 	if (self.count) (*self.count)++;
 }

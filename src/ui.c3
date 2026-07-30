@@ -82,6 +82,16 @@ const Color BLACK = { 0.0, 0.0, 0.0, 1.0 };
 *>
 const Color BLUE  = { 0.5, 0.5, 0.5, 1.0 };
 
+
+// Multiplies rgb rather than dropping alpha: over a dark viewport those look
+// alike, but over the lit flank of the model only the first still reads as
+// "further away" instead of "translucent".
+fn Color Color.dim(self, float amount)
+{
+	Vec4 rgba = (Vec4)self;
+	return (Color){ rgba.x * amount, rgba.y * amount, rgba.z * amount, rgba.w };
+}
+
 <*
  A widget is behavior attached to an Element. All methods are optional:
 

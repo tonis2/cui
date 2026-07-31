@@ -323,6 +323,23 @@ fn void MenuBar.paint(&self, Element* elem, Painter* painter) @dynamic
 }
 
 <*
+ Dismisses the open dropdown, if there is one. Safe to call when nothing is
+ open, and safe from a handler inside the subtree it condemns.
+
+ Public for the app that puts controls of its own on the bar: those sit *above*
+ the bar in the tree, so their clicks never reach the catcher, and without this
+ the dropdown would hang over the action they just ran.
+
+ @param elem : `The bar's element — the one that rebuilds.`
+*>
+fn void MenuBar.close(&self, Element* elem)
+{
+	if (self.open == 0) return;
+	self.open = 0;
+	elem.request_build();
+}
+
+<*
  The close-on-click-elsewhere half of being a menu: any press that bubbles this
  far was on the open catcher (or the bare bar strip), so nothing more specific
  wanted it.
@@ -330,11 +347,7 @@ fn void MenuBar.paint(&self, Element* elem, Painter* painter) @dynamic
 fn bool MenuBar.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	if (event.kind != MouseEventKind.PRESS) return false;
-	if (self.open != 0)
-	{
-		self.open = 0;
-		elem.request_build();
-	}
+	self.close(elem);
 	return true;
 }
 
@@ -342,8 +355,7 @@ fn bool MenuBar.on_key(&self, Element* elem, KeyEvent event) @dynamic
 {
 	if (self.open != 0 && event.down && event.key == Key.ESCAPE)
 	{
-		self.open = 0;
-		elem.request_build();
+		self.close(elem);
 		return true;
 	}
 	return false;

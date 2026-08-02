@@ -317,7 +317,7 @@ struct Ui
 {
 	Element* root;
 	Canvas canvas;
-	TextSystem text; // fonts + glyph atlas backing Painter.text (text.c3)
+	TextSystem text; // fonts + glyph atlas backing Painter.text (render/text.c3)
 	Vec2 size; // root constraints, usually the window size
 	float pixel_ratio; // physical pixels per logical one, reported to widgets
 	// through `Element.media`. The embedder sets it — the
@@ -1357,7 +1357,7 @@ fn void Element.set_transform(&self, Matrix4f transform)
 		ui.paint_pending = true;
 	}
 	// Stored as-is: the shader reads the palette as raw float4s matching
-	// Matrix4f's column-major storage (see shader.slang PushData).
+	// Matrix4f's column-major storage (see shaders/shader.slang PushData).
 	ui.canvas.transforms[self.transform_slot] = transform;
 	ui.canvas.transforms_dirty = true;
 	ui.frame_requested = true;

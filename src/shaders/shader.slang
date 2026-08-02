@@ -7,7 +7,7 @@
 // https://thebookofshaders.com/edit.php?log=160414041142
 // https://www.shadertoy.com/view/tltXDl
 
-// Must match cui::Drawing in canvas.c3 (scalar layout).
+// Must match cui::Drawing in render/canvas.c3 (scalar layout).
 struct Drawing
 {
     uint kind;
@@ -28,7 +28,7 @@ struct Drawing
     uint reserved2;
 };
 
-// Drawing kinds — must match cui::DrawingKind in canvas.c3.
+// Drawing kinds — must match cui::DrawingKind in render/canvas.c3.
 static const uint KIND_RECT = 0;
 static const uint KIND_ELLIPSE = 1;
 static const uint KIND_LINE = 2;

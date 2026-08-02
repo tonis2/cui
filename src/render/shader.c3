@@ -15,7 +15,7 @@ import std::math;
  VkShaderModule straight from the library with no file management. One module,
  two entry points (`SHADER_VERTEX_ENTRY` and `SHADER_FRAGMENT_ENTRY`).
 *>
-char[*] shader_spirv = $embed("shaders/shader.spv");
+char[*] shader_spirv = $embed("../shaders/shader.spv");
 
 <*
  Name of the vertex entry point in `shader_spirv`.

@@ -122,6 +122,21 @@ while (renderer.frame(ui)!!)
 | `cui::camera` | Projection/view helpers producing the matrices the shader expects. Pure math. |
 | `cui::vulkan` | Two things. `CanvasPass` draws a `Canvas` into a command buffer you supply — no window, no swapchain, no frame loop — and is what an engine with its own Vulkan device uses. `Renderer` is a standalone host built on it (window, swapchain, input, frame loop) and is what the examples use. See [docs/embedding.md](docs/embedding.md). |
 
+The source is grouped the same way, one directory per layer:
+
+```
+src/core/      the element tree and the frame — ui.c3, input.c3, media.c3
+src/render/    what a frame turns into — canvas.c3 (the drawing list), text.c3
+               (fonts and the glyph atlas), camera.c3, shader.c3 (GPU contract)
+src/widgets/   the built-ins — basic.c3, menu.c3, dialog.c3, area.c3
+src/vulkan/    the reference backend
+src/shaders/   the Slang source and the compiled SPIR-V
+```
+
+Nothing below `src/core` and `src/render` is required to use cui: an app can
+implement `Widget` without `src/widgets`, and an engine with its own device
+draws a `Canvas` without `src/vulkan`.
+
 ## Working on cui itself
 
 Clone with `--recurse-submodules` — window, image and font live in `lib/` as

@@ -9,7 +9,7 @@ import std::core::test;
 
 // The canary for CPU/GPU struct desync: Drawing and ClipEntry are byte-copied
 // into buffers the shader reads with scalar layout, so their C3 sizes are part
-// of the GPU contract (see canvas.c3). A mismatch here renders scrambled.
+// of the GPU contract (see src/render/canvas.c3). A mismatch here renders scrambled.
 fn void gpu_struct_contract() @test
 {
 	test::eq(Drawing::size, 96);

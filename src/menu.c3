@@ -416,7 +416,6 @@ struct MenuTitle (Widget)
 
 fn Vec2 MenuTitle.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.cursor = Cursor.POINTING_HAND;
 	Vec2 text = elem.ui.text.measure(self.style.font, self.title, self.style.text_size);
 	return cui::clamp_size({ text.x + 2 * self.style.pad_x, self.style.bar_height }, constraints);
 }
@@ -441,6 +440,7 @@ fn void MenuTitle.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void MenuTitle.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	MenuBar* bar = self.bar.widget_as(MenuBar);
 	if (entered && bar.open != 0 && bar.open != self.index)
 	{
@@ -486,7 +486,6 @@ struct MenuItemRow (Widget)
 
 fn Vec2 MenuItemRow.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	if (!self.item.disabled) elem.cursor = Cursor.POINTING_HAND;
 	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
 }
 
@@ -527,6 +526,10 @@ fn void MenuItemRow.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void MenuItemRow.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	// A disabled row asks for nothing rather than for the arrow, leaving the
+	// panel underneath to answer — the arrow is what the panel already wants,
+	// and DEFAULT keeps that one decision in one place.
+	if (entered && !self.item.disabled) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 
@@ -732,7 +735,6 @@ struct SelectHead (Widget)
 
 fn Vec2 SelectHead.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.cursor = Cursor.POINTING_HAND;
 	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
 }
 
@@ -759,6 +761,7 @@ fn void SelectHead.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void SelectHead.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 
@@ -778,7 +781,6 @@ struct SelectOption (Widget)
 
 fn Vec2 SelectOption.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.cursor = Cursor.POINTING_HAND;
 	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
 }
 
@@ -805,6 +807,7 @@ fn void SelectOption.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void SelectOption.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 

@@ -38,10 +38,12 @@ struct Dial (Widget)
 const float DIAL_START = 0.75 * math::PI;
 const float DIAL_SPAN  = 1.5 * math::PI;
 
-fn Vec2 Dial.layout(&self, Element* elem, Constraints constraints) @dynamic
+// A hand over the dial, closing while the needle is being steered. Asked for
+// from the hooks that know — and with the shape out of layout's hands there is
+// nothing left for a layout to say: the `size` field sizes the dial.
+fn void Dial.on_hover(&self, Element* elem, bool entered) @dynamic
 {
-	elem.cursor = Cursor.OPEN_HAND;
-	return self.size.constrain(constraints);
+	if (entered) elem.set_cursor(Cursor.OPEN_HAND);
 }
 
 // Point the needle at the pointer: angle of the element-local position
@@ -70,6 +72,7 @@ fn bool Dial.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
 			self.dragging = true;
+			elem.set_cursor(Cursor.CLOSED_HAND);
 			self.drag(elem, event.pos);
 			return true; // consuming the press captures the drag
 		case MOVE:
@@ -81,6 +84,7 @@ fn bool Dial.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case RELEASE:
 			if (event.button != MouseButton.LEFT || !self.dragging) return false;
 			self.dragging = false;
+			elem.set_cursor(Cursor.OPEN_HAND);
 			return true;
 		case SCROLL:
 			self.value = math::clamp(self.value + event.scroll * 0.005f, 0.0f, 1.0f);
@@ -232,8 +236,9 @@ fn void main(String[] args)
 
 				@tree((Row) { .size = { content_width, 0 }, .main_align = SPACE_BETWEEN })
 				{
-					// Element.cursor gives any element a pointer shape
-					// declaratively — no widget code involved.
+					// set_cursor gives any element a pointer shape with no widget
+					// code involved at all — for a shape that belongs to this one
+					// node rather than to a widget type, the way the Dial's does.
 					// .with_id names this node so a button callback can reach
 					// this exact rectangle among the many in the tree —
 					// get_widget(Rectangle) would return the header, the first
@@ -244,7 +249,7 @@ fn void main(String[] args)
 							.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
 						}
 					).with_id("teal");
-					teal_card.cursor = Cursor.POINTING_HAND;
+					teal_card.set_cursor(Cursor.POINTING_HAND);
 
 					@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 });
 					@node(

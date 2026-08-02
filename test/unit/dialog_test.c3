@@ -163,7 +163,10 @@ fn void title_drag_moves_the_panel() @test
 
 	Element* bar = ui.find(DialogTitleBar)!!;
 	Vec2 grip = bar.absolute + (Vec2) { 20.0, 15.0 }; // left of the close button
+	cui_tests::frame(ui, grip);
+	test::eq(ui.cursor, Cursor.OPEN_HAND);
 	cui_tests::frame(ui, grip, left: true);
+	test::eq(ui.cursor, Cursor.CLOSED_HAND);     // closed on the press that grabs
 	cui_tests::frame(ui, grip + (Vec2) { 30.0, 20.0 }, left: true);
 	ui.flush();
 
@@ -175,6 +178,10 @@ fn void title_drag_moves_the_panel() @test
 	cui_tests::frame(ui, { 900.0, 900.0 }, left: true);
 	cui_tests::frame(ui, { 900.0, 900.0 });
 	ui.flush();
+
+	// The hand opens again on the release, which lands wherever the drag ended
+	// — off the bar entirely here, since the pointer outran the panel.
+	test::eq(bar.cursor, Cursor.OPEN_HAND);
 	cui_tests::eq_vec2(frame.absolute, { DIALOG_WINDOW.x - PANEL_W, DIALOG_WINDOW.y - PANEL_H });
 
 	// And it stays where it was left rather than snapping back to the middle.

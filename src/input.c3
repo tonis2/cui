@@ -68,10 +68,13 @@ struct KeyEvent
 }
 
 <*
- Mouse cursor shape, resolved per frame from the hovered element chain: the
- deepest hovered element whose `cursor` field is not DEFAULT wins (a widget sets
- it declaratively from `layout()`, as Button does). The embedder applies
- `Ui.cursor` to the OS after `process_input`.
+ Mouse cursor shape, resolved once per `process_input` from the hovered element
+ chain: the deepest element whose `cursor` is not DEFAULT wins, and widgets ask
+ for one with `Element.set_cursor` (Button is the worked example). Resolution
+ runs after the frame's events are dispatched, so a shape that depends on what
+ just happened — a handle closing its hand on the press that begins a drag — is
+ right on the same frame. The embedder applies `Ui.cursor` to the OS after
+ `process_input`.
 *>
 enum Cursor
 {
@@ -314,17 +317,6 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 		if (hit && &hit.widget.on_hover) hit.widget.on_hover(hit, true);
 	}
 
-	// Effective cursor: deepest hovered element with a preference wins.
-	self.cursor = Cursor.ARROW;
-	for (Element* e = self.hovered; e != null; e = e.parent)
-	{
-		if (e.cursor != Cursor.DEFAULT)
-		{
-			self.cursor = e.cursor;
-			break;
-		}
-	}
-
 	// While a press is being held by a consumer, everything routes to it —
 	// drags keep working when the pointer leaves the element.
 	Element* target = self.captured ? self.captured : hit;
@@ -386,6 +378,23 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 
 	// Per-frame tick for widgets implementing update().
 	if (self.root) self.tick(self.root, dt);
+
+	// Effective cursor: the deepest hovered element with a preference wins.
+	//
+	// Last, after every handler and every update has run, because a widget that
+	// changes shape in response to input is the common case and resolving before
+	// the dispatch would show the answer to the previous frame's question. The
+	// tree is not rebuilt until the flush, so `hovered` is still a live element
+	// here even when a handler has just condemned it.
+	self.cursor = Cursor.ARROW;
+	for (Element* e = self.hovered; e != null; e = e.parent)
+	{
+		if (e.cursor != Cursor.DEFAULT)
+		{
+			self.cursor = e.cursor;
+			break;
+		}
+	}
 }
 
 <*

@@ -186,7 +186,7 @@ fn void cursor_resolves_from_hover_chain() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* btn = ui.@node((Button){ .size = {80, 30} });   // sets POINTING_HAND
+	Element* btn = ui.@node((Button){ .size = {80, 30} });   // asks for POINTING_HAND
 	ui.build(ui.@node((Stack){}, btn));
 	ui.flush();
 
@@ -195,6 +195,73 @@ fn void cursor_resolves_from_hover_chain() @test
 
 	cui_tests::frame(ui, {300, 80});
 	test::eq(ui.cursor, Cursor.ARROW);           // no preference anywhere: default
+}
+
+fn void a_shape_asked_for_in_a_handler_lands_on_that_frame() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	int layouts;
+	Element* probe = ui.@node((CursorProbe){
+		.pref = {80, 30}, .shape = Cursor.OPEN_HAND, .layouts = &layouts,
+	});
+	ui.build(ui.@node((Stack){}, probe));
+	ui.flush();
+	int sized = layouts;
+
+	cui_tests::frame(ui, {10, 10});               // entering asks for the hand
+	test::eq(ui.cursor, Cursor.OPEN_HAND);
+
+	// The press closes it from on_mouse. Resolution runs after the dispatch, so
+	// the shape is right on the frame that asked, not the one after.
+	cui_tests::frame(ui, {10, 10}, left: true);
+	test::eq(ui.cursor, Cursor.CLOSED_HAND);
+
+	// And neither shape cost a layout: a cursor is not a layout question.
+	test::eq(layouts, sized);
+}
+
+fn void a_button_asks_without_a_layout_of_its_own() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	// A Label-like child, transparent to the pointer, so the button itself is
+	// what the pointer lands on — the arrangement its hand is written for.
+	EventRecord rec;
+	Element* inner = ui.@node((EventProbe){ .pref = {40, 20}, .rec = &rec, .transparent = true });
+	Element* btn = ui.@node((Button){ .size = {80, 30} }, inner);
+	ui.build(ui.@node((Stack){}, btn));
+	ui.flush();
+
+	// Sized by the field, with the child laid out inside it: Button has no layout.
+	cui_tests::eq_vec2(btn.size, {80, 30});
+	cui_tests::eq_vec2(inner.size, {40, 20});
+
+	cui_tests::frame(ui, {10, 10});
+	test::@check(ui.hovered == btn);
+	test::eq(ui.cursor, Cursor.POINTING_HAND);
+}
+
+fn void no_preference_defers_to_the_ancestor() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	// The pointer lands on the probe, which asks for nothing; the shape comes
+	// from the element above it, set from app code the way a viewport sets one
+	// for everything drawn over it.
+	EventRecord rec;
+	Element* probe = ui.@node((EventProbe){ .pref = {40, 20}, .rec = &rec });
+	Element* stack = ui.@node((Stack){}, probe);
+	stack.set_cursor(Cursor.CROSSHAIR);
+	ui.build(stack);
+	ui.flush();
+
+	cui_tests::frame(ui, {10, 10});
+	test::@check(ui.hovered == probe);
+	test::eq(ui.cursor, Cursor.CROSSHAIR);
 }
 
 fn void scroll_reaches_hovered() @test

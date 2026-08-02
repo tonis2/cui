@@ -51,6 +51,91 @@ struct Constraints
 }
 
 <*
+ Constraints that force one exact size: `min == max`, so the child has no say.
+ What a parent hands a child whose rect it has already decided — a split's
+ panes, a title bar's close button.
+
+ @param size : `The size the child must take.`
+ @return `Tight constraints at that size.`
+*>
+fn Constraints tight(Vec2 size)
+{
+	return { .min = size, .max = size };
+}
+
+<*
+ Constraints that force nothing: zero minimum, the given maximum. What a parent
+ hands a child it wants to size itself — the default offer, and the one to reach
+ for when in doubt.
+
+ @param max : `The most the child may take on each axis.`
+ @return `Loose constraints up to that size.`
+*>
+fn Constraints loose(Vec2 max)
+{
+	return { .min = { 0, 0 }, .max = max };
+}
+
+<*
+ Clamps a wanted size into this range — the usual last step of a `layout()`,
+ since the size a layout returns must lie inside the constraints it was given.
+
+ @param wanted : `The size the widget would take if it could.`
+ @require self.min.x <= self.max.x && self.min.y <= self.max.y : `Constraints must have min <= max on both axes.`
+ @return `The wanted size, clamped to this constraint box.`
+*>
+fn Vec2 Constraints.constrain(self, Vec2 wanted)
+{
+	return {
+		math::max(self.min.x, math::min(wanted.x, self.max.x)),
+		math::max(self.min.y, math::min(wanted.y, self.max.y)),
+	};
+}
+
+<*
+ Shrinks both bounds by `by`, floored at zero — the constraints to hand a child
+ when this widget keeps some of the space for itself: padding, a title bar, a
+ border. Flooring matters: a widget padded harder than the room it was offered
+ must hand its child an empty box, not a negative one.
+
+ @param by : `Total space to reserve on each axis (both edges together).`
+ @return `The remaining range, never negative.`
+*>
+fn Constraints Constraints.deflate(self, Vec2 by)
+{
+	return {
+		.min = { math::max(self.min.x - by.x, 0.0f), math::max(self.min.y - by.y, 0.0f) },
+		.max = { math::max(self.max.x - by.x, 0.0f), math::max(self.max.y - by.y, 0.0f) },
+	};
+}
+
+<*
+ Resolves a size the way the `size` field convention does: per axis, a set
+ component is that many pixels and a zero component fills whatever was offered,
+ clamped into range either way. `{ 0, 40 }` inside a 400px Column is 400×40.
+
+ This is the convention the built-in containers and the size-field shortcut both
+ follow (see the Widget interface docs), so a hand-written `layout` that starts
+ here behaves like the rest of the library instead of approximately like it.
+
+ It clamps, which is what a widget's OWN size wants and not always what it wants
+ to offer its children: under tight constraints the clamp wins, so a widget that
+ must cap its children below a minimum it was handed — or publish a `media_box`
+ smaller than the space it fills — has to write that cap out rather than call
+ this. Column does, and says why.
+
+ @param size : `The widget's wanted size, zero meaning "fill" on that axis.`
+ @return `The resolved size, inside these constraints.`
+*>
+fn Vec2 Constraints.fill(self, Vec2 size)
+{
+	return self.constrain({
+		size.x > 0 ? size.x : self.max.x,
+		size.y > 0 ? size.y : self.max.y,
+	});
+}
+
+<*
  What an element must recompute on the next flush. Set through the
  `request_*` methods, cleared by the passes that service them.
 *>
@@ -120,17 +205,24 @@ fn Color Color.dim(self, float amount)
    regenerate the subtree. Must be pure: read own fields, produce nodes — state
    that must survive a rebuild lives on the composite, not inside the built
    subtree. See test/composite.c3 and build.md.
+ - `mount` — the element entered the tree; runs once, just before its first
+   layout, with the parent chain already wired. The home for element properties
+   that never change: `elem.ignores_pointer`, `elem.clips` / `clip_radii`, and
+   `set_cursor` for a widget that speaks for its whole subtree. A property
+   computed from constraints or from mutable fields belongs in `layout`
+   instead, which re-runs; this does not. Not a safe place to acquire anything
+   that `unmount` must release: an element released before it was ever laid out
+   — a subtree built and replaced in the same frame — gets the `unmount` without
+   ever having got the `mount`. Allocate in `build` or on first use.
  - `layout` — given constraints, return own size; lay out children through
    `elem.layout_child` / `elem.place_child`. A content-sized leaf is one line:
-   `return cui::clamp_size(wanted, constraints);` — see Label. Omitted: a
-   build widget delegates to its built subtree; otherwise the size field or
-   the fill default decides, and children get loose constraints and keep
-   their offsets. Runs in the layout pass, so this is where the declarative
-   element properties are set: `elem.clips` / `clip_radii`,
-   `elem.ignores_pointer`, `elem.media_box` — and `set_cursor`, for a widget
-   that speaks for its whole subtree (hover fires on the deepest element only,
-   so an ancestor's shape has to be declared somewhere the pointer never
-   reaches).
+   `return constraints.constrain(wanted);` — see Label. Omitted: a build widget
+   delegates to its built subtree; otherwise the size field or the fill default
+   decides, and children get loose constraints and keep their offsets. Reach
+   for `Constraints.loose` / `tight` / `deflate` / `fill` rather than writing
+   the ranges out by hand. Re-runs on every resize, which is what makes it the
+   place for the element properties `mount` cannot answer for: a `media_box`
+   sized from the constraints, a clip radius read from a mutable style.
  - `paint` — emit primitives in element-local coordinates. Omitted: the element
    draws nothing itself (pure container).
  - `on_mouse` — press/release/move/scroll, hit-tested and bubbling: the deepest
@@ -141,10 +233,12 @@ fn Color Color.dim(self, float amount)
    click focuses; see `Element.request_focus`), bubbling like `on_mouse`.
  - `update` — called every frame with the frame's dt — for animations and
    polling `ui.input`; mutate state then `request_paint()`.
- - `unmount` — free whatever the widget allocated; called when its element
-   leaves the tree. The widget struct itself stays caller-owned. Takes the
-   element like every other hook, so a widget can still reach `inherit` on the
-   way out and release symmetrically with what it acquired.
+ - `unmount` — free whatever the widget allocated; called whenever its element
+   leaves the tree, including when it leaves only to be rebuilt (which mounts
+   the new one again). Fires unconditionally, so it is the wider of the pair:
+   see the caveat on `mount`. The widget struct itself stays caller-owned.
+   Takes the element like every other hook, so a widget can still reach
+   `inherit` on the way out and release symmetrically with what it acquired.
 
  The built-in implementations (Rectangle, Column, Row, Stack, Padding, Clip,
  Scroll, Button) live in module `cui::widgets`; apps write their own against
@@ -152,6 +246,7 @@ fn Color Color.dim(self, float amount)
 *>
 interface Widget
 {
+	fn void mount(Element* elem) @optional;
 	fn Element* build(Element* elem) @optional;
 	fn Vec2 layout(Element* elem, Constraints constraints) @optional;
 	fn void paint(Element* elem, Painter* painter) @optional;
@@ -192,29 +287,17 @@ macro bool @is_widget_type($Type) @const @builtin
 }
 
 <*
- Clamps this size into the given constraints.
-
- @param c : `The constraints to clamp into.`
- @require c.min.x <= c.max.x && c.min.y <= c.max.y : `Constraints must have min <= max on both axes.`
- @return `The size, clamped to the constraint box.`
-*>
-fn Vec2 Vec2.constrain(self, Constraints c)
-{
-	return { math::max(c.min.x, math::min(self.x, c.max.x)), math::max(c.min.y, math::min(self.y, c.max.y)), };
-}
-
-<*
- Clamps a wanted size into the given constraints; the usual last step of a
- layout implementation.
+ Free-function spelling of `Constraints.constrain`, with the arguments the other
+ way round. The method is the one to reach for in new code; this exists because
+ it was the original name and consumers call it.
 
  @param size : `The size the widget wants.`
  @param c : `The constraints handed to layout().`
- @require c.min.x <= c.max.x && c.min.y <= c.max.y : `Constraints must have min <= max on both axes.`
  @return `The wanted size, clamped to the constraint box.`
 *>
 fn Vec2 clamp_size(Vec2 size, Constraints c)
 {
-	return { math::max(c.min.x, math::min(size.x, c.max.x)), math::max(c.min.y, math::min(size.y, c.max.y)), };
+	return c.constrain(size);
 }
 
 <*
@@ -258,6 +341,11 @@ struct Element
 	// the node macros at build time — the one place the concrete type is still
 	// known — and null for every widget that sizes itself another way.
 	SizeGetter auto_size;
+
+	// Whether the widget's `mount` hook has run. Zeroed with the rest of the
+	// element on release, so an element recycled into a new widget mounts that
+	// widget rather than inheriting the last one's answer.
+	bool mounted;
 
 	// Transparent to hit testing: the pointer passes straight through this
 	// element to whatever is painted behind it. Children are unaffected — they
@@ -1311,8 +1399,10 @@ fn void Element.set_offset(&self, Vec2 offset)
 
  Hover fires on the deepest element under the pointer, never on its ancestors.
  A widget that wants to name the shape over its whole subtree — a viewport with
- an overlay on top of it — has no hover to hang that on and should set it from
- `layout` instead.
+ an overlay on top of it — has no hover to hang that on and should declare it
+ from `mount`, which runs once and needs no layout to live in. Resolution walks
+ up from the hovered element, so one declaration answers for everything inside
+ that does not ask for its own.
 
  @param cursor : `The shape, or DEFAULT to defer to the ancestors.`
 *>
@@ -1406,6 +1496,21 @@ fn void Element.place_child(&self, sz index, Vec2 offset)
 	self.children[index].offset = offset;
 }
 
+<*
+ Lays every child out under the same constraints, discarding the sizes and
+ leaving the offsets alone — what a container that stacks its children in one
+ place does, and what the framework itself does for a widget with no `layout`.
+
+ For anything that positions children by measuring them, use `layout_child` per
+ child and keep the size it returns.
+
+ @param constraints : `The range offered to each child.`
+*>
+fn void Element.layout_children(&self, Constraints constraints)
+{
+	foreach (child : self.children) self.ui.layout_element(child, constraints);
+}
+
 // ---------------------------------------------------------------------------
 // Frame flush: build pass, then layout pass, then paint + emit pass.
 
@@ -1484,12 +1589,26 @@ fn void Ui.build_element(&self, Element* element)
  `layout()` asks for. Not dirty and same constraints means same size, so none of
  the subtree's layout code runs — that cache is what keeps a local change local.
 
+ Also where `mount` fires, the first time an element is reached. Every element
+ in the tree is reached by this walk before it can be painted or hit tested, so
+ that is the earliest point at which a hook can see a wired parent chain.
+
  @param element : `The element to size.`
  @param constraints : `The size range offered to it.`
  @return `The size it took.`
 *>
 fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 {
+	// Ahead of the cache check, so mounting is the first thing that ever
+	// happens to an element: a fresh one is always dirty and cannot reach the
+	// early return, but a hook that runs before the size is decided is the
+	// contract, not an accident of the flags.
+	if (!element.mounted)
+	{
+		element.mounted = true;
+		if (&element.widget.mount) element.widget.mount(element);
+	}
+
 	if (!element.dirty.layout && vec2_eq(
 		constraints.min,
 		element.last_constraints.min
@@ -1513,15 +1632,8 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 		// means on the built-in containers — a set component is that many
 		// pixels, a zero component fills whatever the parent offered — so a
 		// widget gets fixed, fill or a mix of the two with no layout code.
-		Vec2 wanted = element.auto_size(((any)element.widget).ptr);
-		size = clamp_size({
-			wanted.x > 0 ? wanted.x : constraints.max.x,
-			wanted.y > 0 ? wanted.y : constraints.max.y,
-		}, constraints);
-		foreach (child : element.children)
-		{
-			self.layout_element(child, { .min = { 0, 0 }, .max = size });
-		}
+		size = constraints.fill(element.auto_size(((any)element.widget).ptr));
+		element.layout_children(loose(size));
 	}
 	else if (&element.widget.build)
 	{
@@ -1536,11 +1648,8 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 		// children get loose constraints and keep their offsets. One rule for
 		// leaves and containers alike, and the same answer a zero size field
 		// gives, so "no sizing code" always means "inherit from the parent".
-		foreach (child : element.children)
-		{
-			self.layout_element(child, { .min = { 0, 0 }, .max = constraints.max });
-		}
 		size = constraints.max;
+		element.layout_children(loose(size));
 	}
 
 	if (!vec2_eq(size, element.size))

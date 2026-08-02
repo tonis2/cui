@@ -280,12 +280,9 @@ struct AreaHost (Widget)
 *>
 fn Vec2 AreaHost.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	Vec2 own = cui::clamp_size({
-		self.size.x > 0 ? self.size.x : constraints.max.x,
-		self.size.y > 0 ? self.size.y : constraints.max.y,
-	}, constraints);
+	Vec2 own = constraints.fill(self.size);
 	elem.media_box = own;
-	elem.layout_child(0, { .min = { 0, 0 }, .max = own });
+	elem.layout_child(0, cui::loose(own));
 	elem.place_child(0, { 0, 0 });
 	return own;
 }
@@ -501,11 +498,11 @@ fn Vec2 AreaSplit.layout(&self, Element* elem, Constraints constraints) @dynamic
 	Vec2 b = side ? (Vec2) { total - first, own.y } : (Vec2) { own.x, total - first };
 	Vec2 handle = side ? (Vec2) { s.splitter_px, own.y } : (Vec2) { own.x, s.splitter_px };
 
-	elem.layout_child(0, { .min = a, .max = a });
+	elem.layout_child(0, cui::tight(a));
 	elem.place_child(0, { 0, 0 });
-	elem.layout_child(1, { .min = b, .max = b });
+	elem.layout_child(1, cui::tight(b));
 	elem.place_child(1, side ? (Vec2) { first + s.splitter_px, 0 } : (Vec2) { 0, first + s.splitter_px });
-	elem.layout_child(2, { .min = handle, .max = handle });
+	elem.layout_child(2, cui::tight(handle));
 	elem.place_child(2, side ? (Vec2) { first, 0 } : (Vec2) { 0, first });
 	return own;
 }
@@ -605,7 +602,7 @@ struct AreaTabStrip (Widget)
 fn Vec2 AreaTabStrip.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	AreaStyle s = self.areas.style.resolved();
-	return cui::clamp_size({ constraints.max.x, s.tab_height }, constraints);
+	return constraints.constrain({ constraints.max.x, s.tab_height });
 }
 
 <*
@@ -754,7 +751,7 @@ struct AreaMenuRow (Widget)
 
 fn Vec2 AreaMenuRow.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return cui::clamp_size({ self.width, AREA_MENU_ROW_H }, constraints);
+	return constraints.constrain({ self.width, AREA_MENU_ROW_H });
 }
 
 fn void AreaMenuRow.paint(&self, Element* elem, Painter* painter) @dynamic

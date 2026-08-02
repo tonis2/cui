@@ -193,6 +193,11 @@ fn bool PopupPanel.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  — never the built subtree's. The open-state subtree is window-sized, and an
  element that big would win every hit test everywhere even while closed.
 
+ The dropdown is placed against the bar's screen (`Element.media`), not simply
+ hung under its title: a bar inside a pane too short for the whole menu slides
+ it up over itself rather than letting the last items fall off the pane's
+ bottom edge, where a clipping pane would cut them off.
+
  Keys: ESC closes an open menu; everything else is declined so it bubbles past
  the bar to whatever the app keeps its shortcuts on.
 
@@ -205,7 +210,22 @@ struct MenuBar (Widget)
 	Menu[] menus; // borrowed
 	MenuStyle style;
 	usz open; // 0 = closed, else 1-based index into menus
+
+	// The press that opened the current dropdown, until its release arrives. A
+	// dropdown with no room below the bar is placed over the bar (see
+	// `Media.drop`), which can leave a row sitting exactly under that press —
+	// and the release would then choose it, so the click that opened the menu
+	// would pick from it in the same gesture. The position is kept because the
+	// OTHER way to use a menu is press, drag onto an item, release: that one
+	// still has to select, and what tells them apart is whether the pointer
+	// moved.
+	bool arming;
+	Vec2 armed_at;
 }
+
+// How far the pointer may drift and the release still count as part of the
+// click that opened the menu rather than a drag onto an item.
+const float MENU_ARM_SLOP = 4.0;
 
 fn Element* MenuBar.build(&self, Element* elem) @dynamic
 {
@@ -231,15 +251,32 @@ fn Element* MenuBar.build(&self, Element* elem) @dynamic
 		panel_x += ui.text.measure(s.font, m.title, s.text_size).x + 2 * s.pad_x;
 	}
 
-	// Uniform row width: the widest label + shortcut decides for the panel.
+	// Uniform row width: the widest label + shortcut decides for the panel. The
+	// height comes out of the same pass — the rows are laid out below, but where
+	// the panel goes has to be decided before it is built.
 	float row_w = PANEL_MIN_W;
+	float panel_h = 2 * PANEL_PAD_Y;
 	foreach (item : menu.items)
 	{
-		if (item.separator) continue;
+		if (item.separator)
+		{
+			panel_h += SEPARATOR_H;
+			continue;
+		}
+		panel_h += s.item_height;
 		float w = CHECK_GUTTER + ui.text.measure(s.font, item.label, s.text_size).x + 2 * s.pad_x;
 		if (item.shortcut.len > 0) w += ui.text.measure(s.font, item.shortcut, s.text_size).x + s.pad_x;
 		row_w = math::max(row_w, w);
 	}
+
+	// Under its title, but on the screen the bar is on: in a pane short enough
+	// that the whole menu will not fit below the bar, it slides up over the bar
+	// rather than running off the bottom edge and being clipped there.
+	Vec2 panel_at = elem.media().drop(
+		{ elem.absolute.x + panel_x, elem.absolute.y },
+		s.bar_height,
+		{ row_w, panel_h },
+	) - elem.absolute;
 
 	return @subtree(ui)
 	{
@@ -279,7 +316,7 @@ fn Element* MenuBar.build(&self, Element* elem) @dynamic
 							.with_id(live.label);
 					}
 				};
-			}.set_offset({ panel_x, s.bar_height });
+			}.set_offset(panel_at);
 		};
 	};
 }
@@ -421,7 +458,10 @@ fn bool MenuTitle.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
 			MenuBar* bar = self.bar.widget_as(MenuBar);
-			bar.open = bar.open == self.index ? 0 : self.index;
+			bool opening = bar.open != self.index;
+			bar.open = opening ? self.index : 0;
+			bar.arming = opening;
+			bar.armed_at = event.absolute;
 			self.bar.request_build();
 			return true;
 		case RELEASE:
@@ -500,12 +540,22 @@ fn bool MenuItemRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
+			MenuBar* bar = self.bar.widget_as(MenuBar);
+
+			// The release belonging to the press that opened this dropdown, with
+			// the pointer still where it was: the user has clicked the title, not
+			// chosen an item, and only a panel placed over its own bar can put a
+			// row under that press at all. Swallowed, so the menu stays open.
+			bool arming = bar.arming;
+			Vec2 drift = event.absolute - bar.armed_at;
+			bar.arming = false;
+			if (arming && math::abs(drift.x) <= MENU_ARM_SLOP && math::abs(drift.y) <= MENU_ARM_SLOP) return true;
+
 			bool inside = event.pos.x >= 0 && event.pos.y >= 0
 				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
 			if (inside && !self.item.disabled)
 			{
 				if (self.item.on_select) self.item.on_select(elem.ui);
-				MenuBar* bar = self.bar.widget_as(MenuBar);
 				bar.open = 0;
 				self.bar.request_build();
 			}
@@ -546,6 +596,10 @@ fn void MenuSeparator.paint(&self, Element* elem, Painter* painter) @dynamic
  be one frame stale. That is invisible in practice (the Select has not moved
  between the click that opened it and the next frame), and it is the price of a
  popup with no overlay layer in the core.
+
+ Because it sits anywhere, the list is placed against the screen rather than
+ simply hung below the head: near the bottom edge it opens upwards instead. See
+ `Media.drop`.
 
  While open, the built subtree paints in this element's slot in the paint order:
  siblings painted later can still cover the popup. Keep an open Select out from
@@ -588,6 +642,13 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 		};
 	}
 
+	// Below the head, or above it when the list is taller than the room left
+	// under it — a chooser near the bottom of the screen opens upwards instead
+	// of off the edge. Local coordinates, so the head's own position comes back
+	// out of the absolute answer.
+	Vec2 list_size = { w, (float)self.options.len * s.item_height + 2 * PANEL_PAD_Y };
+	Vec2 list_at = elem.media().drop(elem.absolute, s.item_height, list_size) - elem.absolute;
+
 	return @subtree(ui)
 	{
 		@tree((Stack) { .size = { w, s.item_height } })
@@ -621,7 +682,7 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 						}).with_id(option);
 					}
 				};
-			}.set_offset({ 0, s.item_height });
+			}.set_offset(list_at);
 		};
 	};
 }

@@ -14,6 +14,10 @@ instanced draw call**.
   clips antialias and nested clips intersect without breaking the single draw.
 - **Input** — hit testing with bubbling, pointer capture for drags, keyboard
   focus, hover, and cursor shapes.
+- **Media** — `elem.media()` tells any widget how big the screen it is on is,
+  where that screen sits and at what pixel density, so it can size itself
+  against the display and not just against its parent. A split pane publishes
+  itself as the screen for the view inside it.
 - **Idle-sleep loop** — an `ON_DEMAND` mode that parks the thread at ~0% CPU
   until the user does something, while animations keep it awake on their own.
 

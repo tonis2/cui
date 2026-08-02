@@ -31,7 +31,10 @@ fn void main(String[] args)
 
 	for (uint i = 0; i < 6; i += 2)
 	{
-		Vec2 box_size = { window_size.x / 3.5, window_size.y / 2 };
+		// Sized off the screen rather than off `window_size`: the same number
+		// here, and the one a widget deep in a tree can ask for without being
+		// handed the window's dimensions.
+		Vec2 box_size = ui.media().fraction({ 1.0 / 3.5, 0.5 });
 		float padding = 20.0;
 		float offset  = padding + i * (box_size.x / 2 + padding);
 

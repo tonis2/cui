@@ -283,6 +283,17 @@ struct Element
 	bool clips;
 	Vec4 clip_radii;
 
+	// The screen this element publishes to its subtree: `Element.media` answers
+	// with the nearest non-zero box at or above the caller, and with the window
+	// when there is none. Zero — the default — is "not a screen".
+	//
+	// A size rather than a flag, and set from `layout()` BEFORE the children are
+	// laid out, because that is the only moment the answer both exists and is
+	// early enough to be useful: `size` below is not assigned until the widget's
+	// own layout has returned, by which time everything inside has already had
+	// to size itself. See media.c3.
+	Vec2 media_box;
+
 	bool owns_widget; // widget is a heap copy made by @node; freed on release
 	DirtyFlags dirty;
 }
@@ -298,6 +309,10 @@ struct Ui
 	Canvas canvas;
 	TextSystem text; // fonts + glyph atlas backing Painter.text (text.c3)
 	Vec2 size; // root constraints, usually the window size
+	float pixel_ratio; // physical pixels per logical one, reported to widgets
+	// through `Element.media`. The embedder sets it — the
+	// reference renderer from the window's backing scale —
+	// and 1.0 is the answer until something does.
 
 	// Interactivity state, maintained by Ui.process_input (input.c3).
 	Input input; // per-frame queryable state — the "context"
@@ -346,6 +361,11 @@ fn Ui* new_ui(Vec2 size)
 {
 	Ui* ui = mem::new(Ui);
 	ui.size = size;
+	// Not the zero a fresh Ui would otherwise report: a widget dividing by the
+	// pixel ratio to snap a coordinate would get an infinity, and "one device
+	// pixel per logical pixel" is the right answer for an embedder that never
+	// says otherwise.
+	ui.pixel_ratio = 1.0;
 	ui.canvas.init();
 	ui.text.init();
 	return ui;

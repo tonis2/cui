@@ -99,6 +99,12 @@ struct Renderer {
 
 	Vec2 window_size;   // logical pixels: UI coordinates, root constraints, mouse
     Extent2D extent;    // physical pixels: window_size * the window's scale
+    // The ratio between those two, pushed into `Ui.pixel_ratio` every frame so
+    // widgets can read it through `Element.media`. Sampled once, at creation:
+    // it is the density the swapchain was built for, and reporting a live one
+    // the framebuffer had not been rebuilt to match would be a lie a widget
+    // could act on.
+    float pixel_ratio;
 
 	c3w::Window window;
     Clock frame_clock;
@@ -361,6 +367,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     // text pixel-sharp instead of compositor-upscaled.
     float scale = window.get_scale();
     renderer.extent = {.width = (uint)(window_size.x * scale), .height = (uint)(window_size.y * scale) };
+    renderer.pixel_ratio = scale;
 
     // Create swapchain
     uint min_images = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
@@ -617,6 +624,10 @@ fn bool? Renderer.frame(&self, Ui* ui)
     // app code before the next call) re-sets frame_requested; clear it first so
     // the next sleep decision reflects only that activity.
     ui.frame_requested = false;
+
+    // Before anything can lay out or paint, so `Element.media` answers with this
+    // window's density from the very first frame.
+    ui.pixel_ratio = self.pixel_ratio;
 
     // Clamped so a long idle sleep (or a stall) doesn't advance animations
     // by the whole elapsed wall-clock in one step.

@@ -254,6 +254,10 @@ fn void AreaLayout.merge_split(&self, AreaNode* split, bool keep_first)
  escape-the-rect trick. While the menu is open the catcher blankets every
  strip and divider, so nothing else can mutate the tree under the parked
  pointer, which is what keeps holding an AreaNode* across frames sound.
+
+ The workspace is a screen of its own (see media.c3): a host under a window menu
+ bar does not own the strip above it, and a popup that clamped itself to the
+ window would be free to cover it.
 *>
 struct AreaHost (Widget)
 {
@@ -262,6 +266,28 @@ struct AreaHost (Widget)
 	AreaNode* menu_node; // the context menu's target; null = no menu open
 	bool menu_merge; // true: merge entries for a split; false: split entries for a leaf
 	Vec2 menu_at; // where the right press landed, in window coordinates
+}
+
+<*
+ Takes its `size` field, filling per zero axis — the size-field convention, done
+ by hand because the box has to be published before the pane tree lays itself
+ out inside it, and the convention's own path assigns nothing that early.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @require elem.children.len() == 1 : `A composite is laid out with exactly the subtree it built.`
+ @return `The size taken.`
+*>
+fn Vec2 AreaHost.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	Vec2 own = cui::clamp_size({
+		self.size.x > 0 ? self.size.x : constraints.max.x,
+		self.size.y > 0 ? self.size.y : constraints.max.y,
+	}, constraints);
+	elem.media_box = own;
+	elem.layout_child(0, { .min = { 0, 0 }, .max = own });
+	elem.place_child(0, { 0, 0 });
+	return own;
 }
 
 <*
@@ -331,13 +357,10 @@ fn Element* AreaHost.build(&self, Element* elem) @dynamic
 		.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
 	}, column);
 
-	// Under the pointer, but clamped inside the host so a click near an edge
-	// does not hang the popup off the window.
+	// Under the pointer, but clamped onto the host's screen so a click near an
+	// edge does not hang the popup off it.
 	Vec2 panel_size = { row_w, (float)entries.len * AREA_MENU_ROW_H + 2 * PANEL_PAD_Y };
-	Vec2 at = self.menu_at - elem.absolute;
-	at.x = math::clamp(at.x, 0.0f, math::max(elem.size.x - panel_size.x, 0.0f));
-	at.y = math::clamp(at.y, 0.0f, math::max(elem.size.y - panel_size.y, 0.0f));
-	panel.set_offset(at);
+	panel.set_offset(elem.media().clamp_rect(self.menu_at, panel_size) - elem.absolute);
 
 	// Hit tests run in reverse order: rows first, then the catcher, then the
 	// pane tree it blankets.
@@ -367,6 +390,26 @@ struct AreaPane (Widget)
 	AreaLayout* areas; // borrowed
 	AreaNode* node; // borrowed from the layout's tree
 	Element* host; // the AreaHost element — structural changes rebuild there
+}
+
+<*
+ The composite passthrough — the subtree decides the size — plus the one thing
+ the default cannot do: publish the pane as the screen its view is on, before
+ that view lays itself out and has to know how much room it has.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @require elem.children.len() == 1 : `A composite is laid out with exactly the subtree it built.`
+ @return `The size the built subtree took.`
+*>
+fn Vec2 AreaPane.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	// The offer, not the result: a pane fills what the split gives it, and the
+	// result is not known until everything inside has already been sized.
+	elem.media_box = constraints.max;
+	Vec2 size = elem.layout_child(0, constraints);
+	elem.place_child(0, { 0, 0 });
+	return size;
 }
 
 fn Element* AreaPane.build(&self, Element* elem) @dynamic

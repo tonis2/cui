@@ -731,6 +731,70 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 }
 
 // ---------------------------------------------------------------------------
+// @each / @each_id — the every-match twins of find / find_id, for when several
+// widgets of a kind coexist by design (one HUD per split pane) and "the first
+// one" is a bug. Inline bodies rather than a returned list, so nothing escapes
+// and no allocation outlives the walk. Iterative with an explicit stack: the
+// element tree's depth is a runtime value, and macro recursion only terminates
+// on compile-time bounds. Visit order is unspecified.
+
+<*
+ Runs the body for every element whose widget is exactly $Type.
+
+     ui.@each(Viewport; elem) { elem.request_paint(); };
+
+ Invalidation from the body is safe (it only sets flags); structural mutation
+ of the tree is not — defer it with request_build like everything else.
+
+ @param $Type : `The widget type to visit.`
+ @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
+*>
+macro void Ui.@each(&self, $Type; @body(elem))
+{
+	if (self.root)
+	{
+		typeid want = $Type;
+		@pool()
+		{
+			List{Element*} stack;
+			stack.tinit();
+			stack.push(self.root);
+			while (stack.len() > 0)
+			{
+				Element* walk = stack.pop()!!;
+				foreach (child : walk.children) stack.push(child);
+				if (((any)walk.widget).type == want) @body(walk);
+			}
+		};
+	}
+}
+
+<*
+ Runs the body for every element stamped with this id — the id-keyed twin of
+ `@each`, for when one name is deliberately shared across duplicated subtrees.
+
+ @param id : `The name given with with_id.`
+*>
+macro void Ui.@each_id(&self, String id; @body(elem))
+{
+	if (self.root)
+	{
+		@pool()
+		{
+			List{Element*} stack;
+			stack.tinit();
+			stack.push(self.root);
+			while (stack.len() > 0)
+			{
+				Element* walk = stack.pop()!!;
+				foreach (child : walk.children) stack.push(child);
+				if (walk.id.len > 0 && equals(walk.id, id)) @body(walk);
+			}
+		};
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Scoped tree building — @pool-style sugar over @node. All four macros are
 // @builtin, so app code calls them without the cui:: prefix. Rules:
 //   - @tree/@node only work inside a @canvas/@subtree body (a contract).

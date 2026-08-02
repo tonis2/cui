@@ -11,6 +11,13 @@
  `ui.inherit`, like every other callback here), because the built subtree is
  released wholesale on every structural change.
 
+ Structural changes all go through the context menu: a right press on a pane's
+ content (anything deeper that wants the right button just consumes it first)
+ offers the splits and close, one on a divider offers merging the two sides.
+ Merge directions name the side that remains, the way Photoshop's Merge Down
+ leaves the lower layer: Merge Left keeps the left pane and hands it the right
+ one's space.
+
  Ownership follows the menu widgets: the AreaLayout, its views array and the
  style are borrowed by every widget below and must outlive the Ui. The node
  tree itself is heap-allocated and owned by the AreaLayout.
@@ -47,9 +54,9 @@ struct AreaStyle
 	Color strip_color; // tab strip background
 	Color strip_border; // the 1px line under the strip
 	Color tab_active; // behind the active tab
-	Color hover_color; // behind the hovered tab, glyph or dragged divider
-	Color text_color; // active tab label and glyph ink
-	Color dim_color; // inactive tab labels; the root's dead close glyph
+	Color hover_color; // behind the hovered tab, menu row or dragged divider
+	Color text_color; // active tab label and menu row ink
+	Color dim_color; // inactive tab labels; disabled menu rows
 	Color splitter_color; // divider bar at rest
 	FontId font; // 0 = the first loaded font
 	float text_size;
@@ -214,29 +221,141 @@ fn AreaNode* find_parent(AreaNode* node, AreaNode* child) @private
 	return hit ? hit : find_parent(node.second, child);
 }
 
+<*
+ Collapses a split to one of its sides: the kept child — a leaf or a whole
+ subtree of further splits — takes the split's place, and the other side is
+ freed. Where close_leaf retires panes one by one, this is the divider's
+ one-step merge, and it works at any depth including the root.
+
+ @param split : `The split whose divider is merged away.`
+ @param keep_first : `True keeps the first child (left/top), false the second.`
+ @require !split.is_leaf() : `Only a split has two sides to merge.`
+*>
+fn void AreaLayout.merge_split(&self, AreaNode* split, bool keep_first)
+{
+	AreaNode* keep = keep_first ? split.first : split.second;
+	AreaNode* drop = keep_first ? split.second : split.first;
+	free_node(drop);
+	*split = *keep;
+	mem::free(keep);
+}
+
 // ---------------------------------------------------------------------------
 // Widgets. AreaHost is the one the app mounts; the rest are built from the
 // node tree by the composites.
 
 <*
  The mount point: renders an AreaLayout inside its own rect. Sized by the
- `size` field (zero = fill). Structural changes — split, close — rebuild from
- here; a tab switch rebuilds only its own pane.
+ `size` field (zero = fill). Structural changes — split, close, merge — rebuild
+ from here; a tab switch rebuilds only its own pane.
+
+ Also the owner of the context menu: a right press on a pane or a divider
+ parks the target node here and rebuilds, and the open shape adds a
+ window-sized catcher plus the popup over the pane tree — MenuBar's
+ escape-the-rect trick. While the menu is open the catcher blankets every
+ strip and divider, so nothing else can mutate the tree under the parked
+ pointer, which is what keeps holding an AreaNode* across frames sound.
 *>
 struct AreaHost (Widget)
 {
 	AreaLayout* areas; // borrowed
 	Vec2 size; // per axis: 0 = fill the available space
+	AreaNode* menu_node; // the context menu's target; null = no menu open
+	bool menu_merge; // true: merge entries for a split; false: split entries for a leaf
+	Vec2 menu_at; // where the right press landed, in window coordinates
 }
 
 <*
  @param elem : `The element this widget is attached to.`
  @require self.areas != null && self.areas.root != null : `An AreaHost needs an initialized AreaLayout — call AreaLayout.init first.`
- @return `The pane tree for the root node.`
+ @return `The pane tree for the root node, with the context menu over it while one is open.`
 *>
 fn Element* AreaHost.build(&self, Element* elem) @dynamic
 {
-	return elem.ui.@node((AreaPane) { .areas = self.areas, .node = self.areas.root, .host = elem });
+	Ui* ui = elem.ui;
+	Element* pane = ui.@node((AreaPane) { .areas = self.areas, .node = self.areas.root, .host = elem });
+	if (!self.menu_node) return pane;
+
+	AreaStyle s = self.areas.style.resolved();
+
+	AreaMenuEntry[3] slots;
+	AreaMenuEntry[] entries;
+	if (self.menu_merge)
+	{
+		bool side = self.menu_node.axis == SplitAxis.HORIZONTAL;
+		slots[0] = { side ? "Merge Left" : "Merge Up", AreaMenuAction.MERGE_FIRST, false };
+		slots[1] = { side ? "Merge Right" : "Merge Down", AreaMenuAction.MERGE_SECOND, false };
+		entries = slots[:2];
+	}
+	else
+	{
+		slots[0] = { "Split Vertical", AreaMenuAction.SPLIT_SIDE, false };
+		slots[1] = { "Split Horizontal", AreaMenuAction.SPLIT_STACK, false };
+		slots[2] = { "Close", AreaMenuAction.CLOSE, self.menu_node == self.areas.root };
+		entries = slots[:3];
+	}
+
+	float row_w = AREA_MENU_MIN_W;
+	foreach (entry : entries)
+	{
+		row_w = math::max(row_w, ui.text.measure(s.font, entry.label, s.text_size).x + 2 * s.pad_x);
+	}
+
+	Element* column = ui.@node((Column) { });
+	foreach (entry : entries)
+	{
+		column.append(ui.@node((AreaMenuRow) {
+			.label = entry.label,
+			.action = entry.action,
+			.disabled = entry.disabled,
+			.style = s,
+			.width = row_w,
+			.host = elem,
+		}).with_id(entry.label));
+	}
+
+	// The catcher walks itself back to the window origin so a click anywhere —
+	// the menu bar included — dismisses; elem.absolute is the previous emit's
+	// value, which is current because opening a menu does not move the host.
+	Element* catcher = ui.@node((AreaMenuCatcher) { .host = elem });
+	catcher.set_offset({ -elem.absolute.x, -elem.absolute.y });
+
+	Element* panel = ui.@node((PopupPanel) {
+		.style = {
+			.color = s.strip_color,
+			.border_width = 1.0,
+			.border_color = s.strip_border,
+			.border_radius = { 6.0, 6.0, 6.0, 6.0 },
+		},
+		.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
+		.shadow = POPUP_SHADOW,
+		.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
+	}, column);
+
+	// Under the pointer, but clamped inside the host so a click near an edge
+	// does not hang the popup off the window.
+	Vec2 panel_size = { row_w, (float)entries.len * AREA_MENU_ROW_H + 2 * PANEL_PAD_Y };
+	Vec2 at = self.menu_at - elem.absolute;
+	at.x = math::clamp(at.x, 0.0f, math::max(elem.size.x - panel_size.x, 0.0f));
+	at.y = math::clamp(at.y, 0.0f, math::max(elem.size.y - panel_size.y, 0.0f));
+	panel.set_offset(at);
+
+	// Hit tests run in reverse order: rows first, then the catcher, then the
+	// pane tree it blankets.
+	return ui.@node((Stack) { }, pane, catcher, panel);
+}
+
+<*
+ Parks the context menu's target on the host and rebuilds into the open shape.
+ Shared by the pane (split entries) and the divider (merge entries).
+*>
+fn void area_open_menu(Element* host_elem, AreaNode* node, bool merge, Vec2 at) @private
+{
+	AreaHost* host = host_elem.widget_as(AreaHost);
+	host.menu_node = node;
+	host.menu_merge = merge;
+	host.menu_at = at;
+	host_elem.request_build();
 }
 
 <*
@@ -256,11 +375,16 @@ fn Element* AreaPane.build(&self, Element* elem) @dynamic
 	Ui* ui = elem.ui;
 	if (self.node.is_leaf())
 	{
+		// A pane is a window onto its view: whatever the content overflows —
+		// an overlay line longer than a narrow pane — stops at the pane's
+		// edge instead of bleeding into the neighbor. The price, for a view
+		// that pops a dropdown near a pane edge, is that popups clip too;
+		// float those from something host-sized, the way the context menu is.
+		elem.clips = true;
 		Element* strip = ui.@node((AreaTabStrip) {
 			.areas = self.areas,
 			.node = self.node,
 			.pane = elem,
-			.host = self.host,
 		});
 		Element* content = self.areas.views[self.node.active].build(ui);
 		return ui.@node((Column) { }, strip, content);
@@ -271,8 +395,34 @@ fn Element* AreaPane.build(&self, Element* elem) @dynamic
 	Element* b = ui.@node((AreaPane) { .areas = self.areas, .node = self.node.second, .host = self.host });
 	// The handle last: siblings hit-test in reverse order, so the divider wins
 	// the boundary pixels it shares with the panes.
-	Element* handle = ui.@node((AreaSplitter) { .node = self.node, .style = s });
+	Element* handle = ui.@node((AreaSplitter) { .node = self.node, .style = s, .host = self.host });
 	return ui.@node((AreaSplit) { .node = self.node, .style = s }, a, b, handle);
+}
+
+<*
+ The leaf's context menu: a right press that nothing in the view's content
+ wanted bubbles here and opens the split/close entries for this pane. Content
+ that consumes the right button for its own gestures simply keeps it — the
+ menu is the fallback, not an override.
+*>
+fn bool AreaPane.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (!self.node.is_leaf()) return false;
+	switch (event.kind)
+	{
+		case PRESS:
+			if (event.button != MouseButton.RIGHT) return false;
+			// With the left button held a drag is in flight and the capture
+			// routes every press here; opening the menu would rebuild the tree
+			// out from under that drag.
+			if (elem.ui.input.down[MouseButton.LEFT.ordinal]) return false;
+			area_open_menu(self.host, self.node, false, event.absolute);
+			return true;
+		case RELEASE:
+			return event.button == MouseButton.RIGHT;
+		default:
+			return false;
+	}
 }
 
 <*
@@ -321,12 +471,14 @@ fn Vec2 AreaSplit.layout(&self, Element* elem, Constraints constraints) @dynamic
 <*
  The draggable divider. Consuming the press captures the pointer, so the drag
  keeps working however far it outruns this thin bar; the ratio is recomputed
- from the absolute pointer position against the parent split's rect.
+ from the absolute pointer position against the parent split's rect. A right
+ press opens the merge menu for the two sides this divider separates.
 *>
 struct AreaSplitter (Widget)
 {
 	AreaNode* node; // borrowed
 	AreaStyle style; // resolved by the pane that built it
+	Element* host; // the AreaHost element: the merge menu opens there
 	bool dragging;
 	bool hovered;
 }
@@ -354,6 +506,11 @@ fn bool AreaSplitter.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	switch (event.kind)
 	{
 		case PRESS:
+			if (event.button == MouseButton.RIGHT && !self.dragging)
+			{
+				area_open_menu(self.host, self.node, true, event.absolute);
+				return true;
+			}
 			if (event.button != MouseButton.LEFT) return false;
 			self.dragging = true;
 			elem.request_paint();
@@ -384,27 +541,22 @@ fn bool AreaSplitter.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 // ---------------------------------------------------------------------------
 // The tab strip.
 
-// Hit zones, shared by paint and on_mouse so they cannot disagree. Positive
-// values are a tab's index + 1 (zero stays "none", the TintToggles encoding);
-// the controls at the right edge get negative codes.
+// The hovered tab as its index + 1, shared by paint and on_mouse so they
+// cannot disagree — zero is "none", the TintToggles encoding.
 const int AREA_ZONE_NONE = 0;
-const int AREA_ZONE_SPLIT_SIDE = -1; // split into left | right
-const int AREA_ZONE_SPLIT_STACK = -2; // split into top / bottom
-const int AREA_ZONE_CLOSE = -3;
 
 <*
- One leaf's header: a tab per registered view, then three glyph buttons —
- split side-by-side, split stacked, close. Selection state lives on the
- AreaNode, so the strip itself survives nothing and needs to survive nothing:
- a tab switch rebuilds its pane, a split or close rebuilds the whole host.
+ One leaf's header: a tab per registered view. Selection state lives on the
+ AreaNode, so the strip itself survives nothing and needs to survive nothing —
+ a tab switch rebuilds its pane. Structural changes are not the strip's job:
+ splitting, closing and merging live in the right-click context menu.
 *>
 struct AreaTabStrip (Widget)
 {
 	AreaLayout* areas; // borrowed
 	AreaNode* node; // borrowed from the layout's tree
 	Element* pane; // the AreaPane element: tab switches rebuild there
-	Element* host; // the AreaHost element: split and close rebuild there
-	int lit; // hovered zone code, AREA_ZONE_NONE when the pointer is elsewhere
+	int lit; // hovered tab index + 1, AREA_ZONE_NONE when the pointer is elsewhere
 }
 
 fn Vec2 AreaTabStrip.layout(&self, Element* elem, Constraints constraints) @dynamic
@@ -425,18 +577,11 @@ fn float AreaTabStrip.tab_width(&self, Ui* ui, AreaStyle s, usz index)
 }
 
 <*
- The zone under a point, in element-local pixels. Glyphs are checked first —
- they own the strip's right edge whatever the tabs measure.
+ The tab under a point, in element-local pixels, as index + 1.
 *>
 fn int AreaTabStrip.zone_at(&self, Element* elem, Vec2 pos)
 {
 	if (pos.x < 0 || pos.y < 0 || pos.y >= elem.size.y) return AREA_ZONE_NONE;
-
-	float h = elem.size.y;
-	float close_x = elem.size.x - h;
-	if (pos.x >= close_x) return AREA_ZONE_CLOSE;
-	if (pos.x >= close_x - h) return AREA_ZONE_SPLIT_STACK;
-	if (pos.x >= close_x - 2 * h) return AREA_ZONE_SPLIT_SIDE;
 
 	AreaStyle s = self.areas.style.resolved();
 	float x = 0;
@@ -477,47 +622,6 @@ fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 		});
 		x += w;
 	}
-
-	int[3] zones = { AREA_ZONE_SPLIT_SIDE, AREA_ZONE_SPLIT_STACK, AREA_ZONE_CLOSE };
-	foreach (i, zone : zones)
-	{
-		float gx = elem.size.x - (float)(3 - i) * h;
-		bool dead = zone == AREA_ZONE_CLOSE && self.node == self.areas.root;
-		if (self.lit == zone && !dead)
-		{
-			painter.rect({ gx, 0 }, { h, h }, { .color = s.hover_color });
-		}
-		paint_area_glyph(painter, zone, { gx, 0 }, h, dead ? s.dim_color.dim(0.55f) : s.text_color);
-	}
-}
-
-<*
- The three control glyphs, drawn from primitives: a framed pane cut by the
- divider the split would add, and a plain cross for close.
-
- @param origin : `Top-left of the glyph's square cell, element-local.`
- @param h : `The cell's side — the strip height.`
-*>
-fn void paint_area_glyph(Painter* painter, int zone, Vec2 origin, float h, Color ink) @private
-{
-	float inset = h * 0.3f;
-	Vec2 lo = origin + inset;
-	Vec2 hi = origin + h - inset;
-	Vec2 mid = (lo + hi) * 0.5f;
-	switch (zone)
-	{
-		case AREA_ZONE_SPLIT_SIDE:
-			painter.rect(lo, hi - lo, { .border_width = 1.2f, .border_color = ink });
-			painter.line({ mid.x, lo.y }, { mid.x, hi.y }, 1.2f, ink);
-		case AREA_ZONE_SPLIT_STACK:
-			painter.rect(lo, hi - lo, { .border_width = 1.2f, .border_color = ink });
-			painter.line({ lo.x, mid.y }, { hi.x, mid.y }, 1.2f, ink);
-		case AREA_ZONE_CLOSE:
-			painter.line(lo, hi, 1.4f, ink);
-			painter.line({ lo.x, hi.y }, { hi.x, lo.y }, 1.4f, ink);
-		default:
-			break;
-	}
 }
 
 fn bool AreaTabStrip.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
@@ -527,25 +631,14 @@ fn bool AreaTabStrip.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
 			int zone = self.zone_at(elem, event.pos);
-			switch
+			if (zone > 0)
 			{
-				case zone > 0:
-					usz index = (usz)(zone - 1);
-					if (self.node.active != index)
-					{
-						self.node.active = index;
-						self.pane.request_build();
-					}
-				case zone == AREA_ZONE_SPLIT_SIDE:
-					self.areas.split_leaf(self.node, SplitAxis.HORIZONTAL);
-					self.host.request_build();
-				case zone == AREA_ZONE_SPLIT_STACK:
-					self.areas.split_leaf(self.node, SplitAxis.VERTICAL);
-					self.host.request_build();
-				case zone == AREA_ZONE_CLOSE:
-					if (self.areas.close_leaf(self.node)) self.host.request_build();
-				default:
-					break;
+				usz index = (usz)(zone - 1);
+				if (self.node.active != index)
+				{
+					self.node.active = index;
+					self.pane.request_build();
+				}
 			}
 			// The strip is a control bar: even a miss swallows the press, so a
 			// sloppy click cannot land in the content below.
@@ -569,4 +662,146 @@ fn void AreaTabStrip.on_hover(&self, Element* elem, bool entered) @dynamic
 	if (entered || self.lit == AREA_ZONE_NONE) return;
 	self.lit = AREA_ZONE_NONE;
 	elem.request_paint();
+}
+
+// ---------------------------------------------------------------------------
+// The context menu. AreaHost builds these while a right press has parked a
+// target node on it; the rows act on that node and every action ends in a
+// host rebuild, which is also what closes the menu.
+
+<*
+ What a context menu row does to the parked node. Split and close are the
+ pane's entries; the merge halves are the divider's, keeping the named child
+ and freeing the other side whole.
+*>
+enum AreaMenuAction
+{
+	SPLIT_SIDE, // split into left | right
+	SPLIT_STACK, // split into top / bottom
+	CLOSE,
+	MERGE_FIRST, // keep the first child (left/top)
+	MERGE_SECOND, // keep the second child (right/bottom)
+}
+
+struct AreaMenuEntry @private
+{
+	String label;
+	AreaMenuAction action;
+	bool disabled;
+}
+
+const float AREA_MENU_ROW_H = 26.0;
+const float AREA_MENU_MIN_W = 140.0;
+
+<*
+ One entry in the context menu. Carries its action and target-by-way-of-host
+ directly — the no-closures answer to MenuItem's context-free callbacks, the
+ same reasoning as the strip's zone codes.
+*>
+struct AreaMenuRow (Widget)
+{
+	String label;
+	AreaMenuAction action;
+	bool disabled;
+	AreaStyle style; // resolved by the host that built it
+	float width;
+	Element* host; // the AreaHost element
+	bool hovered;
+}
+
+fn Vec2 AreaMenuRow.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	if (!self.disabled) elem.cursor = Cursor.POINTING_HAND;
+	return cui::clamp_size({ self.width, AREA_MENU_ROW_H }, constraints);
+}
+
+fn void AreaMenuRow.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	AreaStyle s = self.style;
+	if (self.hovered && !self.disabled)
+	{
+		painter.rect({ 2, 0 }, { elem.size.x - 4, elem.size.y }, {
+			.color = s.hover_color,
+			.border_radius = { 4.0, 4.0, 4.0, 4.0 },
+		});
+	}
+	Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
+	painter.text({ s.pad_x, (elem.size.y - text.y) * 0.5f }, self.label, {
+		.font = s.font,
+		.size = s.text_size,
+		.color = self.disabled ? s.dim_color : s.text_color,
+	});
+}
+
+fn void AreaMenuRow.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+	self.hovered = entered;
+	elem.request_paint();
+}
+
+fn bool AreaMenuRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	switch (event.kind)
+	{
+		case PRESS:
+			// Consumed even when disabled: a dead row still must not close the
+			// menu by letting the press fall through to the catcher.
+			return event.button == MouseButton.LEFT;
+		case RELEASE:
+			if (event.button != MouseButton.LEFT) return false;
+			bool inside = event.pos.x >= 0 && event.pos.y >= 0
+				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			if (inside && !self.disabled) self.act();
+			return true;
+		default:
+			return false;
+	}
+}
+
+<*
+ Runs the row's action on the parked node, then closes the menu — one rebuild
+ covers both, and it runs even when the action was a no-op (closing the root)
+ so the menu never lingers past a click.
+*>
+fn void AreaMenuRow.act(&self)
+{
+	AreaHost* host = self.host.widget_as(AreaHost);
+	AreaNode* node = host.menu_node;
+	host.menu_node = null;
+	switch (self.action)
+	{
+		case SPLIT_SIDE: host.areas.split_leaf(node, SplitAxis.HORIZONTAL);
+		case SPLIT_STACK: host.areas.split_leaf(node, SplitAxis.VERTICAL);
+		case CLOSE: host.areas.close_leaf(node);
+		case MERGE_FIRST: host.areas.merge_split(node, true);
+		case MERGE_SECOND: host.areas.merge_split(node, false);
+	}
+	self.host.request_build();
+}
+
+<*
+ The click-anywhere-else-closes surface under the popup — SelectCatcher for the
+ area menu. Window-sized whatever it is offered; the host's build offsets it
+ back to the window origin.
+*>
+struct AreaMenuCatcher (Widget)
+{
+	Element* host; // the AreaHost element
+}
+
+fn Vec2 AreaMenuCatcher.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	return elem.ui.size;
+}
+
+fn bool AreaMenuCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (event.kind != MouseEventKind.PRESS && event.kind != MouseEventKind.RELEASE) return false;
+	if (event.kind == MouseEventKind.PRESS)
+	{
+		AreaHost* host = self.host.widget_as(AreaHost);
+		host.menu_node = null;
+		self.host.request_build();
+	}
+	return true;
 }

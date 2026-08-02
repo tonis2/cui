@@ -1,5 +1,5 @@
 <*
- Split areas: a Blender-style workspace where the window is a tree of panes,
+ Split areas: a workspace where the window is a tree of panes,
  every pane can be split in two (side by side or stacked) and closed back into
  its sibling, and each pane picks what it shows from a strip of tabs.
 
@@ -173,7 +173,6 @@ fn void free_node(AreaNode* node) @private
 <*
  Turns a leaf into an even split whose two new leaves both keep the view the
  leaf was showing.
-
  @param leaf : `The leaf to split.`
  @param axis : `HORIZONTAL for side by side, VERTICAL for stacked.`
  @require leaf.is_leaf() : `Only a leaf can be split — a split node already is one.`

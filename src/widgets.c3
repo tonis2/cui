@@ -354,6 +354,55 @@ fn Vec2 Clip.layout(&self, Element* elem, Constraints constraints) @dynamic
 // ---------------------------------------------------------------------------
 
 <*
+ Pins a single child to a corner, edge or center of whatever space this widget
+ is offered, with a margin from the anchored edges. It fills that space itself
+ (transparently — the pointer passes through to what is underneath, though the
+ child stays interactive), so the child's position follows every relayout: an
+ overlay anchored END/START sits at the top-right of its pane however the pane
+ resizes, where a hand-set offset would have to be recomputed by hand.
+*>
+struct Anchored (Widget)
+{
+	CrossAlign h; // START = left, END = right
+	CrossAlign v; // START = top, END = bottom
+	Vec2 margin; // gap from the anchored edges; ignored per centered axis
+}
+
+<*
+ Fills the offered space and places the child against the chosen edges.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+ @return `The size taken: everything offered.`
+*>
+fn Vec2 Anchored.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	elem.ignores_pointer = true;
+	Vec2 own = constraints.max;
+	if (elem.children.len() > 0)
+	{
+		Vec2 child = elem.layout_child(0, { .min = { 0, 0 }, .max = own });
+		Vec2 pos;
+		switch (self.h)
+		{
+			case START: pos.x = self.margin.x;
+			case CENTER: pos.x = (own.x - child.x) / 2;
+			case END: pos.x = own.x - child.x - self.margin.x;
+		}
+		switch (self.v)
+		{
+			case START: pos.y = self.margin.y;
+			case CENTER: pos.y = (own.y - child.y) / 2;
+			case END: pos.y = own.y - child.y - self.margin.y;
+		}
+		elem.place_child(0, pos);
+	}
+	return own;
+}
+
+// ---------------------------------------------------------------------------
+
+<*
  Default scroll distance per wheel unit, in pixels — used when `Scroll.step` is
  zero.
 *>

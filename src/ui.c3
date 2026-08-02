@@ -107,6 +107,10 @@ fn Color Color.dim(self, float amount)
  field cannot say — a size measured from content, or children to place —
  is `layout`. A widget with neither fills whatever it is offered.
 
+ The pointer shape is not a method either: `Element.set_cursor` can be called
+ from any hook, and the natural one is `on_hover`, which most interactive
+ widgets already implement to light themselves up. Button is the worked example.
+
  - `build` — compose this widget out of existing widgets: return a subtree made
    with `elem.ui.@node` — the framework attaches it as the element's single
    child on the flush after the element enters the tree (a build widget takes
@@ -122,8 +126,11 @@ fn Color Color.dim(self, float amount)
    build widget delegates to its built subtree; otherwise the size field or
    the fill default decides, and children get loose constraints and keep
    their offsets. Runs in the layout pass, so this is where the declarative
-   element properties are set: `elem.cursor`, `elem.clips` / `clip_radii`,
-   `elem.ignores_pointer`.
+   element properties are set: `elem.clips` / `clip_radii`,
+   `elem.ignores_pointer`, `elem.media_box` — and `set_cursor`, for a widget
+   that speaks for its whole subtree (hover fires on the deepest element only,
+   so an ancestor's shape has to be declared somewhere the pointer never
+   reaches).
  - `paint` — emit primitives in element-local coordinates. Omitted: the element
    draws nothing itself (pure container).
  - `on_mouse` — press/release/move/scroll, hit-tested and bubbling: the deepest
@@ -241,8 +248,10 @@ struct Element
 	// (or by the user under an absolute container)
 	Vec2 absolute; // origin in UI coordinates, stored by the last
 	// emit pass; hit testing reads it
-	Cursor cursor; // preferred pointer shape while hovered
-	// (DEFAULT = defer to ancestors)
+	// Preferred pointer shape while hovered; DEFAULT defers to the ancestors.
+	// Written through `set_cursor` — see it for when it is read and what a
+	// widget is expected to do about it.
+	Cursor cursor;
 
 	// The size-field convention (see the Widget interface docs): reads the
 	// widget's `Vec2 size` field back out of the type-erased pointer. Set by
@@ -255,12 +264,13 @@ struct Element
 	// are tested first and hit normally — so a transparent container still
 	// delivers events to interactive descendants.
 	//
-	// Set from layout(), like cursor and clips. Widgets that paint decoration
-	// over an interactive surface want it: without it, a Label overlaid on a
-	// viewport wins the hit test (deepest rect containing the point, whether or
-	// not it handles anything) and events bubble to its PARENTS, never to the
-	// sibling underneath — so the label becomes a dead zone, and it also takes
-	// the cursor down to ARROW because cursor resolution walks ancestors too.
+	// Set from layout(), like clips. Widgets that paint decoration over an
+	// interactive surface want it: without it, a Label overlaid on a viewport
+	// wins the hit test (deepest rect containing the point, whether or not it
+	// handles anything) and events bubble to its PARENTS, never to the sibling
+	// underneath — so the label becomes a dead zone, and it also takes the
+	// cursor down to ARROW, since hover stops at the label and nothing there
+	// ever asked for the viewport's crosshair.
 	//
 	// Deliberately opt-in rather than "skip elements with no handlers": a
 	// modal scrim, a disabled overlay and a drag blocker are all exactly an
@@ -275,7 +285,7 @@ struct Element
 
 	uint transform_slot;
 
-	// Clipping: when set (widgets set it from layout(), like cursor), emit
+	// Clipping: when set (widgets set it from layout(), like ignores_pointer), emit
 	// clips this element's own drawings and its whole subtree to the element's
 	// rect, rounded by clip_radii {TL, TR, BR, BL}. Nested clips intersect
 	// (axis-aligned; the inner radii win — a documented approximation). Hit
@@ -1281,6 +1291,43 @@ fn void Element.set_offset(&self, Vec2 offset)
 {
 	self.offset = offset;
 	self.ui.paint_pending = true;
+	self.ui.frame_requested = true;
+}
+
+<*
+ Asks for a pointer shape while this element is hovered. Callable from any hook,
+ and `on_hover` is where it usually belongs: most interactive widgets implement
+ it already to light themselves up, and a shape is only ever wanted for the
+ element the pointer is on.
+
+ The shape is resolved at the end of every `process_input`, after that frame's
+ events are dispatched, so a call from `on_mouse` — the same handle closing its
+ hand on the press that starts a drag — takes effect on the frame that made it,
+ not the one after. It sticks until something writes another: only the hovered
+ element and its ancestors are ever asked, so there is nothing to clear on the
+ way out, but a widget that changes shape must write the shape BACK. A handle
+ that sets CLOSED_HAND on press has to set OPEN_HAND on release, wherever the
+ pointer has wandered to by then.
+
+ Hover fires on the deepest element under the pointer, never on its ancestors.
+ A widget that wants to name the shape over its whole subtree — a viewport with
+ an overlay on top of it — has no hover to hang that on and should set it from
+ `layout` instead.
+
+ @param cursor : `The shape, or DEFAULT to defer to the ancestors.`
+*>
+fn void Element.set_cursor(&self, Cursor cursor)
+{
+	// Asking for the shape it already has is the common case — a layout that
+	// declares one runs again on every resize — and scheduling a frame for it
+	// would keep an on-demand loop awake for nothing.
+	if (self.cursor == cursor) return;
+	self.cursor = cursor;
+	// Nothing else is invalidated: the shape is not drawn into the canvas, it is
+	// handed to the window. But a loop asleep on the last frame has to wake to
+	// hand it over — a cursor set from `update()` or from app code between
+	// frames would otherwise not reach the pointer until something unrelated
+	// happened to schedule a frame.
 	self.ui.frame_requested = true;
 }
 

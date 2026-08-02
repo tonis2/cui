@@ -525,22 +525,23 @@ struct AreaSplitter (Widget)
 	bool hovered;
 }
 
-fn Vec2 AreaSplitter.layout(&self, Element* elem, Constraints constraints) @dynamic
+// No layout: with nothing to say about size, the bar fills the slot the split
+// gives it, which is the answer a layout here would have returned anyway.
+fn void AreaSplitter.on_hover(&self, Element* elem, bool entered) @dynamic
 {
-	elem.cursor = self.node.axis == SplitAxis.HORIZONTAL ? Cursor.RESIZE_H : Cursor.RESIZE_V;
-	return constraints.max;
+	self.hovered = entered;
+	// Arrows across the axis the divider slides on.
+	if (entered)
+	{
+		elem.set_cursor(self.node.axis == SplitAxis.HORIZONTAL ? Cursor.RESIZE_H : Cursor.RESIZE_V);
+	}
+	elem.request_paint();
 }
 
 fn void AreaSplitter.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	bool lit = self.dragging || self.hovered;
 	painter.rect({ 0, 0 }, elem.size, { .color = lit ? self.style.hover_color : self.style.splitter_color });
-}
-
-fn void AreaSplitter.on_hover(&self, Element* elem, bool entered) @dynamic
-{
-	self.hovered = entered;
-	elem.request_paint();
 }
 
 fn bool AreaSplitter.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
@@ -603,7 +604,6 @@ struct AreaTabStrip (Widget)
 
 fn Vec2 AreaTabStrip.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.cursor = Cursor.POINTING_HAND;
 	AreaStyle s = self.areas.style.resolved();
 	return cui::clamp_size({ constraints.max.x, s.tab_height }, constraints);
 }
@@ -699,6 +699,7 @@ fn bool AreaTabStrip.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 
 fn void AreaTabStrip.on_hover(&self, Element* elem, bool entered) @dynamic
 {
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	// Leaving produces no MOVE inside the widget, so the highlight has to be
 	// cleared here or the last zone stays lit with the pointer gone.
 	if (entered || self.lit == AREA_ZONE_NONE) return;
@@ -753,7 +754,6 @@ struct AreaMenuRow (Widget)
 
 fn Vec2 AreaMenuRow.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	if (!self.disabled) elem.cursor = Cursor.POINTING_HAND;
 	return cui::clamp_size({ self.width, AREA_MENU_ROW_H }, constraints);
 }
 
@@ -778,6 +778,8 @@ fn void AreaMenuRow.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void AreaMenuRow.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	// Nothing asked for while disabled: see MenuItemRow.on_hover.
+	if (entered && !self.disabled) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 

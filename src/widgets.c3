@@ -593,7 +593,8 @@ alias OnClick = fn void(Ui* ui);
 
  Also the worked example of the Widget event callbacks: `on_hover` / `on_mouse`
  mutate state and `request_paint`; `on_click` fires when a left press is released
- inside.
+ inside, and `on_hover` also asks for the hand. And of a widget with no
+ `layout` at all: the `size` field sizes it and children fill it.
 *>
 struct Button (Widget)
 {
@@ -604,24 +605,6 @@ struct Button (Widget)
 	OnClick on_click; // optional; called on click-release inside
 	bool hovered;
 	bool held;
-}
-
-<*
- Sized by the `size` field with the usual reading — a set component is pixels,
- a zero component fills. Written out as a layout only because the hand cursor
- has to be requested somewhere.
-
- @param elem : `The element this widget is attached to.`
- @param constraints : `The size range offered by the parent.`
- @return `The preferred size, clamped to the constraints.`
-*>
-fn Vec2 Button.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	elem.cursor = Cursor.POINTING_HAND;
-	return cui::clamp_size({
-		self.size.x > 0 ? self.size.x : constraints.max.x,
-		self.size.y > 0 ? self.size.y : constraints.max.y,
-	}, constraints);
 }
 
 <*
@@ -654,6 +637,7 @@ fn void Button.paint(&self, Element* elem, Painter* painter) @dynamic
 fn void Button.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 

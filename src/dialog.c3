@@ -358,13 +358,20 @@ struct DialogTitleBar (Widget)
 *>
 fn Vec2 DialogTitleBar.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.cursor = self.dragging ? Cursor.CLOSED_HAND : Cursor.OPEN_HAND;
 	Vec2 own = cui::clamp_size({ constraints.max.x, self.style.title_height }, constraints);
 
 	Vec2 close = { DIALOG_CLOSE_SIZE, DIALOG_CLOSE_SIZE };
 	elem.layout_child(0, { .min = close, .max = close });
 	elem.place_child(0, { own.x - self.style.pad_x - close.x, (own.y - close.y) * 0.5f });
 	return own;
+}
+
+// The hand the bar is grabbed with. On_hover rather than layout because the
+// closed hand of a drag is written from on_mouse, and one shape declared in two
+// passes would be a shape that depends on which ran last.
+fn void DialogTitleBar.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+	if (entered) elem.set_cursor(self.dragging ? Cursor.CLOSED_HAND : Cursor.OPEN_HAND);
 }
 
 fn void DialogTitleBar.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -398,12 +405,15 @@ fn bool DialogTitleBar.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT) return false;
 			self.dragging = true;
 			self.grab = event.absolute - self.host.widget_as(Dialog).at;
-			elem.request_layout(); // the cursor is declared there
+			elem.set_cursor(Cursor.CLOSED_HAND);
 			return true;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT || !self.dragging) return false;
 			self.dragging = false;
-			elem.request_layout();
+			// Written back here rather than on the way out: a release is delivered
+			// to whoever captured the press, so this runs however far the pointer
+			// has dragged the panel from the bar it grabbed.
+			elem.set_cursor(Cursor.OPEN_HAND);
 			return true;
 		case MOVE:
 			if (!self.dragging) return false;
@@ -429,12 +439,6 @@ struct DialogCloseButton (Widget)
 	bool hovered;
 }
 
-fn Vec2 DialogCloseButton.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	elem.cursor = Cursor.POINTING_HAND;
-	return cui::clamp_size({ DIALOG_CLOSE_SIZE, DIALOG_CLOSE_SIZE }, constraints);
-}
-
 fn void DialogCloseButton.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	DialogStyle s = self.style;
@@ -452,9 +456,12 @@ fn void DialogCloseButton.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.line({ elem.size.x - pad, pad }, { pad, elem.size.y - pad }, 1.4f, ink);
 }
 
+// No layout either: the title bar lays this out at DIALOG_CLOSE_SIZE under
+// tight constraints, which is the whole of the answer a layout here could give.
 fn void DialogCloseButton.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
 

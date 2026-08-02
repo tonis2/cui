@@ -136,6 +136,35 @@ fn void EventProbe.update(&self, Element* elem, float dt) @dynamic
 }
 
 // ---------------------------------------------------------------------------
+// CursorProbe: asks for a shape on the way in and closes its hand on a press,
+// the way a drag handle does — the two hooks a cursor is set from. Counts its
+// layouts so a test can show what changing the shape did NOT cost.
+
+struct CursorProbe (Widget)
+{
+	Vec2 pref;
+	Cursor shape;
+	int* layouts;
+}
+
+fn void CursorProbe.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+	if (entered) elem.set_cursor(self.shape);
+}
+
+fn Vec2 CursorProbe.layout(&self, Element* elem, Constraints c) @dynamic
+{
+	if (self.layouts) (*self.layouts)++;
+	return cui::clamp_size(self.pref, c);
+}
+
+fn bool CursorProbe.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (event.kind == MouseEventKind.PRESS) elem.set_cursor(Cursor.CLOSED_HAND);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // UnmountProbe: counts unmount() calls — proves release fired the hook.
 
 struct UnmountProbe (Widget)

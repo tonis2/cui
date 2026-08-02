@@ -755,18 +755,21 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 }
 
 // ---------------------------------------------------------------------------
-// Tree visitors — @walk and the filtered twins @each / @each_id, for when
-// several widgets of a kind coexist by design (one HUD per split pane) and
-// "the first one" is a bug. Inline bodies rather than a returned list, so
-// nothing escapes and no allocation outlives the walk.
+// Tree visitors — the every-match twins of find / find_id, which stop at the
+// first match in tree order. Use these when a widget type or an id is
+// deliberately duplicated across the tree (one HUD per split pane): reaching
+// only the first HUD leaves every other pane stale.
 //
-// The traversal rides the parent pointers instead of pushing a stack: it needs
-// no scratch memory at all, which is what makes a visitor callable from a
-// render loop. Not recursive, because a tree's depth is a runtime value and
-// macro recursion only terminates on compile-time bounds — and a `fn` walker
-// is no way out either, since a C3 lambda captures nothing and so cannot carry
-// the body. Visit order is pre-order: an element before its children, children
-// left to right.
+// All three take the body inline instead of returning a list, so no match
+// outlives the call and nothing has to be freed. The traversal follows the
+// parent pointers rather than pushing a stack, so it allocates nothing at all
+// and is cheap enough to call from a render loop. Visit order is pre-order: an
+// element before its children, children left to right.
+//
+// Implementation note for anyone tempted to simplify: the walk cannot be
+// recursive. A tree's depth is a runtime value and macro recursion in C3 only
+// terminates on compile-time bounds, and a plain `fn` walker cannot stand in
+// either, because a C3 lambda captures nothing and so cannot carry the body.
 
 <*
  Runs the body once for every element in the tree.

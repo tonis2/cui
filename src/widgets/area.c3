@@ -255,7 +255,7 @@ fn void AreaLayout.merge_split(&self, AreaNode* split, bool keep_first)
  strip and divider, so nothing else can mutate the tree under the parked
  pointer, which is what keeps holding an AreaNode* across frames sound.
 
- The workspace is a screen of its own (see media.c3): a host under a window menu
+ The workspace is a screen of its own (see core/media.c3): a host under a window menu
  bar does not own the strip above it, and a popup that clamped itself to the
  window would be free to cover it.
 *>

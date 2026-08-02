@@ -5,7 +5,7 @@ import std::math::matrix;
 
 <*
  SDF primitive kinds, dispatched in the fragment shader. The values are the GPU
- contract: they must match the KIND_* constants in shader.slang.
+ contract: they must match the KIND_* constants in shaders/shader.slang.
 *>
 constdef DrawingKind : inline uint
 {
@@ -33,7 +33,7 @@ const Texture NO_TEXTURE = (Texture)0;
 <*
  One GPU-side primitive, produced by Painter and consumed by the renderer.
 
- Field order and sizes must match `struct Drawing` in shader.slang (scalar
+ Field order and sizes must match `struct Drawing` in shaders/shader.slang (scalar
  layout): keep 4-byte fields in groups of four so the Vec2/Vec4 members land on
  the same offsets on both sides.
 *>
@@ -66,7 +66,7 @@ struct Drawing {
  compares the UI-space position a drawing was emitted at, so a clip travels with
  any palette transform applied on top (Flutter-consistent) instead of staying
  screen-fixed. Read by the shader as two raw float4s per entry — no matrices, no
- structs (see the BDA note in shader.slang).
+ structs (see the BDA note in shaders/shader.slang).
 *>
 struct ClipEntry {
     Vec4 rect;              // {min.x, min.y, max.x, max.y}

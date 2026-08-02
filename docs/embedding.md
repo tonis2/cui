@@ -71,7 +71,7 @@ format can change, recreate the pass.
 
 Only necessary if you cannot depend on `cui::vulkan` — a different binding
 generator, a rendering abstraction of your own, or a non-Vulkan backend. The
-exports in `src/shader.c3` are the whole contract; `src/vulkan/canvas_pass.c3` is
+exports in `src/render/shader.c3` are the whole contract; `src/vulkan/canvas_pass.c3` is
 the worked implementation of every step below, and is worth reading alongside.
 
 ### Pipeline

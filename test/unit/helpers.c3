@@ -39,7 +39,7 @@ struct Probe (Widget)
 fn Vec2 Probe.layout(&self, Element* elem, Constraints c) @dynamic
 {
 	if (self.layouts) (*self.layouts)++;
-	return cui::clamp_size(self.pref, c);
+	return c.constrain(self.pref);
 }
 
 fn void Probe.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -80,7 +80,7 @@ struct EventProbe (Widget)
 fn Vec2 EventProbe.layout(&self, Element* elem, Constraints c) @dynamic
 {
 	elem.ignores_pointer = self.transparent;
-	Vec2 size = cui::clamp_size(self.pref, c);
+	Vec2 size = c.constrain(self.pref);
 	if (elem.children.len() > 0)
 	{
 		elem.layout_child(0, { .min = {0, 0}, .max = size });
@@ -155,13 +155,48 @@ fn void CursorProbe.on_hover(&self, Element* elem, bool entered) @dynamic
 fn Vec2 CursorProbe.layout(&self, Element* elem, Constraints c) @dynamic
 {
 	if (self.layouts) (*self.layouts)++;
-	return cui::clamp_size(self.pref, c);
+	return c.constrain(self.pref);
 }
 
 fn bool CursorProbe.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	if (event.kind == MouseEventKind.PRESS) elem.set_cursor(Cursor.CLOSED_HAND);
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// MountProbe: records what mount() saw. `parent_at_mount` and `inherited`
+// answer whether the tree was already wired when the hook ran; `mounts` counts
+// the calls, which must stay at one however many relayouts happen.
+
+struct MountRecord
+{
+	int mounts;
+	int depth_at_mount; // hops to the root: 0 would mean the chain was not wired
+	int layouts_at_mount; // the element's own layout count when mount ran
+	Vec2 size_at_mount; // still zero: mount runs before the element is sized
+}
+
+struct MountProbe (Widget)
+{
+	Vec2 pref;
+	MountRecord* rec;
+	int layouts;
+}
+
+fn void MountProbe.mount(&self, Element* elem) @dynamic
+{
+	self.rec.mounts++;
+	self.rec.size_at_mount = elem.size;
+	self.rec.layouts_at_mount = self.layouts;
+	for (Element* e = elem.parent; e != null; e = e.parent) self.rec.depth_at_mount++;
+	elem.set_cursor(Cursor.CROSSHAIR);
+}
+
+fn Vec2 MountProbe.layout(&self, Element* elem, Constraints c) @dynamic
+{
+	self.layouts++;
+	return c.constrain(self.pref);
 }
 
 // ---------------------------------------------------------------------------

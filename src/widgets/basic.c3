@@ -67,6 +67,41 @@ enum CrossAlign
 }
 
 <*
+ Where an already-measured box sits inside a bigger one — the offset to hand
+ `place_child` once the child's size is known.
+
+ The margin is a gap from the edges the box is pushed against, so it applies to
+ START and END and is ignored on a CENTER axis, where there is no edge to sit
+ against. A child bigger than the space it is aligned in overflows the far edge
+ rather than being clamped: aligning is not sizing, and silently pulling it back
+ would hide a constraint bug rather than show it.
+
+ @param outer : `The space to align within.`
+ @param inner : `The size of the box being placed.`
+ @param h : `Horizontal edge: START = left, END = right.`
+ @param v : `Vertical edge: START = top, END = bottom.`
+ @param margin : `Gap from the anchored edges; ignored per centered axis.`
+ @return `The inner box's origin, relative to the outer box.`
+*>
+fn Vec2 align_in(Vec2 outer, Vec2 inner, CrossAlign h, CrossAlign v, Vec2 margin = { 0, 0 })
+{
+	Vec2 pos;
+	switch (h)
+	{
+		case START: pos.x = margin.x;
+		case CENTER: pos.x = (outer.x - inner.x) / 2;
+		case END: pos.x = outer.x - inner.x - margin.x;
+	}
+	switch (v)
+	{
+		case START: pos.y = margin.y;
+		case CENTER: pos.y = (outer.y - inner.y) / 2;
+		case END: pos.y = outer.y - inner.y - margin.y;
+	}
+	return pos;
+}
+
+<*
  Stacks children vertically with a gap between them.
 
  By default it wraps its content; a non-zero `size` fixes that axis, and the
@@ -100,6 +135,10 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	// whatever it was offered itself. That top-down cap is what lets a
 	// fill-width child — a zero size field, a bare container — inherit the
 	// column's width instead of the window's.
+	//
+	// A cap rather than `constraints.fill`: fill would raise a size smaller than
+	// the incoming minimum back up to it, and what the children are offered has
+	// to be what this Column was told to be, not what its parent would prefer.
 	Vec2 avail = {
 		self.size.x > 0 ? math::min(self.size.x, constraints.max.x) : constraints.max.x,
 		self.size.y > 0 ? math::min(self.size.y, constraints.max.y) : constraints.max.y,
@@ -108,16 +147,16 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	for (sz i = 0; i < count; i++)
 	{
 		float remaining = math::max(avail.y - content, 0.0f);
-		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { avail.x, remaining } });
+		Vec2 child_size = elem.layout_child(i, cui::loose({ avail.x, remaining }));
 		content += child_size.y;
 		if (i + 1 < count) content += self.gap;
 		cross = math::max(cross, child_size.x);
 	}
 
-	Vec2 own = cui::clamp_size(
-		{ self.size.x > 0 ? self.size.x : cross, self.size.y > 0 ? self.size.y : content, },
-		constraints
-	);
+	Vec2 own = constraints.constrain({
+		self.size.x > 0 ? self.size.x : cross,
+		self.size.y > 0 ? self.size.y : content,
+	});
 
 	float leftover = math::max(own.y - content, 0.0f);
 	float cursor   = 0;
@@ -133,13 +172,7 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	for (sz i = 0; i < count; i++)
 	{
 		Element* child = elem.children[i];
-		float x        = 0;
-		switch (self.cross_align)
-		{
-			case START: x = 0;
-			case CENTER: x = (own.x - child.size.x) / 2;
-			case END: x = own.x - child.size.x;
-		}
+		float x        = align_in(own, child.size, self.cross_align, CrossAlign.START).x;
 		elem.place_child(i, { x, cursor });
 		cursor += child.size.y + step;
 	}
@@ -181,16 +214,16 @@ fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 	for (sz i = 0; i < count; i++)
 	{
 		float remaining = math::max(avail.x - content, 0.0f);
-		Vec2 child_size = elem.layout_child(i, { .min = { 0, 0 }, .max = { remaining, avail.y } });
+		Vec2 child_size = elem.layout_child(i, cui::loose({ remaining, avail.y }));
 		content += child_size.x;
 		if (i + 1 < count) content += self.gap;
 		cross = math::max(cross, child_size.y);
 	}
 
-	Vec2 own = cui::clamp_size(
-		{ self.size.x > 0 ? self.size.x : content, self.size.y > 0 ? self.size.y : cross, },
-		constraints
-	);
+	Vec2 own = constraints.constrain({
+		self.size.x > 0 ? self.size.x : content,
+		self.size.y > 0 ? self.size.y : cross,
+	});
 
 	float leftover = math::max(own.x - content, 0.0f);
 	float cursor   = 0;
@@ -206,13 +239,7 @@ fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 	for (sz i = 0; i < count; i++)
 	{
 		Element* child = elem.children[i];
-		float y        = 0;
-		switch (self.cross_align)
-		{
-			case START: y = 0;
-			case CENTER: y = (own.y - child.size.y) / 2;
-			case END: y = own.y - child.size.y;
-		}
+		float y        = align_in(own, child.size, CrossAlign.START, self.cross_align).y;
 		elem.place_child(i, { cursor, y });
 		cursor += child.size.x + step;
 	}
@@ -262,20 +289,18 @@ struct Padding (Widget)
 *>
 fn Vec2 Padding.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	float w = self.insets.left + self.insets.right;
-	float h = self.insets.top + self.insets.bottom;
-	Constraints inner = {
-		.min = { math::max(constraints.min.x - w, 0.0f), math::max(constraints.min.y - h, 0.0f) },
-		.max = { math::max(constraints.max.x - w, 0.0f), math::max(constraints.max.y - h, 0.0f) },
+	Vec2 pad = {
+		self.insets.left + self.insets.right,
+		self.insets.top + self.insets.bottom,
 	};
 
 	Vec2 child_size = { 0, 0 };
 	if (elem.children.len() > 0)
 	{
-		child_size = elem.layout_child(0, inner);
+		child_size = elem.layout_child(0, constraints.deflate(pad));
 		elem.place_child(0, { self.insets.left, self.insets.top });
 	}
-	return cui::clamp_size({ child_size.x + w, child_size.y + h }, constraints);
+	return constraints.constrain(child_size + pad);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,16 +326,8 @@ struct Stack (Widget)
 *>
 fn Vec2 Stack.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	Vec2 own = {
-		self.size.x > 0 ? self.size.x : constraints.max.x,
-		self.size.y > 0 ? self.size.y : constraints.max.y,
-	};
-	own = cui::clamp_size(own, constraints);
-
-	for (sz i = 0; i < elem.children.len(); i++)
-	{
-		elem.layout_child(i, { .min = { 0, 0 }, .max = own });
-	}
+	Vec2 own = constraints.fill(self.size);
+	elem.layout_children(cui::loose(own));
 	return own;
 }
 
@@ -348,7 +365,7 @@ fn Vec2 Clip.layout(&self, Element* elem, Constraints constraints) @dynamic
 		size = elem.layout_child(0, constraints);
 		elem.place_child(0, { 0, 0 });
 	}
-	return cui::clamp_size(size, constraints);
+	return constraints.constrain(size);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +385,14 @@ struct Anchored (Widget)
 	Vec2 margin; // gap from the anchored edges; ignored per centered axis
 }
 
+// The whole point of the widget is that it fills a space it does not itself
+// occupy: it covers its pane so the child can be positioned against the pane's
+// edges, and the pointer has to reach whatever is painted underneath.
+fn void Anchored.mount(&self, Element* elem) @dynamic
+{
+	elem.ignores_pointer = true;
+}
+
 <*
  Fills the offered space and places the child against the chosen edges.
 
@@ -377,25 +402,11 @@ struct Anchored (Widget)
 *>
 fn Vec2 Anchored.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.ignores_pointer = true;
 	Vec2 own = constraints.max;
 	if (elem.children.len() > 0)
 	{
-		Vec2 child = elem.layout_child(0, { .min = { 0, 0 }, .max = own });
-		Vec2 pos;
-		switch (self.h)
-		{
-			case START: pos.x = self.margin.x;
-			case CENTER: pos.x = (own.x - child.x) / 2;
-			case END: pos.x = own.x - child.x - self.margin.x;
-		}
-		switch (self.v)
-		{
-			case START: pos.y = self.margin.y;
-			case CENTER: pos.y = (own.y - child.y) / 2;
-			case END: pos.y = own.y - child.y - self.margin.y;
-		}
-		elem.place_child(0, pos);
+		Vec2 child = elem.layout_child(0, cui::loose(own));
+		elem.place_child(0, align_in(own, child, self.h, self.v, self.margin));
 	}
 	return own;
 }
@@ -499,13 +510,9 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 		elem.children.push(thumb);
 	}
 
-	Vec2 viewport = {
-		self.size.x > 0 ? self.size.x : constraints.max.x,
-		self.size.y > 0 ? self.size.y : constraints.max.y,
-	};
-	viewport = cui::clamp_size(viewport, constraints);
+	Vec2 viewport = constraints.fill(self.size);
 
-	Vec2 content = elem.layout_child(0, { .min = { 0, 0 }, .max = { viewport.x, cui::UNBOUNDED } });
+	Vec2 content = elem.layout_child(0, cui::loose({ viewport.x, cui::UNBOUNDED }));
 	self.content_extent = content.y;
 
 	float max_scroll = math::max(content.y - viewport.y, 0.0f);
@@ -526,7 +533,7 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 	float track     = math::max(viewport.y - 2 * THUMB_MARGIN, 0.0f);
 	float len       = show ? math::clamp(track * (viewport.y / content.y), THUMB_MIN, track) : 0;
 	Vec2 thumb_size = { show ? THUMB_WIDTH : 0, len };
-	elem.layout_child(1, { .min = thumb_size, .max = thumb_size });
+	elem.layout_child(1, cui::tight(thumb_size));
 	self.place_thumb(elem, viewport, max_scroll);
 	return viewport;
 }
@@ -693,8 +700,17 @@ struct Label (Widget)
 	Color color; // text color — the zero default is fully transparent
 }
 
+// Text is decoration, and decoration must not eat the clicks meant for what it
+// labels: without this a caption over a viewport wins the hit test (deepest
+// rect containing the point) and becomes a dead zone, because events bubble to
+// parents and never to the sibling underneath.
+fn void Label.mount(&self, Element* elem) @dynamic
+{
+	elem.ignores_pointer = true;
+}
+
 <*
- Sizes the label to its measured text, and marks it transparent to hit testing.
+ Sizes the label to its measured text.
 
  @param elem : `The element this widget is attached to.`
  @param constraints : `The size range offered by the parent.`
@@ -702,8 +718,7 @@ struct Label (Widget)
 *>
 fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	elem.ignores_pointer = true;
-	return cui::clamp_size(elem.ui.text.measure(self.font, self.text, self.size), constraints);
+	return constraints.constrain(elem.ui.text.measure(self.font, self.text, self.size));
 }
 
 <*

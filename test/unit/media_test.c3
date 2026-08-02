@@ -30,12 +30,12 @@ struct Screen (Widget)
 
 fn Vec2 Screen.layout(&self, Element* elem, Constraints c) @dynamic
 {
+	// Deliberately not `c.fill`, which clamps: this fixture is the root, laid
+	// out under tight window constraints, and the point of it is to publish a
+	// box smaller than what it was offered.
 	Vec2 own = { self.box.x > 0 ? self.box.x : c.max.x, self.box.y > 0 ? self.box.y : c.max.y };
 	elem.media_box = own;
-	for (sz i = 0; i < elem.children.len(); i++)
-	{
-		elem.layout_child(i, { .min = { 0, 0 }, .max = own });
-	}
+	elem.layout_children(cui::loose(own));
 	return own;
 }
 

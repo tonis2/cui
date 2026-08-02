@@ -154,7 +154,7 @@ fn Vec2 PopupPanel.layout(&self, Element* elem, Constraints constraints) @dynami
 	Vec2 child = { 0, 0 };
 	if (elem.children.len() > 0)
 	{
-		child = elem.layout_child(0, { .min = { 0, 0 }, .max = { cui::UNBOUNDED, cui::UNBOUNDED } });
+		child = elem.layout_child(0, cui::loose({ cui::UNBOUNDED, cui::UNBOUNDED }));
 		elem.place_child(0, { self.insets.left, self.insets.top });
 	}
 	return { child.x + w, child.y + h };
@@ -341,10 +341,10 @@ fn Vec2 MenuBar.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	if (elem.children.len() > 0)
 	{
-		elem.layout_child(0, { .min = { 0, 0 }, .max = constraints.max });
+		elem.layout_child(0, cui::loose(constraints.max));
 		elem.place_child(0, { 0, 0 });
 	}
-	return cui::clamp_size({ constraints.max.x, self.style.resolved().bar_height }, constraints);
+	return constraints.constrain({ constraints.max.x, self.style.resolved().bar_height });
 }
 
 <*
@@ -417,7 +417,7 @@ struct MenuTitle (Widget)
 fn Vec2 MenuTitle.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	Vec2 text = elem.ui.text.measure(self.style.font, self.title, self.style.text_size);
-	return cui::clamp_size({ text.x + 2 * self.style.pad_x, self.style.bar_height }, constraints);
+	return constraints.constrain({ text.x + 2 * self.style.pad_x, self.style.bar_height });
 }
 
 fn void MenuTitle.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -486,7 +486,7 @@ struct MenuItemRow (Widget)
 
 fn Vec2 MenuItemRow.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
+	return constraints.constrain({ self.width, self.style.item_height });
 }
 
 fn void MenuItemRow.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -735,7 +735,7 @@ struct SelectHead (Widget)
 
 fn Vec2 SelectHead.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
+	return constraints.constrain({ self.width, self.style.item_height });
 }
 
 fn void SelectHead.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -781,7 +781,7 @@ struct SelectOption (Widget)
 
 fn Vec2 SelectOption.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return cui::clamp_size({ self.width, self.style.item_height }, constraints);
+	return constraints.constrain({ self.width, self.style.item_height });
 }
 
 fn void SelectOption.paint(&self, Element* elem, Painter* painter) @dynamic

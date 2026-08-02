@@ -174,7 +174,7 @@ fn Vec2 Dialog.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	if (!self.open)
 	{
-		elem.layout_child(0, { .min = { 0, 0 }, .max = { 0, 0 } });
+		elem.layout_child(0, cui::tight({ 0, 0 }));
 		return { 0, 0 };
 	}
 
@@ -183,7 +183,7 @@ fn Vec2 Dialog.layout(&self, Element* elem, Constraints constraints) @dynamic
 		math::max(screen.size.x - 2 * DIALOG_MARGIN, 0.0f),
 		math::max(screen.size.y - 2 * DIALOG_MARGIN, 0.0f),
 	};
-	Vec2 panel = elem.layout_child(0, { .min = { 0, 0 }, .max = room });
+	Vec2 panel = elem.layout_child(0, cui::loose(room));
 
 	// Centred until someone drags it, and clamped onto the screen either way —
 	// which is also what stops a drag from posting the panel off the edge.
@@ -293,15 +293,11 @@ struct DialogFrame (Widget)
 fn Vec2 DialogFrame.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	DialogStyle s = self.style;
-	Vec2 inner = {
-		math::max(constraints.max.x - 2 * s.pad_x, 0.0f),
-		math::max(constraints.max.y - s.title_height - 2 * s.pad_y, 0.0f),
-	};
-	Vec2 body = elem.layout_child(1, { .min = { 0, 0 }, .max = inner });
+	Constraints inner = constraints.deflate({ 2 * s.pad_x, s.title_height + 2 * s.pad_y });
+	Vec2 body = elem.layout_child(1, cui::loose(inner.max));
 
 	float width = math::min(math::max(body.x + 2 * s.pad_x, self.min_width), constraints.max.x);
-	Vec2 bar = { width, s.title_height };
-	elem.layout_child(0, { .min = bar, .max = bar });
+	elem.layout_child(0, cui::tight({ width, s.title_height }));
 	elem.place_child(0, { 0, 0 });
 	elem.place_child(1, { s.pad_x, s.title_height + s.pad_y });
 
@@ -358,11 +354,11 @@ struct DialogTitleBar (Widget)
 *>
 fn Vec2 DialogTitleBar.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	Vec2 own = cui::clamp_size({ constraints.max.x, self.style.title_height }, constraints);
+	Vec2 own = constraints.constrain({ constraints.max.x, self.style.title_height });
 
 	Vec2 close = { DIALOG_CLOSE_SIZE, DIALOG_CLOSE_SIZE };
-	elem.layout_child(0, { .min = close, .max = close });
-	elem.place_child(0, { own.x - self.style.pad_x - close.x, (own.y - close.y) * 0.5f });
+	elem.layout_child(0, cui::tight(close));
+	elem.place_child(0, align_in(own, close, CrossAlign.END, CrossAlign.CENTER, { self.style.pad_x, 0 }));
 	return own;
 }
 

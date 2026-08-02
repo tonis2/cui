@@ -39,6 +39,16 @@ fn Element* Shedding.build(&self, Element* elem) @dynamic
 	return elem.ui.@node((UnmountProbe){ .count = self.unmounts });
 }
 
+struct Remounting (Widget)
+{
+	MountRecord* rec;
+}
+
+fn Element* Remounting.build(&self, Element* elem) @dynamic
+{
+	return elem.ui.@node((MountProbe){ .pref = { 20, 10 }, .rec = self.rec });
+}
+
 fn Ui* fixture(float v) @private
 {
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
@@ -125,6 +135,61 @@ fn void rebuild_fires_unmount_on_old_subtree() @test
 	shed.request_build();
 	ui.flush();
 	test::eq(unmounts, 2);
+}
+
+<*
+ What mount is for: it runs once, before the element has a size, with the
+ parent chain already wired — so a widget can declare properties that are read
+ later (here the cursor) without owning a layout to hang them on.
+*>
+fn void mount_runs_once_before_the_first_layout() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	MountRecord rec;
+	Element* probe = ui.@node((MountProbe){ .pref = {80, 30}, .rec = &rec });
+	Element* mid = ui.@node((Stack){}, probe);
+	ui.build(ui.@node((Stack){}, mid));
+	ui.flush();
+
+	test::eq(rec.mounts, 1);
+	test::eq(rec.depth_at_mount, 2);             // probe -> mid -> root, all wired
+	test::eq(rec.layouts_at_mount, 0);           // ahead of the element's own layout
+	cui_tests::eq_vec2(rec.size_at_mount, {0, 0});
+	cui_tests::eq_vec2(probe.size, {80, 30});    // and the layout still ran
+
+	// What it declared outlives the pass it declared it in.
+	cui_tests::frame(ui, {10, 10});
+	test::eq(ui.cursor, Cursor.CROSSHAIR);
+
+	// Relayouts do not re-mount: a resize is not a new element.
+	ui.size = {380, 90};
+	ui.root.request_layout();
+	ui.flush();
+	test::eq(rec.mounts, 1);
+}
+
+<*
+ An element that leaves the tree and comes back mounts again — the element is
+ recycled through the free-list, and the flag lives on the element, so a stale
+ true would leave the new widget's mount unrun.
+*>
+fn void a_rebuilt_subtree_mounts_again() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	MountRecord rec;
+	Element* host = ui.@node((Remounting){ .rec = &rec });
+	ui.build(ui.@node((Stack){}, host));
+	ui.flush();
+	test::eq(rec.mounts, 1);
+
+	host.request_build();
+	ui.flush();
+	test::eq(rec.mounts, 2);                     // fresh element, fresh mount
+	test::eq(ui.free_elements.len(), 0);         // and it is the recycled one
 }
 
 fn void request_paint_routes_only_for_paintless_build() @test

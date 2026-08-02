@@ -3,12 +3,77 @@ module cui_tests::layouts;
 import cui;
 import cui_tests;
 import std::core::test;
+import std::math::vector;
 
-fn void clamp_size_clamps() @test
+fn void constrain_clamps() @test
 {
 	Constraints c = { .min = {10, 10}, .max = {100, 50} };
+	cui_tests::eq_vec2(c.constrain({500, 5}), {100, 10});
+	cui_tests::eq_vec2(c.constrain({50, 30}), {50, 30});
+	// The free-function spelling kept for consumers, arguments the other way.
 	cui_tests::eq_vec2(cui::clamp_size({500, 5}, c), {100, 10});
-	cui_tests::eq_vec2(cui::clamp_size({50, 30}, c), {50, 30});
+}
+
+fn void tight_and_loose_build_the_two_common_offers() @test
+{
+	Constraints t = cui::tight({40, 20});
+	cui_tests::eq_vec2(t.min, {40, 20});
+	cui_tests::eq_vec2(t.max, {40, 20});
+
+	Constraints l = cui::loose({40, 20});
+	cui_tests::eq_vec2(l.min, {0, 0});
+	cui_tests::eq_vec2(l.max, {40, 20});
+}
+
+<*
+ Deflate reserves space on both bounds and floors at zero — a widget padded
+ harder than the room it was given hands its child an empty box, never a
+ negative one, which would make min > max and trip the constrain contract.
+*>
+fn void deflate_floors_at_zero() @test
+{
+	Constraints c = { .min = {10, 10}, .max = {100, 50} };
+	Constraints inner = c.deflate({20, 8});
+	cui_tests::eq_vec2(inner.min, {0, 2});
+	cui_tests::eq_vec2(inner.max, {80, 42});
+
+	Constraints crushed = c.deflate({500, 500});
+	cui_tests::eq_vec2(crushed.min, {0, 0});
+	cui_tests::eq_vec2(crushed.max, {0, 0});
+}
+
+<*
+ `fill` is the size-field convention as a function: a set component is that many
+ pixels, a zero one fills what was offered, and the result is inside the range
+ either way. Hand-written layouts and the no-layout shortcut must agree, so this
+ pins the rule both of them read.
+*>
+fn void fill_resolves_zero_as_fill_per_axis() @test
+{
+	Constraints c = { .min = {0, 0}, .max = {400, 100} };
+	cui_tests::eq_vec2(c.fill({0, 0}), {400, 100});      // both axes fill
+	cui_tests::eq_vec2(c.fill({0, 40}), {400, 40});      // mixed: the bar case
+	cui_tests::eq_vec2(c.fill({80, 30}), {80, 30});      // both fixed
+	cui_tests::eq_vec2(c.fill({9999, 30}), {400, 30});   // fixed but clamped
+
+	Constraints floored = { .min = {50, 50}, .max = {400, 100} };
+	cui_tests::eq_vec2(floored.fill({10, 10}), {50, 50}); // raised to the minimum
+}
+
+fn void align_in_places_a_box_against_edges() @test
+{
+	Vec2 outer = { 100, 40 };
+	Vec2 inner = { 20, 10 };
+	cui_tests::eq_vec2(widgets::align_in(outer, inner, CrossAlign.START, CrossAlign.START), {0, 0});
+	cui_tests::eq_vec2(widgets::align_in(outer, inner, CrossAlign.END, CrossAlign.END), {80, 30});
+	cui_tests::eq_vec2(widgets::align_in(outer, inner, CrossAlign.CENTER, CrossAlign.CENTER), {40, 15});
+
+	// The margin holds the box off the edges it is pushed against, and a centered
+	// axis ignores it — there is no edge there to sit against.
+	cui_tests::eq_vec2(
+		widgets::align_in(outer, inner, CrossAlign.END, CrossAlign.CENTER, {8, 8}),
+		{72, 15}
+	);
 }
 
 fn void rectangle_clamps_to_constraints() @test

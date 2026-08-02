@@ -516,6 +516,19 @@ macro Element.widget_as(&self, $Type)
 }
 
 <*
+ Whether this element's widget is exactly $Type — the test `@each` runs on
+ every element, exposed for `@walk` bodies that sort several types out of one
+ pass. Exact, not "assignable to": a widget is one concrete type here.
+
+ @param $Type : `The widget type to test for.`
+ @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
+*>
+macro bool Element.is_widget(&self, $Type)
+{
+	return ((any)self.widget).type == $Type;
+}
+
+<*
  The embedder value of a type, as seen from this element. See `Ui.provide`.
 
  Prefer this over `elem.ui.inherit` even though they are the same call today.
@@ -644,9 +657,20 @@ fn Element*? Ui.find_id(&self, String id)
 	return elem;
 }
 
+<*
+ Whether this element carries this name. An empty id never matches, so unkeyed
+ elements stay invisible to a name-based pass.
+
+ @param id : `The name given with with_id.`
+*>
+fn bool Element.has_id(&self, String id)
+{
+	return self.id.len > 0 && equals(self.id, id);
+}
+
 fn Element* find_by_id(Element* elem, String id) @private
 {
-	if (elem.id.len > 0 && equals(elem.id, id)) return elem;
+	if (elem.has_id(id)) return elem;
 	foreach (child : elem.children)
 	{
 		Element* hit = find_by_id(child, id);
@@ -731,42 +755,93 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 }
 
 // ---------------------------------------------------------------------------
-// @each / @each_id — the every-match twins of find / find_id, for when several
-// widgets of a kind coexist by design (one HUD per split pane) and "the first
-// one" is a bug. Inline bodies rather than a returned list, so nothing escapes
-// and no allocation outlives the walk. Iterative with an explicit stack: the
-// element tree's depth is a runtime value, and macro recursion only terminates
-// on compile-time bounds. Visit order is unspecified.
+// Tree visitors — @walk and the filtered twins @each / @each_id, for when
+// several widgets of a kind coexist by design (one HUD per split pane) and
+// "the first one" is a bug. Inline bodies rather than a returned list, so
+// nothing escapes and no allocation outlives the walk.
+//
+// The traversal rides the parent pointers instead of pushing a stack: it needs
+// no scratch memory at all, which is what makes a visitor callable from a
+// render loop. Not recursive, because a tree's depth is a runtime value and
+// macro recursion only terminates on compile-time bounds — and a `fn` walker
+// is no way out either, since a C3 lambda captures nothing and so cannot carry
+// the body. Visit order is pre-order: an element before its children, children
+// left to right.
+
+<*
+ Runs the body once for every element in the tree.
+
+     ui.@walk(; elem)
+     {
+         if (elem.is_widget(Viewport) || elem.has_id("hud")) elem.request_paint();
+     };
+
+ The unfiltered primitive under `@each` and `@each_id`. Reach for it when one
+ pass has to answer several questions: three `@each` calls are three walks of
+ the same tree, and testing an element costs far less than reaching it.
+
+ Invalidation from the body is safe (it only sets flags); structural mutation
+ of the tree is not — defer it with request_build like everything else.
+*>
+macro void Ui.@walk(&self; @body(elem))
+{
+	Element* root = self.root;
+	Element* walk = root;
+	while (walk)
+	{
+		@body(walk);
+
+		// Down first; at a leaf, across to the next sibling, climbing while
+		// there is none. Arriving back at the root means the tree is done.
+		if (walk.children.len() > 0)
+		{
+			walk = walk.children[0];
+			continue;
+		}
+		Element* next = null;
+		while (walk != root && walk.parent)
+		{
+			Element* parent = walk.parent;
+			sz after = child_slot(parent, walk) + 1;
+			if (after < parent.children.len())
+			{
+				next = parent.children[after];
+				break;
+			}
+			walk = parent;
+		}
+		walk = next;
+	}
+}
+
+<*
+ Where a child sits in its parent's list — the step `@walk` takes in place of a
+ stack. Linear in the sibling count, which stays small in a UI tree; a parent
+ with hundreds of children pays for it once per child.
+
+ @return `The index, or the child count if the two are not related.`
+*>
+fn sz child_slot(Element* parent, Element* child) @private
+{
+	foreach (index, entry : parent.children) if (entry == child) return index;
+	return parent.children.len();
+}
 
 <*
  Runs the body for every element whose widget is exactly $Type.
 
      ui.@each(Viewport; elem) { elem.request_paint(); };
 
- Invalidation from the body is safe (it only sets flags); structural mutation
- of the tree is not — defer it with request_build like everything else.
-
  @param $Type : `The widget type to visit.`
  @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
 *>
 macro void Ui.@each(&self, $Type; @body(elem))
 {
-	if (self.root)
+	typeid want = $Type;
+	self.@walk(; visited)
 	{
-		typeid want = $Type;
-		@pool()
-		{
-			List{Element*} stack;
-			stack.tinit();
-			stack.push(self.root);
-			while (stack.len() > 0)
-			{
-				Element* walk = stack.pop()!!;
-				foreach (child : walk.children) stack.push(child);
-				if (((any)walk.widget).type == want) @body(walk);
-			}
-		};
-	}
+		if (((any)visited.widget).type == want) @body(visited);
+	};
 }
 
 <*
@@ -777,21 +852,10 @@ macro void Ui.@each(&self, $Type; @body(elem))
 *>
 macro void Ui.@each_id(&self, String id; @body(elem))
 {
-	if (self.root)
+	self.@walk(; visited)
 	{
-		@pool()
-		{
-			List{Element*} stack;
-			stack.tinit();
-			stack.push(self.root);
-			while (stack.len() > 0)
-			{
-				Element* walk = stack.pop()!!;
-				foreach (child : walk.children) stack.push(child);
-				if (walk.id.len > 0 && equals(walk.id, id)) @body(walk);
-			}
-		};
-	}
+		if (visited.has_id(id)) @body(visited);
+	};
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
-// Tree queries: find / find_id (fault-based), the get_widget twins, and the
-// @modify sugar.
+// Tree queries: find / find_id (fault-based), the get_widget twins, the
+// @modify sugar, and the @walk / @each visitors.
 module cui_tests::lookups;
 import cui;
 import cui_tests;
@@ -99,4 +99,74 @@ fn void modify_missing_is_silent_noop() @test
 	};
 
 	test::@check(!ui.paint_pending);
+}
+
+fn void walk_visits_every_element_in_order() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	// Lopsided on purpose: reaching `right` means climbing two levels out of
+	// the deep branch, which is the step a stackless walk can get wrong. A
+	// missed element here is a pane that never repaints.
+	Element* deep = ui.@node((Rectangle){ .size = {10, 10} });
+	Element* mid = ui.@node((Column){}, deep);
+	Element* left = ui.@node((Column){}, mid);
+	Element* right = ui.@node((Rectangle){ .size = {20, 20} });
+	Element* root = ui.@node((Stack){}, left, right);
+	ui.build(root);
+
+	Element*[5] want = { root, left, mid, deep, right };
+	int seen = 0;
+	bool in_order = true;
+	ui.@walk(; elem)
+	{
+		if (seen >= 5 || elem != want[seen]) in_order = false;
+		seen++;
+	};
+
+	test::eq(seen, 5);
+	test::@check(in_order);                     // parent first, siblings left to right
+}
+
+fn void walk_before_the_first_build_is_a_noop() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	int seen = 0;
+	ui.@walk(; elem) { seen++; };
+	test::eq(seen, 0);
+}
+
+fn void each_sees_every_match() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	// One name on two nodes at different depths — the duplicated-subtree case
+	// find/find_id cannot express, since they stop at the first hit.
+	Element* a = ui.@node((Rectangle){ .size = {30, 20} }).with_id("card");
+	Element* b = ui.@node((Rectangle){ .size = {50, 40} }).with_id("card");
+	Element* column = ui.@node((Column){}, b);
+	ui.build(ui.@node((Stack){}, a, column));
+
+	int rects = 0;
+	ui.@each(Rectangle; elem) { rects++; };
+	test::eq(rects, 2);
+
+	int cards = 0;
+	ui.@each_id("card"; elem) { cards++; };
+	test::eq(cards, 2);
+
+	int absent = 0;
+	ui.@each(Button; elem) { absent++; };
+	test::eq(absent, 0);
+
+	// The same two tests a @walk body would run by hand.
+	test::@check(a.is_widget(Rectangle));
+	test::@check(!a.is_widget(Column));
+	test::@check(a.has_id("card"));
+	test::@check(!a.has_id("nope"));
+	test::@check(!column.has_id(""));           // unkeyed nodes match no name
 }

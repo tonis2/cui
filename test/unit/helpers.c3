@@ -15,11 +15,11 @@ macro void eq_vec2(Vec2 got, Vec2 want)
 }
 
 // Feed one input frame the way an embedder would.
-fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = {})
+fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = {}, bool right = false)
 {
 	ui.process_input({
 		.mouse = mouse,
-		.buttons = { left, false, false },
+		.buttons = { left, right, false },
 		.scroll = scroll,
 		.keys_down = keys,
 	}, 0.016f);

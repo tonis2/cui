@@ -710,6 +710,24 @@ fn bool Select.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	}
 }
 
+<*
+ Dismisses the open list, if there is one. Safe to call when nothing is open.
+
+ The same service `MenuBar.close` provides, and public for the same reason: a
+ Select's click catcher is placed against the window, so a pane that clips its
+ subtree leaves the list hanging when the press lands outside the pane. An app
+ that puts one inside a clipped region needs a way to say "close whatever is
+ open" from wherever the press did land.
+
+ @param elem : `The Select's element — the one that rebuilds.`
+*>
+fn void Select.close(&self, Element* elem)
+{
+	if (!self.open) return;
+	self.open = false;
+	elem.request_build();
+}
+
 fn bool Select.on_key(&self, Element* elem, KeyEvent event) @dynamic
 {
 	if (self.open && event.down && event.key == Key.ESCAPE)

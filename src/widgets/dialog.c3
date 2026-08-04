@@ -89,6 +89,25 @@ const Color DIALOG_SHADOW_COLOR = { 0.0, 0.0, 0.0, 0.45 };
 const String DIALOG_CLOSE_ID = "dialog-close";
 
 <*
+ A body builder handed something to build *from*.
+
+ `ViewBuilder` takes only the Ui, which is all a panel needs when its content is
+ the same every time — a key reference, an about box. It is not enough for one
+ whose content is decided per opening, because a plain function pointer has
+ nowhere to carry the decision. Widgets built this way pass themselves, which is
+ the same answer `DialogCloseButton.host` gives one level down.
+
+ `any` rather than a `void*`, matching `Ui.provide`: the pointer arrives with
+ its type attached, so the receiving end recovers it with `anycast` and a
+ mismatch is a fault at the call site instead of a wrong-shaped read inside it.
+*>
+alias ViewBuilderCtx = fn Element*(Ui* ui, any ctx);
+
+// The context-carrying twin of `OnClick`, for the same reason and with the same
+// type-checked handle.
+alias OnDialogClose = fn void(Ui* ui, any ctx);
+
+<*
  A floating titled panel.
 
  Mount one wherever it should sit in the paint order — later siblings still
@@ -121,11 +140,25 @@ struct Dialog (Widget)
 {
 	String title; // borrowed; must outlive the widget
 	ViewBuilder body; // builds the content; called on every open
+
+	<*
+	 The same, for content that has to be built from something — set this or
+	 `body`. `body_ctx` is handed `ctx` and wins if both are set.
+	*>
+	ViewBuilderCtx body_ctx;
+
+	<*
+	 Handed to `body_ctx` and `on_close_ctx`; nothing else reads it. Borrowed —
+	 it must outlive the dialog. Pass a pointer; it converts to `any`.
+	*>
+	any ctx;
+
 	DialogStyle style;
 	bool open;
 	bool modal; // dim and block everything behind it
 	bool close_outside; // modal only: a press on the backdrop closes the dialog
 	OnClick on_close; // optional; called whenever the dialog goes from open to closed
+	OnDialogClose on_close_ctx; // the same, handed `ctx`; both run if both are set
 	Vec2 at; // the panel's top-left in UI coordinates; written by layout
 	bool placed; // false = centre it (and re-centre it on every layout)
 }
@@ -135,7 +168,7 @@ struct Dialog (Widget)
  at all while closed.
 
  @param elem : `The element this widget is attached to.`
- @require self.body != null : `A Dialog needs a body builder — the panel is chrome around content.`
+ @require self.body != null || self.body_ctx != null : `A Dialog needs a body builder — the panel is chrome around content.`
  @return `The panel subtree, or a childless Stack that layout sizes to zero.`
 *>
 fn Element* Dialog.build(&self, Element* elem) @dynamic
@@ -154,11 +187,13 @@ fn Element* Dialog.build(&self, Element* elem) @dynamic
 	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x
 		+ s.pad_x + DIALOG_CLOSE_SIZE;
 
+	Element* content = self.body_ctx != null ? self.body_ctx(ui, self.ctx) : self.body(ui);
+
 	Element* close = ui.@node((DialogCloseButton) { .style = s, .host = elem })
 		.with_id(DIALOG_CLOSE_ID);
 	Element* bar = ui.@node((DialogTitleBar) { .title = self.title, .style = s, .host = elem }, close);
 	return ui.@node((DialogFrame) { .style = s, .min_width = math::max(s.min_width, head) },
-		bar, self.body(ui));
+		bar, content);
 }
 
 <*
@@ -245,7 +280,14 @@ fn void Dialog.set_open(&self, Element* elem, bool open)
 	if (self.open == open) return;
 	self.open = open;
 	if (open) elem.request_focus();
-	if (!open && self.on_close) self.on_close(elem.ui);
+	if (!open)
+	{
+		// Every dismissal lands here — the close button, ESC, the backdrop, or
+		// the app calling this — which is what lets a caller treat "it went away"
+		// as an answer rather than having to watch for each of the ways.
+		if (self.on_close) self.on_close(elem.ui);
+		if (self.on_close_ctx) self.on_close_ctx(elem.ui, self.ctx);
+	}
 
 	// A build, not a paint: this widget paints (the backdrop), so `request_paint`
 	// would stop at the backdrop and leave the panel exactly as it was.

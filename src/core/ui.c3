@@ -776,6 +776,25 @@ fn Element*? Ui.find_id(&self, String id)
 }
 
 <*
+ The element carrying this id within this subtree, this element included.
+
+ The scoped twin of `Ui.find_id`, and what a composite uses to reach into the
+ subtree it has just built: a detached subtree is not in `Ui.root` yet, so the
+ tree-wide lookup cannot see it. It is also the narrower answer when ids repeat
+ by design — one HUD per pane — since it searches only below here.
+
+ @param id : `The name given with with_id.`
+ @return `The element carrying the id.`
+ @return? WIDGET_NOT_FOUND : `No element in this subtree carries that id.`
+*>
+fn Element*? Element.find_id(&self, String id)
+{
+	Element* elem = find_by_id(self, id);
+	if (!elem) return WIDGET_NOT_FOUND~;
+	return elem;
+}
+
+<*
  Whether this element carries this name. An empty id never matches, so unkeyed
  elements stay invisible to a name-based pass.
 

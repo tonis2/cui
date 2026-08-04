@@ -612,11 +612,24 @@ struct Button (Widget)
 	OnClick on_click; // optional; called on click-release inside
 	bool hovered;
 	bool held;
+
+	<*
+	 Text drawn centred in the button, or empty for a bare rect.
+
+	 Here rather than as a nested `Label` because centring one would take a
+	 container of its own, and because a label inside a button is not decoration
+	 sitting on top of it — it is what the button says, and the two are never
+	 styled or sized apart. Borrowed, like every other string in a widget: it
+	 must outlive the element.
+	*>
+	String label;
+	TextStyle label_style;
 }
 
 <*
  Draws the rect in the style matching the current state: press, then hover, then
- the base style (a state style counts as set when its color alpha is above zero).
+ the base style (a state style counts as set when its color alpha is above zero),
+ and the label centred on top of it.
 
  @param elem : `The element this widget is attached to.`
  @param painter : `The painter to draw into, in element-local coordinates.`
@@ -633,7 +646,45 @@ fn void Button.paint(&self, Element* elem, Painter* painter) @dynamic
 		style = self.hover_style;
 	}
 	painter.rect({ 0, 0 }, elem.size, style);
+
+	if (self.label.len == 0) return;
+
+	Vec2 text = elem.ui.text.measure(self.label_style.font, self.label, self.label_style.size);
+	painter.text((elem.size - text) * 0.5f, self.label, self.label_style);
 }
+
+<*
+ Sizes to the label plus its padding when the button has one and no explicit
+ size, so a row of buttons is as wide as its words rather than as wide as the
+ widest guess. A `size` component that was set wins, per axis — the size-field
+ convention, unchanged.
+
+ @param elem : `The element this widget is attached to.`
+ @param constraints : `The size range offered by the parent.`
+*>
+fn Vec2 Button.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	Vec2 own = self.size;
+	if (self.label.len > 0)
+	{
+		Vec2 text = elem.ui.text.measure(self.label_style.font, self.label, self.label_style.size);
+		if (own.x == 0.0f) own.x = text.x + BUTTON_LABEL_PAD.x * 2.0f;
+		if (own.y == 0.0f) own.y = text.y + BUTTON_LABEL_PAD.y * 2.0f;
+	}
+	own = constraints.fill(own);
+
+	// The same loose pass a widget with no `layout` of its own would have got, so
+	// adding this method did not change what children do inside a Button.
+	elem.layout_children(cui::loose(own));
+	return own;
+}
+
+<*
+ Space around a label that is sizing its own button: enough that the text is not
+ touching the border at either edge, and the same on every button so a row of
+ them lines up.
+*>
+const Vec2 BUTTON_LABEL_PAD = { 14.0, 7.0 };
 
 <*
  Tracks hover state and repaints.

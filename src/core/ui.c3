@@ -1301,7 +1301,15 @@ fn void Ui.release(&self, Element* element)
 	if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
 	if (self.hovered == element) self.hovered = null;
 	if (self.captured == element) self.captured = null;
-	if (self.focused == element) self.focused = null;
+
+	// The keyboard moves up to the parent rather than going out. Children are
+	// released first, so a subtree containing the focused element hands it up
+	// one level at a time and it comes to rest on the nearest survivor — the
+	// element whose subtree was replaced, not null. Null would leave the whole
+	// application deaf to keys until the next left press, which is the only
+	// thing that assigns focus: dismissing a dialog that had a text field in it
+	// would silently disable every shortcut in the window.
+	if (self.focused == element) self.focused = element.parent;
 	element.children.free();
 	element.local_drawings.free();
 	*element = { };

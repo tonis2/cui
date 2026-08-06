@@ -121,7 +121,8 @@ fn void release_clears_interactivity_pointers() @test
 	defer ui.free();
 
 	Element* rect = ui.@node((Rectangle){ .size = {30, 20} });
-	ui.build(ui.@node((Stack){}, rect));
+	Element* stack = ui.@node((Stack){}, rect);
+	ui.build(stack);
 	ui.flush();
 
 	// Elements recycle through a free-list: a stale pointer would silently
@@ -133,7 +134,11 @@ fn void release_clears_interactivity_pointers() @test
 
 	test::@check(ui.hovered == null);
 	test::@check(ui.captured == null);
-	test::@check(ui.focused == null);
+
+	// Focus is lifted rather than severed: keys go to the enclosing element, so
+	// replacing the subtree someone was typing in leaves the keyboard working
+	// instead of dead until the next left press.
+	test::@check(ui.focused == stack);
 }
 
 fn void freed_elements_are_reused() @test

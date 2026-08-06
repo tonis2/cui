@@ -66,6 +66,10 @@ struct EventRecord
 	Vec2 last_pos;
 	float last_scroll;
 	Key last_key;
+
+	// Whether EventProbe.watch was held when the last key arrived — what an
+	// application asks to tell a chord from the bare key.
+	bool watched_at_key;
 	bool consume_mouse;
 	bool consume_key;
 }
@@ -75,6 +79,7 @@ struct EventProbe (Widget)
 	Vec2 pref;
 	EventRecord* rec;
 	bool transparent; // sets elem.ignores_pointer from layout(), like Label does
+	Key watch; // polled from on_key into `watched_at_key`; EMPTY is never held
 }
 
 fn Vec2 EventProbe.layout(&self, Element* elem, Constraints c) @dynamic
@@ -127,6 +132,7 @@ fn bool EventProbe.on_key(&self, Element* elem, KeyEvent event) @dynamic
 		self.rec.key_ups++;
 	}
 	self.rec.last_key = event.key;
+	self.rec.watched_at_key = elem.ui.input.key_down(self.watch);
 	return self.rec.consume_key;
 }
 

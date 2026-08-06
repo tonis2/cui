@@ -181,6 +181,43 @@ fn void focus_and_key_delivery() @test
 	test::@check(ui.focused == null);
 }
 
+<*
+ The held-key set a handler reads is the frame it was called for.
+
+ A modifier and the key under it reach the embedder as two events, and one frame
+ carries however many arrived since the last one — so Ctrl and A land together
+ whenever they were pressed between the same two frames, which on a loop that
+ sleeps for input is most of the time. An application resolving the chord asks
+ `key_down(LEFT_CTRL)` while handling A: answered from the previous frame's set,
+ the chord reads as the bare key and fires whatever that is bound to.
+*>
+fn void a_chord_inside_one_frame_reads_as_a_chord() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	EventRecord rec = { .consume_key = true };
+	Element* probe = ui.@node((EventProbe){
+		.pref = {100, 50}, .rec = &rec, .watch = Key.LEFT_CTRL,
+	});
+	ui.build(ui.@node((Stack){}, probe));
+	ui.flush();
+
+	cui_tests::frame(ui, {50, 25}, left: true);
+	cui_tests::frame(ui, {50, 25});
+
+	Key[2] both = { Key.LEFT_CTRL, Key.A };
+	cui_tests::frame(ui, {50, 25}, keys: both[..]);
+	test::eq(rec.last_key, Key.A);
+	test::@check(rec.watched_at_key);
+
+	// And the level state is gone on the frame the keys are: a handler asking
+	// on the release edge is asking about a key that is up.
+	cui_tests::frame(ui, {50, 25});
+	test::eq(rec.key_ups, 2);
+	test::@check(!rec.watched_at_key);
+}
+
 fn void cursor_resolves_from_hover_chain() @test
 {
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);

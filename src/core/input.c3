@@ -300,6 +300,17 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	input.scroll_x = frame.scroll_x;
 	input.scroll_precise = frame.scroll_precise;
 	input.text = frame.text;
+
+	// Held keys are level state like the buttons, and are published here —
+	// before any dispatch — so a handler asking `key_down(LEFT_CTRL)` is asking
+	// about the frame it is being called for. Published later, it would answer
+	// with the previous frame's set, and a chord whose two keys arrive in one
+	// frame (the queue drained them together, or the modifier and the click
+	// landed between the same two frames) would be read as the bare key: Ctrl+A
+	// as A. Re-pointed at `held_keys` once the edges are diffed below, since
+	// `frame.keys_down` is only borrowed for the call.
+	input.keys_down = frame.keys_down;
+
 	for (sz b = 0; b < 3; b++)
 	{
 		input.pressed[b] = frame.buttons[b] && !input.down[b];
@@ -374,6 +385,9 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	}
 	self.held_keys.clear();
 	foreach (key : frame.keys_down) self.held_keys.push(key);
+
+	// Same contents, an array the Ui owns: `update()` hooks run below and app
+	// code runs after the call, both outliving the embedder's per-frame buffer.
 	input.keys_down = self.held_keys.array_view();
 
 	// Per-frame tick for widgets implementing update().

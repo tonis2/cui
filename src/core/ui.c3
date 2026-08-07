@@ -1057,14 +1057,6 @@ macro void @canvas(Ui* ui; @body()) @builtin
  The detached twin of `@canvas`: returns the body's single top-level node
  instead of installing it — the shape of a composite's `build()`:
 
-     `fn Element* Counter.build(&self, Element* elem) @dynamic`
-     `{`
-     `    return @subtree(elem.ui)`
-     `    {`
-     `        @tree((Row){ .gap = 4.0 }) { ... };`
-     `    };`
-     `}`
-
  @param ui : `The Ui to build into — inside build(), elem.ui.`
  @require ui != null : `@subtree needs a Ui.`
  @return `The single node built at the top level of the body, detached.`

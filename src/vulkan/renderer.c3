@@ -32,6 +32,14 @@ import image::png;
 const MAX_FRAMES_IN_FLIGHT = 2;
 const APP_NAME = "UI EXAMPLE";
 
+// The canvas pass rotates its host-visible buffers over CANVAS_SLOTS copies and
+// trusts the host to have waited for the frame that many submissions back before
+// asking for an upload. `frame()` waits on frame_fences[frame_index], which is
+// the frame MAX_FRAMES_IN_FLIGHT back — so raising the depth here without
+// raising it there would put the memcpy back on top of a frame still drawing.
+$assert MAX_FRAMES_IN_FLIGHT <= CANVAS_SLOTS :
+    "CANVAS_SLOTS must cover MAX_FRAMES_IN_FLIGHT, or uploads tear frames in flight";
+
 <*
  Upper bound on a frame delta, in seconds. A stall — or waking from an on-demand
  sleep after minutes idle — must not hand animations one enormous step. Also the
@@ -664,16 +672,21 @@ fn bool? Renderer.frame(&self, Ui* ui)
         self.window.set_cursor(cursor_shape(ui.cursor));
     }
 
+    Fence frame_fence = self.frame_fences[self.frame_index];
+    Semaphore wait_semaphore = self.wait_semaphores[self.frame_index];
+
+    // Ahead of the upload, not after it. There are MAX_FRAMES_IN_FLIGHT fences
+    // and slots alike, so this fence is the frame that last wrote the buffers
+    // the upload is about to write, and waiting on it is the whole of what makes
+    // them free. Uploading first hands the memcpy to a frame still on the GPU
+    // and tears its display list — see CANVAS_SLOTS for what that looks like.
+    frame_fence.wait(self.device)!;
+    frame_fence.reset(self.device)!;
+
     // Flush and upload before any recording starts: this bakes glyphs, may grow
     // a buffer (which idles the GPU) and may rebuild the pipeline for a new
     // texture count — none of which belong in the middle of a command buffer.
     self.canvas.upload(ui, self.window_size)!;
-
-    Fence frame_fence = self.frame_fences[self.frame_index];
-    Semaphore wait_semaphore = self.wait_semaphores[self.frame_index];
-
-    frame_fence.wait(self.device)!;
-    frame_fence.reset(self.device)!;
 
     uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
     Semaphore signal_semaphore = self.signal_semaphores[next_image];

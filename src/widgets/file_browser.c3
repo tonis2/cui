@@ -240,7 +240,14 @@ fn void FileBrowser.rescan(&self)
 
 	PathList? found = path::ls(mem, (Path)here);
 	if (catch found) return;
-	defer found.free();
+
+	// Each entry carries its own copy of the name; the list's own free releases
+	// the array that held them and not the names themselves.
+	defer
+	{
+		foreach (entry : found) entry.free(mem);
+		found.free();
+	}
 
 	foreach (entry : found)
 	{

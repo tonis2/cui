@@ -206,6 +206,42 @@ fn Vec2 MountProbe.layout(&self, Element* elem, Constraints c) @dynamic
 }
 
 // ---------------------------------------------------------------------------
+// WatchProbe: reads a provided Steering through `Element.watch` from layout,
+// paint, both or neither, and counts the calls — so a test can invalidate the
+// value and see which hooks re-ran. The `reads_*` flags are what a branch that
+// stops reading looks like from outside.
+
+struct Steering
+{
+	float angle;
+}
+
+struct WatchProbe (Widget)
+{
+	Vec2 pref;
+	int* layouts;
+	int* paints;
+	bool reads_in_layout;
+	bool reads_in_paint;
+	float* seen; // the angle the last watching paint read
+}
+
+fn Vec2 WatchProbe.layout(&self, Element* elem, Constraints c) @dynamic
+{
+	if (self.layouts) (*self.layouts)++;
+	if (self.reads_in_layout) elem.watch(Steering)!!;
+	return c.constrain(self.pref);
+}
+
+fn void WatchProbe.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	if (self.paints) (*self.paints)++;
+	if (!self.reads_in_paint) return;
+	Steering* steering = elem.watch(Steering)!!;
+	if (self.seen) *self.seen = steering.angle;
+}
+
+// ---------------------------------------------------------------------------
 // UnmountProbe: counts unmount() calls — proves release fired the hook.
 
 struct UnmountProbe (Widget)

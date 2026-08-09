@@ -38,6 +38,23 @@ import std::core::dstring;
 *>
 alias OnSubmit = fn void(Ui* ui, String text);
 
+<*
+ Called whenever the user changes the text, on every edit rather than on Return.
+
+ What a search box is built on: filtering only on submit makes a field the user
+ has to finish before anything happens, which is a different interaction from one
+ that narrows as it is typed.
+
+ Fired for typing, for a deletion that removed something, and for each tick of a
+ held key that did. **Not** fired by `set_text` — that is the caller setting the
+ field, and a callback there is a caller being told what it just did, which is
+ how an update loop starts.
+
+ The string is the field's own buffer, valid only for the duration of the call —
+ copy it if it has to outlive the callback.
+*>
+alias OnChange = fn void(Ui* ui, String text);
+
 // How long a key is held before it starts repeating, and how long between the
 // repeats once it does. Close to what a desktop defaults to: the pause is what
 // keeps a single tap from deleting two characters, and the interval is fast
@@ -103,6 +120,7 @@ struct TextField (Widget)
 
 	String placeholder; // borrowed; must outlive the element
 	OnSubmit on_submit; // optional; Return
+	OnChange on_change; // optional; every edit
 	TextFieldStyle style;
 
 	<*
@@ -364,6 +382,10 @@ fn void TextField.update(&self, Element* elem, float dt) @dynamic
 	}
 	self.anchor = self.caret;
 	elem.request_paint();
+	// Unconditional: the printable check above guarantees at least one character
+	// went in, so reaching here is an edit whether or not the length moved — a
+	// selection typed over by the same number of characters is still a change.
+	if (self.on_change) self.on_change(elem.ui, self.text.str_view());
 }
 
 <*
@@ -459,10 +481,19 @@ fn bool TextField.apply(&self, Element* elem, Key key)
 	{
 		case Key.BACKSPACE:
 		case Key.DELETE:
+			// Measured across the deletion rather than assumed: Backspace at the
+			// start of the field, and Delete at the end, are keys that consume the
+			// event and remove nothing. Reporting those as edits would filter a
+			// search on every tick of a key held against an end it cannot pass.
+			usz before = self.length();
 			self.delete_key(key);
 			// A deletion always collapses the selection: it is what was removed,
 			// so there is nothing left for the anchor to hold on to.
 			self.anchor = self.caret;
+			if (self.length() != before && self.on_change)
+			{
+				self.on_change(elem.ui, self.text.str_view());
+			}
 		case Key.LEFT_ARROW:
 		case Key.RIGHT_ARROW:
 		case Key.HOME:

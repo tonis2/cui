@@ -15,8 +15,18 @@
  - `request_build` — a composite drops its built subtree and re-runs `build()`,
    then layout + paint as above (`request_paint` on a build widget routes here
    — see `Element.request_paint`).
+ - `invalidate` — every element whose hook read the named provided value
+   (`Element.watch`) is invalidated in the phase it read it from. One tree walk
+   plus whichever of the above the watchers asked for.
  - nothing — `flush()` returns immediately; the GPU redraws the retained
    display list without any upload.
+
+ Invalidation is per element and does not propagate: a parent's `request_paint`
+ does not reach its children and a child's does not reach its parent. Where two
+ elements go stale together because they read the same state, that is what
+ `watch` / `invalidate` are for — a writer naming the elements it believes are
+ affected goes wrong as soon as one moves in the tree or a second copy of the
+ view appears.
 
  The built-in widgets live in `cui::widgets`, the reference renderer in
  `cui::vulkan`.
@@ -145,6 +155,38 @@ bitstruct DirtyFlags : char
 	bool layout;
 	bool paint;
 }
+
+<*
+ Which hook a watch was taken from, and therefore what `Ui.invalidate` asks for
+ when the watched value changes. See `Element.watch`.
+*>
+enum WatchKind : char
+{
+	BUILD,
+	LAYOUT,
+	PAINT,
+}
+
+<*
+ One recorded dependency: this element's `kind` hook read the provided value of
+ `type` the last time it ran.
+*>
+struct Watch
+{
+	typeid type;
+	WatchKind kind;
+}
+
+<*
+ How many distinct (type, hook) pairs one element may watch.
+
+ Inline on the Element rather than a list, so watching allocates nothing and a
+ recycled element carries none of its predecessor's. Four is generous for what
+ a single hook realistically reads — a camera, a theme — and overflowing it
+ asserts rather than silently dropping a dependency, which would show up as a
+ stale pane long after the call that caused it.
+*>
+const usz MAX_WATCHES = 4;
 
 <*
  Linear RGBA, 0..1 per channel. Alpha 0 also means "unset" wherever a style
@@ -394,6 +436,12 @@ struct Element
 
 	bool owns_widget; // widget is a heap copy made by @node; freed on release
 	DirtyFlags dirty;
+
+	// Provided values this element's hooks read, recorded by `Element.watch` and
+	// re-declared every time the hook runs. `Ui.invalidate` walks the tree
+	// looking at these.
+	Watch[MAX_WATCHES] watches;
+	uint watch_count;
 }
 
 <*
@@ -438,6 +486,13 @@ struct Ui
 	// Embedder state, reachable by type from anywhere in the tree — see
 	// `Ui.provide` / `Element.inherit`. Every slot is borrowed.
 	List{any} context;
+
+	// Whose hook is running, for `Element.watch` to attribute a read to. Null
+	// outside the three dispatches; saved and restored around each of them,
+	// because layout nests (a container lays its children out from inside its
+	// own `layout`).
+	Element* watcher;
+	WatchKind watch_kind;
 
 	bool build_pending;
 	bool layout_pending;
@@ -661,6 +716,103 @@ macro bool Element.is_widget(&self, $Type)
  @return? NOT_PROVIDED
 *>
 macro Element.inherit(&self, $Type) => self.ui.inherit($Type);
+
+<*
+ `inherit`, and a standing request to be invalidated when that value changes.
+
+ The mover then names only what it wrote — `ui.invalidate(OrbitCamera)` — and
+ every hook that read it re-runs, in the phase it read it from: a `paint` that
+ watches repaints, a `layout` that watches re-layouts, a `build` that watches
+ rebuilds. Nobody has to know who the readers are, which is the whole point:
+ painting is cached per element, so the alternative is each writer naming the
+ elements it believes are affected, and that list goes stale the moment a widget
+ moves in the tree or a second pane appears.
+
+ Watches are re-declared on every run of the hook and the previous run's are
+ dropped, so a branch that stops reading a value stops being invalidated by it.
+
+ ONLY counts inside `build`, `layout` and `paint` — the calls whose result is
+ cached and therefore can go stale. From an event handler, `mount` or a free
+ function this is exactly `inherit`: handlers run on every event already, so
+ there is nothing to invalidate.
+
+ @param $Type : `The provided type itself, not its pointer.`
+ @return `Pointer to the provided value.`
+ @return? NOT_PROVIDED
+*>
+macro Element.watch(&self, $Type)
+{
+	if (self.ui.watcher == self)
+	{
+		// The bare type, not `$Type.typeid`: the latter is rejected inside a
+		// macro body ("A type can't appear here").
+		typeid want = $Type;
+		self.record_watch(want, self.ui.watch_kind);
+	}
+	return self.ui.inherit($Type);
+}
+
+<*
+ Records one dependency, ignoring a repeat. Internal to `Element.watch`; the
+ dedupe is what lets a paint loop call `watch` per item without overflowing.
+
+ @param type : `The provided type read.`
+ @param kind : `The hook that read it.`
+*>
+fn void Element.record_watch(&self, typeid type, WatchKind kind)
+{
+	for (uint i = 0; i < self.watch_count; i++)
+	{
+		if (self.watches[i].type == type && self.watches[i].kind == kind) return;
+	}
+	assert(self.watch_count < MAX_WATCHES, "an element watches at most MAX_WATCHES provided types");
+	self.watches[self.watch_count++] = { .type = type, .kind = kind };
+}
+
+<*
+ Drops the watches taken from one hook, leaving the other hooks' alone.
+
+ Per kind rather than all at once because the hooks run on different schedules:
+ a layout watch is declared once and then survives many paints, and clearing
+ everything at the top of `paint` would delete it with no layout run coming to
+ put it back.
+
+ @param kind : `The hook about to run.`
+*>
+fn void Element.clear_watches(&self, WatchKind kind)
+{
+	uint kept = 0;
+	for (uint i = 0; i < self.watch_count; i++)
+	{
+		if (self.watches[i].kind == kind) continue;
+		self.watches[kept++] = self.watches[i];
+	}
+	self.watch_count = kept;
+}
+
+<*
+ Runs one widget hook with `Element.watch` attributing to it: the previous run's
+ watches of this kind are dropped first, and the cursor is restored afterwards
+ so a nested dispatch (layout, which lays its children out from inside itself)
+ hands attribution back to the outer one.
+
+ @param element : `The element whose hook is about to run.`
+ @param kind : `Which hook it is.`
+*>
+macro void Ui.@watching(&self, Element* element, WatchKind kind; @body())
+{
+	element.clear_watches(kind);
+	Element* outer = self.watcher;
+	WatchKind outer_kind = self.watch_kind;
+	self.watcher = element;
+	self.watch_kind = kind;
+	defer
+	{
+		self.watcher = outer;
+		self.watch_kind = outer_kind;
+	}
+	@body();
+}
 
 <*
  The fault `find` / `find_id` (and the `get_widget` twins built on them) raise
@@ -1389,6 +1541,49 @@ fn void Element.request_paint(&self)
 }
 
 <*
+ A provided value changed: invalidate every element that watched it, each in the
+ phase it was watched from. See `Element.watch`.
+
+ Costs one walk of the tree — the same walk `emit` makes every frame anyway —
+ rather than keeping subscriber lists on the providers. Elements recycle through
+ a free-list, so a stored `Element*` subscriber would have to be unsubscribed in
+ `release`, and a missed one would invalidate whatever reused the slot.
+
+ A no-op when nothing watched the type, including when nothing provided it: this
+ does not check, so a writer may call it unconditionally.
+
+ @param $Type : `The provided type that changed, not its pointer.`
+*>
+macro Ui.invalidate(&self, $Type)
+{
+	// See Element.watch for why the type is assigned rather than used directly.
+	typeid changed = $Type;
+	if (self.root) self.invalidate_watchers(self.root, changed);
+}
+
+<*
+ The tree walk behind `Ui.invalidate`. Public only because the macro above
+ expands into it.
+
+ @param element : `Subtree root to visit.`
+ @param type : `The provided type that changed.`
+*>
+fn void Ui.invalidate_watchers(&self, Element* element, typeid type)
+{
+	for (uint i = 0; i < element.watch_count; i++)
+	{
+		if (element.watches[i].type != type) continue;
+		switch (element.watches[i].kind)
+		{
+			case BUILD: element.request_build();
+			case LAYOUT: element.request_layout();
+			case PAINT: element.request_paint();
+		}
+	}
+	foreach (child : element.children) self.invalidate_watchers(child, type);
+}
+
+<*
  Manual placement under an absolute container (Stack). Cheap: the subtree's
  cached drawings are re-emitted at the new origin, no `paint()` calls.
 
@@ -1595,7 +1790,11 @@ fn void Ui.build_element(&self, Element* element)
 		element.dirty.build = false;
 		foreach (child : element.children) self.release(child);
 		element.children.clear();
-		Element* subtree = element.widget.build(element);
+		Element* subtree;
+		self.@watching(element, WatchKind.BUILD)
+		{
+			subtree = element.widget.build(element);
+		};
 		subtree.parent = element;
 		element.children.push(subtree);
 		element.request_layout();
@@ -1642,7 +1841,10 @@ fn Vec2 Ui.layout_element(&self, Element* element, Constraints constraints)
 	Vec2 size;
 	if (&element.widget.layout)
 	{
-		size = element.widget.layout(element, constraints);
+		self.@watching(element, WatchKind.LAYOUT)
+		{
+			size = element.widget.layout(element, constraints);
+		};
 	}
 	else if (element.auto_size)
 	{
@@ -1723,8 +1925,11 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 		element.local_drawings.clear();
 		if (&element.widget.paint)
 		{
-			Painter painter = { .element = element };
-			element.widget.paint(element, &painter);
+			self.@watching(element, WatchKind.PAINT)
+			{
+				Painter painter = { .element = element };
+				element.widget.paint(element, &painter);
+			};
 		}
 		element.dirty.paint = false;
 	}

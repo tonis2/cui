@@ -25,6 +25,21 @@ fn void typed(Ui* ui, String text) @local
 	ui.process_input({ .mouse = { 300, 5 }, .text = text }, 0.016f);
 }
 
+// What `on_change` reported, and how often — a bare OnChange carries no context
+// back, so the callback writes here.
+int changes @local;
+char[64] last_text @local;
+usz last_len @local;
+
+fn void note_change(Ui* ui, String text) @local
+{
+	changes++;
+	last_len = text.len < 64 ? text.len : 64;
+	foreach (usz i, char c : text[:last_len]) last_text[i] = c;
+}
+
+fn String reported() @local => (String)last_text[:last_len];
+
 // A focused field holding `text`, with the caret at the end: the click at x=300
 // both focuses it and walks the caret past the last boundary.
 fn TextField* focused_field(Ui* ui, Element** out_elem, String text) @local
@@ -247,4 +262,147 @@ fn void deleting_a_selection_leaves_nothing_selected() @test
 	test::@check(!field.has_selection());
 	test::eq((int)field.caret, 0);
 	test::eq((int)field.anchor, 0);
+}
+
+// A field that reports every edit, with the counters cleared and the text set
+// before the callback is attached — `set_text` is not an edit and must not fire.
+fn TextField* watched_field(Ui* ui, Element** out_elem, String text) @local
+{
+	changes = 0;
+	last_len = 0;
+
+	TextField* field = focused_field(ui, out_elem, text);
+	field.on_change = &note_change;
+	return field;
+}
+
+<*
+ Typing reports every character, with the text as it stands after each.
+
+ What a search box is built on: a field that only reported on Return would have
+ to be finished before anything narrowed.
+*>
+fn void typing_reports_every_edit() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* elem;
+	watched_field(ui, &elem, "");
+
+	typed(ui, "b");
+	test::eq(changes, 1);
+	test::@check(reported() == "b", "the callback was handed '%s'", reported());
+
+	typed(ui, "i");
+	typed(ui, "p");
+	test::eq(changes, 3);
+	test::@check(reported() == "bip", "the callback was handed '%s' rather than the whole field", reported());
+}
+
+<*
+ A deletion reports, and one that removed nothing does not.
+
+ Backspace at the start of a field consumes the key and changes no text. A held
+ key against an end it cannot pass would otherwise re-filter a search thirty
+ times a second over text that never moved.
+*>
+fn void deleting_reports_only_when_something_went() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* elem;
+	TextField* field = watched_field(ui, &elem, "ab");
+
+	hold(ui, { Key.BACKSPACE });
+	test::eq(changes, 1);
+	test::@check(reported() == "a");
+
+	hold(ui, { });
+	hold(ui, { Key.BACKSPACE });
+	test::eq(changes, 2);
+	test::@check(reported() == "");
+
+	// The field is empty and the caret is at 0: nothing left to take.
+	hold(ui, { });
+	hold(ui, { Key.BACKSPACE });
+	hold(ui, { });
+	hold(ui, { Key.DELETE });
+	test::eq(changes, 2);
+	test::eq((int)field.length(), 0);
+}
+
+<*
+ A selection typed over reports once, whatever it did to the length.
+
+ Replacing three characters with three is an edit the length cannot see, so a
+ callback fired on a length change alone would miss it and leave a search showing
+ results for text that is no longer in the box.
+*>
+fn void replacing_a_selection_reports_even_at_the_same_length() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* elem;
+	watched_field(ui, &elem, "abc");
+
+	hold(ui, { Key.LEFT_CTRL, Key.A });
+	hold(ui, { });
+	test::eq(changes, 0); // selecting is not editing
+
+	typed(ui, "xyz");
+	test::eq(changes, 1);
+	test::@check(reported() == "xyz", "the callback was handed '%s'", reported());
+}
+
+<*
+ `set_text` does not report.
+
+ That is the caller filling the field in, and telling it what it just did is how
+ an update loop starts — a callback that rescanned and reset the field would call
+ itself.
+*>
+fn void setting_the_text_is_not_an_edit() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* elem;
+	TextField* field = watched_field(ui, &elem, "abc");
+
+	field.set_text(elem, "something else");
+	test::eq(changes, 0);
+
+	// And a frame carrying nothing printable leaves it alone too.
+	typed(ui, "\r");
+	test::eq(changes, 0);
+}
+
+<*
+ A held key reports each repeat, because each repeat is an edit.
+
+ The repeat runs off the field's own clock rather than off key events, so it
+ reaches the buffer by a path a press does not — and a search that stopped
+ narrowing while a key was held would look stuck.
+*>
+fn void a_held_key_reports_each_repeat() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* elem;
+	TextField* field = watched_field(ui, &elem, "abcdefghij");
+
+	hold(ui, { Key.BACKSPACE });
+	test::eq(changes, 1);
+
+	hold(ui, { Key.BACKSPACE }, 0.3f); // inside the delay: no repeat, no report
+	test::eq(changes, 1);
+
+	hold(ui, { Key.BACKSPACE }, 0.2f); // past REPEAT_DELAY
+	test::@check(changes > 1, "the repeats deleted without reporting");
+	test::@check(reported().len == field.length(),
+		"the last report was %d characters and the field holds %d", reported().len, field.length());
 }

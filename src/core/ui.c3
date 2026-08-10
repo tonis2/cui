@@ -18,6 +18,9 @@
  - `invalidate` — every element whose hook read the named provided value
    (`Element.watch`) is invalidated in the phase it read it from. One tree walk
    plus whichever of the above the watchers asked for.
+ - `resize` — the root constraints changed, so the whole tree re-layouts and the
+   whole display list is re-emitted. The embedder's call, made when the window
+   moved; the most expensive of these and the rarest.
  - nothing — `flush()` returns immediately; the GPU redraws the retained
    display list without any upload.
 
@@ -1486,6 +1489,35 @@ fn Element* Ui.alloc_element(&self)
 *>
 fn void Ui.request_frame(&self)
 {
+	self.frame_requested = true;
+}
+
+<*
+ The window changed size: re-lay the whole tree out against the new root
+ constraints.
+
+ The embedder's call, not a widget's — `Ui.size` is what `flush` offers the root
+ and what `Ui.media` reports as the screen, so nothing below can decide it. The
+ reference renderer calls this from `frame()` whenever the surface's extent moves;
+ an embedder driving cui from its own loop calls it from whatever its window
+ system reports a resize through.
+
+ Unchanged is a no-op, so calling it every frame with the current size costs
+ nothing and is the simplest way to stay in step with a window.
+
+ Both passes are scheduled, not just layout: an element whose own size did not
+ change can still have moved, and the canvas holds absolute coordinates, so a
+ re-layout without a re-emit would leave those drawings where the old layout put
+ them.
+
+ @param size : `The new root constraints — the window's size in logical pixels.`
+*>
+fn void Ui.resize(&self, Vec2 size)
+{
+	if (vec2_eq(size, self.size)) return;
+	self.size = size;
+	self.layout_pending = true;
+	self.paint_pending = true;
 	self.frame_requested = true;
 }
 

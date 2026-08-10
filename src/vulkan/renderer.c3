@@ -111,7 +111,8 @@ struct Renderer {
     // widgets can read it through `Element.media`. Sampled once, at creation:
     // it is the density the swapchain was built for, and reporting a live one
     // the framebuffer had not been rebuilt to match would be a lie a widget
-    // could act on.
+    // could act on. A resize keeps it and derives the new `window_size` from it,
+    // so the two stay consistent with the surface the layer actually has.
     float pixel_ratio;
 
 	c3w::Window window;
@@ -152,6 +153,16 @@ struct Renderer {
     SwapchainKHR swapchain;
     ImageViewList swapchain_views;
     vk::ImageList swapchain_images;
+
+    // What the swapchain is rebuilt from when the window changes size. The image
+    // count is settled once, at creation, and reused: the per-image semaphores
+    // and command buffers are sized by it and are deliberately NOT rebuilt on a
+    // resize, because a semaphore a presentation engine may still be waiting on
+    // is not safe to destroy — `vkDeviceWaitIdle` covers the queues, not the
+    // presentation.
+    SurfaceFormatKHR surface_format;
+    ImageUsageFlags swapchain_usage;
+    uint swapchain_image_count;
 
     uint frame_index;   // frame-in-flight slot, cycles mod MAX_FRAMES_IN_FLIGHT
 
@@ -377,59 +388,31 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     renderer.extent = {.width = (uint)(window_size.x * scale), .height = (uint)(window_size.y * scale) };
     renderer.pixel_ratio = scale;
 
-    // Create swapchain
-    uint min_images = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
+    // Settled once and reused by every later rebuild — see the fields' own note
+    // for why the image count in particular must not move.
+    renderer.swapchain_image_count = capabilities.maxImageCount != 0 ? capabilities.maxImageCount : capabilities.minImageCount + 2;
+    renderer.surface_format = format;
 
     // TRANSFER_SRC lets request_screenshot copy a rendered image back to host
     // memory. Masked against what the surface actually supports, so a surface
     // that refuses it still gets a swapchain and only screenshots are lost.
-    ImageUsageFlags image_usage = IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    renderer.swapchain_usage = IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if ((ImageUsageFlagBits)capabilities.supportedUsageFlags & IMAGE_USAGE_TRANSFER_SRC_BIT) {
-        image_usage |= IMAGE_USAGE_TRANSFER_SRC_BIT;
+        renderer.swapchain_usage |= IMAGE_USAGE_TRANSFER_SRC_BIT;
         renderer.screenshot_supported = true;
     }
 
-    SwapchainCreateInfoKHR swapchain_info = vk::swapchainCreateInfoKHR()
-      .setMinImageCount(min_images)
-      .setImageUsage(image_usage)
-      .setImageSharingMode(SHARING_MODE_EXCLUSIVE)
-      .setCompositeAlpha(COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
-      .setPresentMode(PRESENT_MODE_FIFO_KHR)
-      .setPreTransform(capabilities.currentTransform)
-      .setImageColorSpace(format.colorSpace)
-      .setImageFormat(format.format)
-      .setSurface(renderer.surface)
-      .setImageArrayLayers(1)
-      .setImageExtent(renderer.extent);
-
-    renderer.swapchain = swapchain_info.build(device)!;
-    renderer.swapchain_images = renderer.swapchain.getImages(device, swapchain_info.minImageCount)!;
-
-    for (uint i = 0; i < swapchain_info.minImageCount; ++i) {
-        ImageView view = vk::imageViewCreateInfo()
-        .setViewType(IMAGE_VIEW_TYPE_2D)
-        .setFormat(format.format)
-        .setComponents({
-            .r = COMPONENT_SWIZZLE_IDENTITY,
-            .g = COMPONENT_SWIZZLE_IDENTITY,
-            .b = COMPONENT_SWIZZLE_IDENTITY,
-            .a = COMPONENT_SWIZZLE_IDENTITY,
-        })
-        .setSubresourceRange({
-            .aspectMask = IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-            .levelCount = 1,
-        })
-        .setImage(renderer.swapchain_images[i])
-        .build(device)!;
-        renderer.swapchain_views.push(view);
-    }
+    // Assigned before the swapchain is built rather than at the end of `new`,
+    // because `create_swapchain` reaches for them through `self`.
+    renderer.instance = instance;
+	renderer.physical_device = physical_device;
+	renderer.graphics_queue = graphics_queue;
+	renderer.device = device;
+    renderer.depth_format = depth_format;
 
     // Create command pool
     renderer.command_pool = device.createCommandPool(queue: graphics_queue.index)!;
-    renderer.command_buffers = device.createCommandBuffers(renderer.command_pool, swapchain_info.minImageCount)!;
+    renderer.command_buffers = device.createCommandBuffers(renderer.command_pool, renderer.swapchain_image_count)!;
 
     // Single allocator; per-buffer memory properties are chosen at new_buffer time.
     renderer.allocator = (vk::MemoryAllocator) {
@@ -439,8 +422,8 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         .flags = MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
     }.init()!;
 
-    renderer.depth_texture.createDepthTexture(&renderer.allocator, graphics_queue, { renderer.extent.width, renderer.extent.height }, depth_format, &renderer.depth_image)!;
-    renderer.depth_format = depth_format;
+    // After the allocator, which the depth image's memory comes from.
+    renderer.create_swapchain()!;
 
     // Everything about drawing the interface, in one object the host merely
     // owns. Built after the allocator and the depth texture because it borrows
@@ -455,19 +438,101 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
         renderer.wait_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
         renderer.frame_fences.push(vk::fenceCreateInfo().setFlags(FENCE_CREATE_SIGNALED_BIT).build(device))!;
     }
-    for (uint i = 0; i < swapchain_info.minImageCount; ++i) {
+    for (uint i = 0; i < renderer.swapchain_image_count; ++i) {
         renderer.signal_semaphores.push(vk::semaphoreCreateInfo().build(device))!;
     }
-
-    renderer.instance = instance;
-	renderer.physical_device = physical_device;
-	renderer.graphics_queue = graphics_queue;
-	renderer.device = device;
 
     renderer.window = window;
     renderer.frame_clock = clock::now();
 
 	return renderer;
+}
+
+<*
+ Build the swapchain, its image views and the depth attachment at `self.extent`.
+
+ Everything here is sized by that extent and by nothing else, which is what makes
+ a resize `destroy_swapchain` + this. The per-image semaphores and command
+ buffers are NOT built here: they are sized by `swapchain_image_count`, which is
+ settled once in `new`.
+
+ **The caller owns the ordering.** On a rebuild the device must be idle and the
+ previous swapchain already destroyed; at creation the allocator must exist, since
+ the depth image's memory comes from it.
+*>
+fn void? Renderer.create_swapchain(&self)
+{
+    // Re-queried rather than remembered: `currentTransform` is what the surface
+    // wants *now*, and on a display that can rotate it is not what it was when
+    // the first swapchain was built.
+    SurfaceCapabilitiesKHR capabilities = self.surface.deviceSurfaceCapabilities(self.physical_device)!;
+
+    SwapchainCreateInfoKHR swapchain_info = vk::swapchainCreateInfoKHR()
+      .setMinImageCount(self.swapchain_image_count)
+      .setImageUsage(self.swapchain_usage)
+      .setImageSharingMode(SHARING_MODE_EXCLUSIVE)
+      .setCompositeAlpha(COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+      .setPresentMode(PRESENT_MODE_FIFO_KHR)
+      .setPreTransform(capabilities.currentTransform)
+      .setImageColorSpace(self.surface_format.colorSpace)
+      .setImageFormat(self.surface_format.format)
+      .setSurface(self.surface)
+      .setImageArrayLayers(1)
+      .setImageExtent(self.extent);
+
+    self.swapchain = swapchain_info.build(self.device)!;
+
+    // Fetched into a scratch array rather than through `SwapchainKHR.getImages`,
+    // which allocates one and never frees it — a leak per rebuild, and a rebuild
+    // happens on every resize.
+    uint count = self.swapchain_image_count;
+    vk::Image[] images = mem::new_array(vk::Image, count);
+    defer mem::free(images);
+    vk::getSwapchainImagesKHR(self.device, self.swapchain, &count, images.ptr)!;
+
+    for (uint i = 0; i < count; ++i) {
+        self.swapchain_images.push(images[i]);
+        self.swapchain_views.push(vk::imageViewCreateInfo()
+        .setViewType(IMAGE_VIEW_TYPE_2D)
+        .setFormat(self.surface_format.format)
+        .setComponents({
+            .r = COMPONENT_SWIZZLE_IDENTITY,
+            .g = COMPONENT_SWIZZLE_IDENTITY,
+            .b = COMPONENT_SWIZZLE_IDENTITY,
+            .a = COMPONENT_SWIZZLE_IDENTITY,
+        })
+        .setSubresourceRange({
+            .aspectMask = IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+            .levelCount = 1,
+        })
+        .setImage(images[i])
+        .build(self.device)!);
+    }
+
+    self.depth_texture.createDepthTexture(&self.allocator, self.graphics_queue,
+        { self.extent.width, self.extent.height }, self.depth_format, &self.depth_image)!;
+}
+
+<*
+ Destroy everything `create_swapchain` made, leaving the lists empty and ready to
+ be filled again.
+
+ **The device must be idle.** Every object here can be in flight in a frame that
+ has been submitted, and none of them is reference-counted by the driver.
+*>
+fn void Renderer.destroy_swapchain(&self)
+{
+    self.depth_texture.free(self.device);
+    self.depth_image.free(self.device);
+
+    // Views read images the swapchain owns, so they go first.
+    foreach (view : self.swapchain_views) view.free(self.device);
+    self.swapchain_views.clear();
+    self.swapchain_images.clear();
+    self.swapchain.free(self.device);
 }
 
 
@@ -521,15 +586,12 @@ fn void Renderer.free(&self) {
     self.canvas.adopt(&self.allocator);
     self.canvas.free();
 
-    self.depth_texture.free(self.device);
-    self.depth_image.free(self.device);
+    // Before the allocator: the depth image inside is bound to memory that came
+    // out of it.
+    self.destroy_swapchain();
     self.allocator.free();
 
-    // Swapchain image views are created from images the swapchain owns, so they
-    // have to go before the swapchain does.
-    foreach (view : self.swapchain_views) view.free(self.device);
-    self.swapchain.free(self.device);
-
+    // `destroy_swapchain` empties the lists; this releases their storage.
     self.swapchain_images.free();
     self.swapchain_views.free();
 
@@ -633,6 +695,20 @@ fn bool? Renderer.frame(&self, Ui* ui)
     // the next sleep decision reflects only that activity.
     ui.frame_requested = false;
 
+    // Polled rather than driven by an event, because a resize is not one: on
+    // macOS the whole drag runs inside AppKit's own tracking loop and nothing
+    // here is reached until the mouse comes up, and c3w reports no resize event
+    // on any platform. Asking the surface is the one question that has the same
+    // answer everywhere.
+    //
+    // Ahead of the input dispatch and the flush, so the widgets are hit-tested
+    // and laid out against the size this frame will actually be drawn at.
+    Extent2D surface = self.surface_extent()!;
+    if (surface.width != self.extent.width || surface.height != self.extent.height)
+    {
+        self.rebuild_surface(ui)!;
+    }
+
     // Before anything can lay out or paint, so `Element.media` answers with this
     // window's density from the very first frame.
     ui.pixel_ratio = self.pixel_ratio;
@@ -688,7 +764,34 @@ fn bool? Renderer.frame(&self, Ui* ui)
     // texture count — none of which belong in the middle of a command buffer.
     self.canvas.upload(ui, self.window_size)!;
 
-    uint next_image = self.swapchain.getNextImage(self.device, wait_semaphore);
+    // Acquired by hand rather than through `SwapchainKHR.getNextImage`, which
+    // asserts on every result it does not recognise: a swapchain the window has
+    // outgrown reports itself here first, and that is a frame to skip and rebuild
+    // from, not a crash. The timeout is infinite for the same reason — the
+    // helper's is four seconds, and a timeout is not mapped to a fault, so it
+    // would come back as success holding an index nothing wrote.
+    uint next_image;
+    if (catch fault error = vk::acquireNextImageKHR(self.device, self.swapchain,
+        ulong::max, wait_semaphore, (Fence)null, &next_image))
+    {
+        if (error != vk::E_ERROR_OUT_OF_DATE_KHR) return error~;
+
+        // The upload above advanced the canvas slot for a frame that is not going
+        // to be submitted, so the rotation is now half a step out of phase with
+        // the fences: the next upload would write the copy the frame BEFORE this
+        // one is still reading, which is exactly the tear CANVAS_SLOTS exists to
+        // prevent. Draining here puts it right, and costs nothing on a path that
+        // only runs when the window has just changed size.
+        self.device.waitIdle();
+
+        // Nothing will be submitted this frame, and the fence was just reset —
+        // so the next pass through this slot would wait for a frame that never
+        // happened. An empty submit signals it and nothing else.
+        vk::queueSubmit(self.graphics_queue.handle, 0, null, frame_fence)!;
+
+        self.rebuild_surface(ui)!;
+        return true;
+    }
     Semaphore signal_semaphore = self.signal_semaphores[next_image];
 
     RenderingInfo rendering_info = vk::renderingInfo()
@@ -815,7 +918,17 @@ fn bool? Renderer.frame(&self, Ui* ui)
     .setSwapchains({ self.swapchain })
     .setImageIndices({ next_image });
 
-    vk::queuePresentKHR(self.graphics_queue.handle, &present_info)!;
+    // The other end the window's new size can arrive from: the image was drawn
+    // at the old one and is presented anyway — stretched by the compositor for
+    // this one frame — and the rebuild happens below, once the frame is finished
+    // with. Skipping the present instead would leave the acquired image
+    // unreturned.
+    bool stale = false;
+    if (catch fault error = vk::queuePresentKHR(self.graphics_queue.handle, &present_info))
+    {
+        if (error != vk::E_ERROR_OUT_OF_DATE_KHR) return error~;
+        stale = true;
+    }
 
     if (grabbing)
     {
@@ -830,7 +943,79 @@ fn bool? Renderer.frame(&self, Ui* ui)
     }
 
     self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
+
+    // Last, so the frame's own bookkeeping is complete before the device is
+    // idled and the swapchain replaced under it.
+    if (stale) self.rebuild_surface(ui)!;
     return true;
+}
+
+<*
+ The window's framebuffer size right now, in physical pixels.
+
+ Read off the surface rather than off the window, because it is the surface the
+ swapchain has to agree with and the two can disagree for a frame while a resize
+ settles.
+
+ A surface that declines to say — Wayland answers `0xFFFFFFFF`, meaning "whatever
+ the swapchain asks for" — gets the extent already in use, so the caller sees no
+ change and nothing is rebuilt. Resizing there needs the window's own size, which
+ c3w does not report.
+
+ @return `The surface's current extent, or the one in use where it has no answer.`
+*>
+fn Extent2D? Renderer.surface_extent(&self)
+{
+    SurfaceCapabilitiesKHR capabilities = self.surface.deviceSurfaceCapabilities(self.physical_device)!;
+    if (capabilities.currentExtent.width == uint::max) return self.extent;
+    return capabilities.currentExtent;
+}
+
+<*
+ Rebuild the swapchain for the window's current size and re-lay the interface out
+ in it.
+
+ The one path a resize takes, whether it was noticed by the poll at the top of
+ `frame()` or reported as `ERROR_OUT_OF_DATE_KHR` by the acquire or the present.
+ The device is idled first: every image and view about to be destroyed can be in
+ flight.
+
+ `pixel_ratio` is kept rather than re-sampled, and the logical size derived from
+ it, so `Ui.size` and the framebuffer stay two views of one number. A window
+ dragged onto a display of a different density therefore keeps the density it was
+ opened at — the layer's `contentsScale` is set once too, so that is the honest
+ answer rather than a stale one.
+
+ **Only callable between frames.** Nothing may be recorded or in flight against
+ the swapchain this replaces; `frame()`'s three call sites are all outside a
+ command buffer.
+
+ @param ui : `Re-laid out at the new logical size, and asked for the frame that redraws into the new images.`
+*>
+fn void? Renderer.rebuild_surface(&self, Ui* ui)
+{
+    Extent2D extent = self.surface_extent()!;
+
+    // Minimized, or on a space that is not showing: there is nothing to build a
+    // swapchain for, and asking for a frame would spin the loop on an acquire
+    // that keeps failing. The window system's next event is what brings it back.
+    if (extent.width == 0 || extent.height == 0) return;
+
+    self.device.waitIdle();
+    self.destroy_swapchain();
+
+    self.extent = extent;
+    self.window_size = {
+        (float)extent.width / self.pixel_ratio,
+        (float)extent.height / self.pixel_ratio,
+    };
+    self.create_swapchain()!;
+
+    // The Ui only re-lays out when the logical size actually moved, but the frame
+    // is asked for either way: the images are new and hold nothing, so something
+    // has to draw into them before anything is on screen.
+    ui.resize(self.window_size);
+    ui.request_frame();
 }
 
 <*

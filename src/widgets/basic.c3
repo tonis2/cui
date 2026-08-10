@@ -730,6 +730,167 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	}
 }
 
+// ---------------------------------------------------------------------------
+
+<*
+ A toggle callback, carrying the state the box is in **after** the click.
+
+     `fn void rig_toggled(Ui* ui, bool on) { ui.inherit(App)!!.with_rig = on; }`
+*>
+alias OnToggle = fn void(Ui* ui, bool checked);
+
+<*
+ How a Checkbox is drawn.
+
+ The MenuStyle convention: a zero `box` means "use DEFAULT_CHECKBOX_STYLE
+ wholesale", and a partly filled style is not merged field by field.
+*>
+struct CheckboxStyle
+{
+	Color color; // the square, unticked
+	Color hover_color; // ... under the pointer
+	Color checked_color; // ... ticked
+	Color mark; // the tick drawn inside it
+	Color text_color;
+	Vec4 border_radius;
+	FontId font; // 0 = the first loaded font
+	float text_size;
+	float box; // side of the square; 0 = the whole style defaults
+	float gap; // between the square and the label
+	float thickness; // of the tick's two strokes
+}
+
+const CheckboxStyle DEFAULT_CHECKBOX_STYLE = {
+	.color = { 0.20, 0.22, 0.28, 1.0 },
+	.hover_color = { 0.28, 0.31, 0.40, 1.0 },
+	.checked_color = { 0.95, 0.60, 0.20, 1.0 },
+	.mark = { 0.05, 0.06, 0.09, 1.0 },
+	.text_color = { 0.92, 0.93, 0.95, 1.0 },
+	.border_radius = { 4.0, 4.0, 4.0, 4.0 },
+	.text_size = 14.0,
+	.box = 16.0,
+	.gap = 8.0,
+	.thickness = 2.0,
+};
+
+fn CheckboxStyle CheckboxStyle.resolved(self)
+{
+	return self.box > 0 ? self : DEFAULT_CHECKBOX_STYLE;
+}
+
+<*
+ A tick box with its label beside it: the boolean sibling of Button.
+
+     `@node((Checkbox) { .label = "Export rig", .checked = true, .on_change = &rig_toggled });`
+
+ **The box flips itself and then says so.** `on_change` is told the new state
+ rather than asked for it, and the widget has already repainted by the time the
+ callback runs. That is what makes a tick respond to the click that made it,
+ without the caller having to rebuild the subtree around it — cui has no
+ mechanism that would do that on its own. A caller keeping the answer somewhere
+ of its own passes it back in as `checked` the next time the panel is built, and
+ that copy wins.
+
+ **Only the box and the label are clickable**, not the width they were offered:
+ the widget sizes itself to its own ink unless `size` says otherwise, so a tick
+ in a wide Column does not turn the empty half of the row into a target.
+*>
+struct Checkbox (Widget)
+{
+	String label; // borrowed; must outlive the element, as every widget's string must
+	bool checked;
+	OnToggle on_change; // optional; called after the flip, with the new state
+	CheckboxStyle style;
+	Vec2 size; // per axis: 0 = wrap the box and the label
+	bool hovered;
+	bool held;
+}
+
+fn Vec2 Checkbox.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	CheckboxStyle s = self.style.resolved();
+
+	Vec2 own = self.size;
+	if (own.x == 0.0f || own.y == 0.0f)
+	{
+		Vec2 text = self.label.len > 0
+			? elem.ui.text.measure(s.font, self.label, s.text_size)
+			: (Vec2){ 0, 0 };
+		if (own.x == 0.0f) own.x = s.box + (self.label.len > 0 ? s.gap + text.x : 0.0f);
+		if (own.y == 0.0f) own.y = math::max(s.box, text.y);
+	}
+	return constraints.constrain(own);
+}
+
+fn void Checkbox.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	CheckboxStyle s = self.style.resolved();
+
+	// Centred in whatever height the row ended up at, so a tick beside a taller
+	// label does not sit on its baseline.
+	float top = (elem.size.y - s.box) * 0.5f;
+
+	Color fill = s.color;
+	if (self.checked) { fill = s.checked_color; }
+	else if (self.hovered) { fill = s.hover_color; }
+	painter.rect({ 0, top }, { s.box, s.box }, { .color = fill, .border_radius = s.border_radius });
+
+	if (self.checked)
+	{
+		// Two strokes rather than a glyph: a tick is the one mark a widget cannot
+		// assume the loaded font has.
+		painter.line({ s.box * 0.24f, top + s.box * 0.52f }, { s.box * 0.44f, top + s.box * 0.72f },
+			s.thickness, s.mark);
+		painter.line({ s.box * 0.44f, top + s.box * 0.72f }, { s.box * 0.78f, top + s.box * 0.26f },
+			s.thickness, s.mark);
+	}
+
+	if (self.label.len == 0) return;
+	Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
+	painter.text({ s.box + s.gap, (elem.size.y - text.y) * 0.5f }, self.label, {
+		.font = s.font,
+		.size = s.text_size,
+		.color = s.text_color,
+	});
+}
+
+fn void Checkbox.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+	self.hovered = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
+	elem.request_paint();
+}
+
+<*
+ Flips on a left press released inside, the way Button fires.
+
+ @return `True for any left press or release: consuming the press captures the pointer, so a drag out and back still resolves.`
+*>
+fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	switch (event.kind)
+	{
+		case PRESS:
+			if (event.button != MouseButton.LEFT) return false;
+			self.held = true;
+			return true;
+		case RELEASE:
+			if (event.button != MouseButton.LEFT || !self.held) return false;
+			self.held = false;
+
+			bool inside = event.pos.x >= 0 && event.pos.y >= 0
+				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			if (!inside) return true;
+
+			self.checked = !self.checked;
+			elem.request_paint();
+			if (self.on_change) self.on_change(elem.ui, self.checked);
+			return true;
+		default:
+			return false;
+	}
+}
+
 <*
  A single line of SDF text, sized by its font metrics: width = the kerned
  advance of the string, height = ascent - descent. Load a font first with

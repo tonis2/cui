@@ -30,7 +30,11 @@ import image;
 import image::png;
 
 const MAX_FRAMES_IN_FLIGHT = 2;
-const APP_NAME = "UI EXAMPLE";
+
+// What the window is called when the host does not name itself. An application
+// passes its own through `new`'s `title` — this is only what the library's own
+// examples run under.
+const DEFAULT_TITLE = "cui";
 
 // The canvas pass rotates its host-visible buffers over CANVAS_SLOTS copies and
 // trusts the host to have waited for the frame that many submissions back before
@@ -187,10 +191,12 @@ struct Renderer {
  @param loop_mode : `Whether frame() redraws continuously or sleeps until input arrives.`
  @param clear_color : `RGBA the color attachment is cleared to each frame.`
  @param quit_on_escape : `Whether ESCAPE ends the frame loop. Clear it when the app binds ESCAPE itself — a 3D viewport usually wants it for cancel/deselect.`
+ @param title : `The window title — what the title bar, the task switcher and the dock show. Read once here; there is no setter, so a host with a document name in the title has to rebuild the window to change it.`
  @return `The renderer, ready for frame(). Set its scene/scene_ctx fields to draw under the UI.`
 *>
 fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopMode loop_mode = CONTINUOUS,
-                 float[4] clear_color = {0.0, 0.0, 0.0, 1.0}, bool quit_on_escape = true) {
+                 float[4] clear_color = {0.0, 0.0, 0.0, 1.0}, bool quit_on_escape = true,
+                 String title = DEFAULT_TITLE) {
 
 	ZStringList validations;
 	ZStringList extensions;
@@ -214,7 +220,7 @@ fn Renderer? new(Vec2 window_size = {800, 600}, bool enable_debug = false, LoopM
     // Create the window first; the Vulkan surface is created from it.
     c3w::Window window = c3w::new(
         params: { .x = 0, .y = 0, .width = (int)window_size.x, .height = (int)window_size.y },
-        name: APP_NAME
+        name: title
     )!;
 
     // Bind the Vulkan loader before anything asks Vulkan a question: every

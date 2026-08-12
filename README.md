@@ -55,12 +55,6 @@ Then point `project.json` at both:
 `provides`, not by the file name. c3c reads a `.c3l` as either a zip or a
 directory, so the downloaded files work as-is.
 
-**There is no Vulkan SDK to install.** No `linked-libraries`, no
-`linker-search-paths`: nothing links against Vulkan, every command is resolved
-at runtime, on every platform. On macOS `vulkan.c3l` also carries its own loader
-and driver, so an app runs with nothing installed at all. On Linux and Windows
-the machine's own loader and GPU driver are used.
-
 ## Example
 
 `@canvas(ui)` opens a build scope and installs the body's top-level node as the

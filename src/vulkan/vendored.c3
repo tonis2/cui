@@ -28,14 +28,11 @@ module cui::vulkan;
 import std::os::env;
 import vk;
 
-<*
- The opt-out, for using a Vulkan of your own instead of the one vulkan.c3l
- ships. Build with `-D SYSTEM_VULKAN` (or add the feature to project.json) and
- cui stops looking for bundled candidates: `vk::init()` falls back to the
- platform default loader names, and the installed loader finds an installed
- driver exactly as it normally would.
-*>
-const bool SYSTEM_VULKAN @private = $feature(SYSTEM_VULKAN);
+// The SYSTEM_VULKAN feature is the opt-out, for using a Vulkan of your own
+// instead of the one vulkan.c3l ships. Build with `-D SYSTEM_VULKAN` (or add
+// the feature to project.json) and cui stops looking for bundled candidates:
+// `vk::init()` falls back to the platform default loader names, and the
+// installed loader finds an installed driver exactly as it normally would.
 
 <*
  Bind the Vulkan loader. A `$CUI_VULKAN_LOADER` override comes first; without
@@ -44,7 +41,7 @@ const bool SYSTEM_VULKAN @private = $feature(SYSTEM_VULKAN);
 
  @return? vk::LOADER_NOT_FOUND : `No loader anywhere — neither bundled nor installed.`
 *>
-fn void? init_loader() @if(env::DARWIN && !SYSTEM_VULKAN)
+fn void? init_loader() @feat(DARWIN & !SYSTEM_VULKAN)
 {
 	String[1] candidates;
 	usz count = 0;
@@ -61,7 +58,7 @@ fn void? init_loader() @if(env::DARWIN && !SYSTEM_VULKAN)
 
  @return? vk::LOADER_NOT_FOUND : `No system loader installed.`
 *>
-fn void? init_loader() @if(!env::DARWIN || SYSTEM_VULKAN)
+fn void? init_loader() @feat(!DARWIN | SYSTEM_VULKAN)
 {
 	return vk::init();
 }
@@ -75,7 +72,7 @@ fn void? init_loader() @if(!env::DARWIN || SYSTEM_VULKAN)
 
  @return? vk::DRIVER_NOT_LOADED : `No bundled driver — fall back to the loader's own discovery.`
 *>
-fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @if(env::DARWIN && !SYSTEM_VULKAN)
+fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @feat(DARWIN & !SYSTEM_VULKAN)
 {
 	if (try override = env::tget_var("CUI_VULKAN_DRIVER"))
 	{
@@ -91,7 +88,7 @@ fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @if(env::DARWIN &&
 
  @return? vk::DRIVER_NOT_LOADED : `Always — there is no bundled driver in this build.`
 *>
-fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @if(!env::DARWIN || SYSTEM_VULKAN)
+fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @feat(!DARWIN | SYSTEM_VULKAN)
 {
 	return vk::DRIVER_NOT_LOADED~;
 }

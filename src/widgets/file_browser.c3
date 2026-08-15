@@ -24,9 +24,9 @@ import std::io;
 import std::io::path;
 import std::math::vector;
 import std::core::string;
-import std::core::dstring;
+
 import std::collections::list;
-import std::core::mem::allocator;
+
 
 <*
  Called with an absolute path when a row is activated (a second click on the

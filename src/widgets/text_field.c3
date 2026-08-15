@@ -28,7 +28,7 @@ module cui::widgets;
 
 import cui;
 import std::math::vector;
-import std::core::dstring;
+
 
 <*
  Called when the field is submitted with Return.

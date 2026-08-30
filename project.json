@@ -3,8 +3,6 @@
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "lib" ],
-
-
   "dependencies": ["vk", "c3w", "image", "font"],
   "features": [],
   "version": "0.1.0",

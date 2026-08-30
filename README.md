@@ -23,37 +23,38 @@ instanced draw call**.
 
 ## Install
 
-CUI needs **two** libraries, and they are downloaded separately. The Vulkan
-bindings are **not** part of this repository and are **not** bundled inside
-`cui.c3l` — you always fetch them yourself:
+CUI is its own sources and nothing else. It **vendors no dependencies**: the
+windowing, image, font and Vulkan libraries are separate projects, and you
+install them yourself next to `cui.c3l`. That is what keeps an engine that
+already uses `c3w` or `image` from compiling a second, colliding copy of them.
+
+Run this in **your own project**, not in a clone of cui:
 
 ```sh
 mkdir -p lib
 
-# 1. cui itself — windowing, image and font libraries are vendored inside
+# cui itself
 curl -fsSL -o lib/cui.c3l \
   https://github.com/tonis2/cui/releases/latest/download/cui.c3l
 
-# 2. Vulkan bindings — a separate project, rolling `latest`
+
+# vk is the exception, and the only one that has to come from a release: the
+# artifact carries the prebuilt macOS loader + driver dylibs, which are not in
+# the repo. It dlopens them relative to its own sources at runtime.
 curl -fsSL -o lib/vulkan.c3l \
   https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l
 ```
 
-Then point `project.json` at both:
 
 ```json
 {
   "dependency-search-paths": [ "lib" ],
-  "dependencies": [ "cui", "vk" ],
+  "dependencies": [ "cui", "vk", "c3w", "image", "font" ],
   "targets": {
     "app": { "type": "executable" }
   }
 }
 ```
-
-`vk` is what `vulkan.c3l` provides — c3c resolves a dependency by the manifest's
-`provides`, not by the file name. c3c reads a `.c3l` as either a zip or a
-directory, so the downloaded files work as-is.
 
 ## Example
 
@@ -134,8 +135,10 @@ draws a `Canvas` without `src/vulkan`.
 ## Working on cui itself
 
 Clone with `--recurse-submodules` — window, image and font live in `lib/` as
-submodules. `vk` is not a submodule, so download it exactly like a consumer
-does:
+submodules **for building cui itself**. They are not part of the library: a
+release ships `manifest.json` and `src/` only, and `project.json` (which points
+at `lib/`) is left out of it. `vk` is not a submodule, so download it exactly
+like a consumer does:
 
 ```sh
 curl -fsSL -o lib/vulkan.c3l \

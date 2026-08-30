@@ -12,9 +12,19 @@ on:
 
 env:
   C3C_VERSION: v0.8.2
-  # The Vulkan bindings a consumer installs next to cui.c3l. Vulkan.c3 publishes
-  # a rolling "latest" release; it carries the macOS loader + driver dylibs and
-  # finds them itself, which is why cui.c3l ships neither.
+  # The four libraries a consumer installs next to cui.c3l -- cui names them in
+  # manifest.json "dependencies" and vendors none of them.
+  #
+  # window, image and font are plain source repos, each already a .c3l at its
+  # root, and a consumer adds them as submodules. CI has nothing to add a
+  # submodule to, so it clones -- same tree, and c3c reads a .c3l directory just
+  # as happily as a zip.
+  WINDOW_C3_REPO: https://github.com/tonis2/Window.c3.git
+  IMAGE_C3_REPO: https://github.com/tonis2/image.c3.git
+  FONT_C3_REPO: https://github.com/tonis2/font.c3.git
+  # vk is the exception: its release carries the prebuilt macOS loader + driver
+  # dylibs, which are not in the repo, so a clone would not do. It finds them
+  # itself, which is why cui.c3l ships neither.
   VULKAN_C3L_URL: https://github.com/tonis2/Vulkan.c3/releases/download/latest/vulkan.c3l
 
 jobs:
@@ -34,60 +44,45 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.tag.outputs.name }}
-          submodules: recursive
 
       - name: Build cui.c3l
         # Nothing is compiled or downloaded here: a release is just a zip of the
-        # files that were tested as-is. The checkout above already installed
-        # c3w, image and font as submodules, so the artifact is the working tree
-        # with the noise stripped out -- no staging copy, and no reshaping.
+        # files that were tested as-is -- manifest.json plus src/, and that is
+        # all. cui vendors nothing.
         #
-        # The zip therefore has the SAME layout as a git clone, which is the
-        # point: manifest.json names lib/window.c3l/... and lib/image.c3l/...,
-        # and those paths resolve identically whether cui is consumed as a
-        # downloaded zip or as a source submodule. (c3c reads a .c3l as either.)
-        # An earlier layout flattened them into deps/, and a clone could not
-        # build against its own manifest.
+        # c3w, image, font and vk are named in manifest.json "dependencies" and
+        # installed by the consumer next to cui.c3l. They used to be submodules
+        # zipped in under lib/, and the manifest compiled them from there. That
+        # meant a project already using c3w or image -- an engine, say --
+        # compiled those modules twice and collided, and every consumer was
+        # pinned to whichever commit cui happened to hold.
         #
         # One artifact serves every platform, and every byte of it is source:
         # nothing links against Vulkan -- the vk bindings dlopen the loader at
         # runtime. The macOS loader + driver dylibs are vulkan.c3l's to ship. It
         # locates them relative to its own sources (vk::c3l_root, from the
         # compile-time $$FILEPATH), so a copy inside cui.c3l would sit somewhere
-        # that macro never looks; a consumer installs vulkan.c3l alongside this
-        # artifact instead. That is also why vk is not a submodule: nothing in
-        # this job should be able to sweep it in.
+        # that macro never looks.
         run: |
           set -e
-          # c3w, image and font are vendored in -- they are pure source with
-          # nothing to find at runtime. vk is not: see above.
-          #
-          # Excluded: git metadata, each submodule's own project.json (a
-          # consumer builds through manifest.json; a stray project.json in the
-          # tree is confusing at best), and their test/docs/wasm trees, which are
-          # 4x the artifact in image fixtures alone -- 712K vs 168K.
-          # lib/vulkan.c3l is excluded rather than merely asserted against: CI
-          # never has it, but a developer running this same command locally does
-          # (building cui itself needs it there), and 3 MB of loader + driver is
-          # exactly what must not ship. The guard below stays as the assertion.
-          zip -qr cui.c3l manifest.json LICENSE README.md src lib \
-            -x '*.git*' '*/project.json' '*/test/*' '*/docs/*' '*/wasm/*' 'lib/vulkan.c3l/*'
+          # project.json is excluded on purpose: it is how cui builds *itself*
+          # (its test targets, against the lib/ submodules). A consumer builds
+          # through manifest.json, and a stray project.json in the tree is
+          # confusing at best.
+          zip -qr cui.c3l manifest.json LICENSE README.md src -x '*.git*'
 
-          # A vendored copy of either would be the bug this layout removes: the
-          # bindings would compile from a path with no macos-aarch64/ beside it,
-          # and the dylibs would be duplicated where nothing opens them. vk is no
-          # longer a submodule, so this guard now catches a stray local download
-          # rather than a packaging mistake -- keep it either way.
-          if unzip -l cui.c3l | grep -iE 'vulkan\.c3l/|\.dylib'; then
-            echo "cui.c3l must not carry the vk bindings or the Vulkan dylibs"; exit 1
+          # No dependency may ride along -- vendoring is the bug this layout
+          # removes, and 3 MB of Vulkan loader + driver is the worst case of it.
+          # A developer running this same command locally has lib/ populated;
+          # CI does not. The guard covers both.
+          if unzip -l cui.c3l | grep -iE ' lib/|\.dylib|\.a$|\.lib$'; then
+            echo "cui.c3l must carry only its own sources"; exit 1
           fi
 
           # The manifest is only as good as the paths behind it: a missing source
           # tree here is a broken release that would otherwise reach the verify
           # job as a confusing compile error.
-          for p in manifest.json src/shaders/shader.spv lib/window.c3l/main.c3 \
-                   lib/window.c3l/linux lib/window.c3l/darwin lib/window.c3l/win32 \
-                   lib/image.c3l/src lib/font.c3l/src; do
+          for p in manifest.json src/shaders/shader.spv; do
             unzip -l cui.c3l | grep -q " $p" || { echo "missing from artifact: $p"; exit 1; }
           done
 
@@ -118,9 +113,17 @@ jobs:
           name: cui.c3l
           path: consumer/lib
 
-      - name: Fetch vulkan.c3l
+      - name: Fetch the dependencies cui names
+        # This is the install a README reader performs, run verbatim: if cui's
+        # manifest names a library the consumer cannot get, the release fails
+        # here rather than in someone's project.
         shell: bash
-        run: curl -fsSL "$VULKAN_C3L_URL" -o consumer/lib/vulkan.c3l
+        run: |
+          set -e
+          git clone --depth 1 "$WINDOW_C3_REPO" consumer/lib/window.c3l
+          git clone --depth 1 "$IMAGE_C3_REPO"  consumer/lib/image.c3l
+          git clone --depth 1 "$FONT_C3_REPO"   consumer/lib/font.c3l
+          curl -fsSL "$VULKAN_C3L_URL" -o consumer/lib/vulkan.c3l
 
       - name: Install C3
         shell: bash
@@ -133,18 +136,25 @@ jobs:
           chmod +x c3/c3c || true
           echo "$PWD/c3" >> "$GITHUB_PATH"
 
-      - name: Consumer project depending on cui + vk
+      - name: Consumer project depending on cui and what cui depends on
         shell: bash
         run: |
           mkdir -p consumer/src
-          # "vk" is what vulkan.c3l provides -- c3c resolves a dependency by the
-          # manifest's "provides", not by the file name.
+          # A dependency is resolved by the manifest's "provides", not by the
+          # file name: vulkan.c3l provides "vk" and window.c3l provides "c3w".
+          #
+          # All five are listed even though cui's manifest already names four of
+          # them, because c3c 0.8 does not pull a transitive dependency in on its
+          # own -- it only checks that a library the manifest names is among the
+          # ones the project listed. Drop "font" here and the build stops with
+          # "Required library 'font' could not be found". Keep this list and the
+          # README's in step.
           cat > consumer/project.json <<'EOF'
           {
             "langrev": "1",
             "warnings": [ "no-unused" ],
             "dependency-search-paths": [ "lib" ],
-            "dependencies": [ "cui", "vk" ],
+            "dependencies": [ "cui", "vk", "c3w", "image", "font" ],
             "sources": [ "src/**" ],
             "output": "build",
             "targets": { "smoke": { "type": "executable" } }

@@ -11,7 +11,7 @@ on:
         required: true
 
 env:
-  C3C_VERSION: v0.8.2
+  C3C_VERSION: v0.8.3
   # The four libraries a consumer installs next to cui.c3l -- cui names them in
   # manifest.json "dependencies" and vendors none of them.
   #
@@ -237,19 +237,6 @@ jobs:
         # compile src/vulkan/*.c3, so install it the same way a consumer does.
         # c3c reads a .c3l as a zip, so the downloaded file needs no unpacking.
         run: curl -fsSL "$VULKAN_C3L_URL" -o lib/vulkan.c3l
-
-      - name: Generate API docs
-        run: |
-          # docgen always writes ./docs.html, ignoring -o. Path mode ignores
-          # project.json dependencies, so the libs are passed explicitly --
-          # without them src/vulkan/renderer.c3 fails to compile and no page is
-          # written at all. docgen then embeds EVERY compiled module: vk alone is
-          # 5.3 MB of a 7 MB page, std another 2 MB, cui's own modules 120 KB.
-          # There is no flag to exclude them, so trim the embedded JSON after.
-          c3c docgen --libdir lib --lib vk --lib c3w --lib image --lib font src
-          python3 scripts/trim_docs.py docs.html cui
-          # Park it outside the worktree: the next step switches branches.
-          cp docs.html "$RUNNER_TEMP/index.html"
 
       - name: Publish docs to main
         # The tag checkout is a detached HEAD, so the docs commit is made on main

@@ -8,7 +8,9 @@
  without clipping to the parent (see Ui.hit_test_element), so an open menu's
  subtree simply contains elements bigger than the bar — the panel below it, and
  a window-sized catcher that turns any click elsewhere into "close". No overlay
- layer, no second tree.
+ layer, no second tree. What decides that it is drawn OVER what it overlaps is
+ `Element.raised`, set while a list is open: the subtree paints and hit-tests
+ after its siblings and nothing else moves.
 
  Data (Menu, MenuItem) is borrowed, like Label.text: the arrays must outlive the
  widget, and module-level constants are the intended shape.
@@ -231,6 +233,10 @@ fn Element* MenuBar.build(&self, Element* elem) @dynamic
 {
 	MenuStyle s = self.style.resolved();
 	Ui* ui = elem.ui;
+
+	// Over whatever the bar sits above while a dropdown is down — see
+	// `Element.raised`.
+	elem.raised = self.open != 0;
 
 	if (self.open == 0 || self.open > self.menus.len)
 	{
@@ -604,9 +610,11 @@ fn void MenuSeparator.paint(&self, Element* elem, Painter* painter) @dynamic
  simply hung below the head: near the bottom edge it opens upwards instead. See
  `Media.drop`.
 
- While open, the built subtree paints in this element's slot in the paint order:
- siblings painted later can still cover the popup. Keep an open Select out from
- under overlapping later siblings — in a plain form layout there are none.
+ While open the element sets `Element.raised`, so the popup paints and
+ hit-tests after everything beside it — the field under a dropdown in the same
+ form is covered by it rather than the other way round. The raise is against its
+ SIBLINGS: a subtree mounted after this one, a dialog over the form, is still on
+ top, which is the order an embedder wrote.
 *>
 struct Select (Widget)
 {
@@ -636,6 +644,11 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 	float w = self.head_width(ui, s);
 	usz pick = self.selected < self.options.len ? self.selected : self.options.len - 1;
 	String current = self.options.len > 0 ? self.options[pick] : "";
+
+	// Over the fields beside it while the list is down, and back in its own slot
+	// when it is not. Here rather than in `layout` because this is the method
+	// that runs when `open` changes.
+	elem.raised = self.open;
 
 	if (!self.open)
 	{

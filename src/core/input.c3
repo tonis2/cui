@@ -487,8 +487,18 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 			return null;
 		}
 	}
+	// Raised children first, because the search runs in reverse PAINT order and
+	// a raise is a change to the paint order — an open dropdown has to take the
+	// click that lands on the field it is covering.
 	foreach_r (child : element.children)
 	{
+		if (!child.raised) continue;
+		Element* hit = self.hit_test_element(child, point);
+		if (hit) return hit;
+	}
+	foreach_r (child : element.children)
+	{
+		if (child.raised) continue;
 		Element* hit = self.hit_test_element(child, point);
 		if (hit) return hit;
 	}

@@ -410,6 +410,19 @@ struct Element
 	// element that handles nothing and must block everything.
 	bool ignores_pointer;
 
+	// Paints — and is hit-tested — after its siblings, whatever order it was
+	// built in. An open dropdown is the whole reason: a popup is a child of the
+	// widget that owns it, so without this it lands in that widget's slot in the
+	// paint order and the fields BELOW it in the same form cover it.
+	//
+	// A stacking context per parent rather than one layer over the window: a
+	// raise lifts a subtree above the ones beside it and never above a whole
+	// floor of the interface mounted after it, so an embedder that builds its
+	// layers out of siblings — a dialog over a HUD — keeps the order it wrote.
+	// Set from `build()` or `layout()`, like `ignores_pointer`, and cleared for
+	// free by `release`.
+	bool raised;
+
 	// Paint cache, in element-local coordinates. Emitting shifts copies by the
 	// absolute origin, so a moved-but-clean element never re-paints.
 	List{Drawing} local_drawings;
@@ -2002,7 +2015,21 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 	}
 	element.drawing_count = self.canvas.drawings.len() - element.first_drawing;
 
-	foreach (child : element.children) self.emit(child, absolute, slot, clip);
+	// Two passes only when there is something to raise: one bool per child on
+	// the common path, which is what this being in the emit walk costs.
+	bool raised;
+	foreach (child : element.children)
+	{
+		if (child.raised) { raised = true; continue; }
+		self.emit(child, absolute, slot, clip);
+	}
+	if (raised)
+	{
+		foreach (child : element.children)
+		{
+			if (child.raised) self.emit(child, absolute, slot, clip);
+		}
+	}
 }
 
 <*

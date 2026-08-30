@@ -1483,7 +1483,17 @@ fn void Ui.release(&self, Element* element)
 *>
 fn Element* Ui.alloc_element(&self)
 {
-	if (try element = self.free_elements.pop()) return element;
+	if (try element = self.free_elements.pop())
+	{
+		// Re-armed, not left as `release` zeroed them: a zeroed List takes the
+		// TEMP allocator on its first push, so a recycled element would hold its
+		// children in memory a host's @pool() takes back — and the dangling
+		// child list only shows up on the third rebuild, when the free list
+		// first has anything in it.
+		element.children.init(mem, 0);
+		element.local_drawings.init(mem, 0);
+		return element;
+	}
 	Element* element = mem::new(Element);
 	// The heap by name, for `new_ui`'s reason: an element built inside a host's
 	// `@pool()` must not hold its children in memory the pool takes back.

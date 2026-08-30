@@ -151,6 +151,12 @@ fn CanvasPass? new_canvas_pass(Device device, vk::MemoryAllocator* allocator, vk
         .uniform_size = window_size,
     };
 
+    // The heap by name: both lists live as long as the pass, and a zeroed List
+    // takes the temp allocator on its first push — which in a host that renders
+    // inside a `@pool()` is memory the frame gives back. See `cui::new_ui`.
+    pass.textures.init(mem, 0);
+    pass.texture_images.init(mem, 0);
+
     // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
     // never empty; user images get their handles from load_image/load_pixels.
     char[4] white_pixel = { 255, 255, 255, 255 };

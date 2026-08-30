@@ -103,6 +103,12 @@ struct Canvas {
 *>
 fn void Canvas.init(&self)
 {
+    // The heap by name — a zeroed List takes the temp allocator on its first
+    // push, and the display list has to survive whatever the host's frame does
+    // with the temp arena. See `new_ui`.
+    self.drawings.init(mem, 0);
+    self.transforms.init(mem, 0);
+    self.clips.init(mem, 0);
     self.transforms.push(matrix::IDENTITY4);
     self.clips.push(NO_CLIP_ENTRY);
     self.drawings_dirty = true;

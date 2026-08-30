@@ -85,6 +85,9 @@ fn void TextSystem.init(&self)
 	self.atlas = alloc::new_array(mem, char, (sz)ATLAS_SIZE * ATLAS_SIZE);
 	self.atlas_width = ATLAS_SIZE;
 	self.atlas_height = ATLAS_SIZE;
+	// Beside `glyphs`, and for the same reason: a zeroed List takes the temp
+	// allocator on its first push, and a loaded font outlives every temp scope.
+	self.fonts.init(mem, 0);
 	self.glyphs.init(mem);
 }
 

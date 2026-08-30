@@ -522,6 +522,18 @@ fn Ui* new_ui(Vec2 size)
 	// pixel per logical pixel" is the right answer for an embedder that never
 	// says otherwise.
 	ui.pixel_ratio = 1.0;
+	// Every list on a Ui outlives whatever temp scope the embedder happens to
+	// have open, and a zeroed List takes the TEMP allocator on its first push —
+	// so a host that builds a tree inside a `@pool()` would find its elements
+	// pointing into memory the pool reclaimed. Named here instead. `init(mem, 0)`
+	// sets the allocator and allocates nothing, so the empty case still costs
+	// nothing.
+	ui.held_keys.init(mem, 0);
+	ui.free_elements.init(mem, 0);
+	ui.all_elements.init(mem, 0);
+	ui.free_transform_slots.init(mem, 0);
+	ui.build_stack.init(mem, 0);
+	ui.context.init(mem, 0);
 	ui.canvas.init();
 	ui.text.init();
 	return ui;
@@ -1473,6 +1485,10 @@ fn Element* Ui.alloc_element(&self)
 {
 	if (try element = self.free_elements.pop()) return element;
 	Element* element = mem::new(Element);
+	// The heap by name, for `new_ui`'s reason: an element built inside a host's
+	// `@pool()` must not hold its children in memory the pool takes back.
+	element.children.init(mem, 0);
+	element.local_drawings.init(mem, 0);
 	self.all_elements.push(element);
 	return element;
 }

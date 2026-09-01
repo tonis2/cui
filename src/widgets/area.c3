@@ -11,6 +11,11 @@
  `ui.inherit`, like every other callback here), because the built subtree is
  released wholesale on every structural change.
 
+ A view may instead hand over an element it keeps — `AreaView.content`, see
+ `borrow_content` — and then nothing is released: the subtree is detached on the
+ way out and attached again on the way back, state and all. That is the path for
+ a caller outside C3 holding a tree it patches rather than rebuilds.
+
  Structural changes all go through the context menu: a right press on a pane's
  content (anything deeper that wants the right button just consumes it first)
  offers the splits and close, one on a divider offers merging the two sides.
@@ -94,12 +99,60 @@ fn AreaStyle AreaStyle.resolved(self)
 alias ViewBuilder = fn Element*(Ui* ui);
 
 <*
- One entry in the view registry: the tab label and the builder behind it.
+ Hands a widget an element the caller built, owns and keeps — the alternative to
+ a `ViewBuilder` for content that already exists.
+
+ A builder is a function cui calls and a subtree cui frees, which is the wrong
+ shape for a caller that is holding the subtree already and means to go on
+ holding it: a scripting binding that describes its interface once and patches
+ it in place, the case this exists for. Such a caller cannot hand a builder
+ anything (a bare function pointer closes over nothing) and cannot survive
+ cui freeing what it handed over. So the widgets that take a builder —
+ `Dialog.content`, `AreaView.content` — take an optional element beside it, and
+ route it through here.
+
+ **Borrowed means borrowed.** `Element.borrowed` is what makes the release of
+ the surrounding subtree cut this element loose instead of recycling it: closing
+ the dialog, switching the tab, splitting the pane all detach it whole, with its
+ widgets, their state and their paint cache intact, and the next open or the next
+ switch back attaches the very same element again. cui never frees it; the owner
+ does, with `Ui.release` on the element itself, once nothing is showing it.
+
+ An element has one parent, so content that is already hanging somewhere is not
+ taken a second time — two panes offering one borrowed view would otherwise put
+ the same element in two child lists and place it wherever the later layout put
+ it. The second asks and gets an empty box instead, until whoever holds it lets
+ go.
+
+ @param ui : `The Ui the empty box is built from, when there is one to build.`
+ @param content : `The borrowed element.`
+ @require content != null : `borrow_content is the path for content that exists — check the field first.`
+ @return `What to put in the subtree: the borrowed element, or an empty Stack when it is spoken for.`
+*>
+fn Element* borrow_content(Ui* ui, Element* content)
+{
+	if (content.parent) return ui.@node((Stack) { });
+	content.borrowed = true;
+	return content;
+}
+
+<*
+ One entry in the view registry: the tab label and what is behind it.
 *>
 struct AreaView
 {
 	String name; // borrowed; must outlive the widget
-	ViewBuilder build;
+
+	ViewBuilder build; // builds the content afresh on every switch to this tab
+
+	<*
+	 Shown instead of `build` when it is set: an element the caller keeps. A tab
+	 switch away from this view detaches it rather than releasing it, and
+	 switching back attaches the same element again — so per-view state written
+	 into the subtree survives, which is the one thing a built view cannot do.
+	 See `borrow_content`, including what happens when two panes offer it at once.
+	*>
+	Element* content;
 }
 
 <*
@@ -425,7 +478,8 @@ fn Element* AreaPane.build(&self, Element* elem) @dynamic
 			.node = self.node,
 			.pane = elem,
 		});
-		Element* content = self.areas.views[self.node.active].build(ui);
+		AreaView* view = &self.areas.views[self.node.active];
+		Element* content = view.content ? borrow_content(ui, view.content) : view.build(ui);
 		return ui.@node((Column) { }, strip, content);
 	}
 

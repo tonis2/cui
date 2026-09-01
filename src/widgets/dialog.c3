@@ -16,6 +16,11 @@
  remember across a close belongs on the app (reached with `ui.inherit`) — the
  composite rule from build.md.
 
+ Or it is an element the caller keeps: `Dialog.content` (see `borrow_content`)
+ is used instead of the builder and is never released — closing detaches it,
+ opening attaches the same one back, and everything the subtree remembers comes
+ back with it.
+
  Data is borrowed like everywhere else here: the title string and the style must
  outlive the widget.
 *>
@@ -153,6 +158,15 @@ struct Dialog (Widget)
 	*>
 	any ctx;
 
+	<*
+	 Shown instead of either builder when it is set: an element the caller built
+	 and keeps. Closing the dialog detaches this element rather than releasing
+	 it, and re-opening attaches the same one — so a panel whose content must
+	 remember something across a close can simply remember it, instead of parking
+	 it on the app. See `borrow_content`.
+	*>
+	Element* content;
+
 	DialogStyle style;
 	bool open;
 	bool modal; // dim and block everything behind it
@@ -168,7 +182,7 @@ struct Dialog (Widget)
  at all while closed.
 
  @param elem : `The element this widget is attached to.`
- @require self.body != null || self.body_ctx != null : `A Dialog needs a body builder — the panel is chrome around content.`
+ @require self.content != null || self.body != null || self.body_ctx != null : `A Dialog needs content or a body builder — the panel is chrome around content.`
  @return `The panel subtree, or a childless Stack that layout sizes to zero.`
 *>
 fn Element* Dialog.build(&self, Element* elem) @dynamic
@@ -187,13 +201,22 @@ fn Element* Dialog.build(&self, Element* elem) @dynamic
 	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x
 		+ s.pad_x + DIALOG_CLOSE_SIZE;
 
-	Element* content = self.body_ctx != null ? self.body_ctx(ui, self.ctx) : self.body(ui);
+	// Borrowed content wins over both builders: an element that already exists is
+	// the answer to what this panel holds, and building a second one beside it
+	// would only be something to throw away.
+	Element* inner;
+	switch
+	{
+		case self.content != null: inner = borrow_content(ui, self.content);
+		case self.body_ctx != null: inner = self.body_ctx(ui, self.ctx);
+		default: inner = self.body(ui);
+	}
 
 	Element* close = ui.@node((DialogCloseButton) { .style = s, .host = elem })
 		.with_id(DIALOG_CLOSE_ID);
 	Element* bar = ui.@node((DialogTitleBar) { .title = self.title, .style = s, .host = elem }, close);
 	return ui.@node((DialogFrame) { .style = s, .min_width = math::max(s.min_width, head) },
-		bar, content);
+		bar, inner);
 }
 
 <*

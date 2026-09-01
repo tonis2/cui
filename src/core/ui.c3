@@ -451,6 +451,22 @@ struct Element
 	Vec2 media_box;
 
 	bool owns_widget; // widget is a heap copy made by @node; freed on release
+
+	// Borrowed: this element belongs to whoever built it, not to the tree it is
+	// hanging in. `Ui.release` reaching it through a PARENT cuts it loose —
+	// parent nulled, nothing recycled, nothing freed — instead of recycling it,
+	// so a caller that hands a subtree to a widget still owns every element in
+	// it afterwards and can patch it and attach it somewhere else.
+	//
+	// Only the recursion is filtered: `Ui.release(borrowed)` on the element
+	// ITSELF still releases it, which is how the owner eventually gives it back.
+	//
+	// The case it exists for is a widget whose content is handed in rather than
+	// built — `Dialog.content`, `AreaView.content`, and `widgets::borrow_content`
+	// which sets this. Every other element in the tree is owned by the tree, and
+	// leaving this false is what says so.
+	bool borrowed;
+
 	DirtyFlags dirty;
 
 	// Provided values this element's hooks read, recorded by `Element.watch` and
@@ -1463,11 +1479,25 @@ fn void Ui.unmount(&self, Element* element)
  pointers into the subtree are cleared — a stale one would silently retarget
  whatever reuses the slot.
 
+ A `borrowed` child is the one thing this does not recycle: it is cut loose and
+ left whole, because somebody outside the tree owns it and means to use it
+ again. The filter is on the recursion only — called on a borrowed element
+ directly, this releases it like any other, which is how its owner hands it
+ back.
+
  @param element : `The root of the subtree to release.`
 *>
 fn void Ui.release(&self, Element* element)
 {
-	foreach (child : element.children) self.release(child);
+	foreach (child : element.children)
+	{
+		if (child.borrowed)
+		{
+			self.detach(child);
+			continue;
+		}
+		self.release(child);
+	}
 	if (&element.widget.unmount) element.widget.unmount(element);
 	if (element.owns_widget) mem::free(((any)element.widget).ptr);
 	if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
@@ -1486,6 +1516,53 @@ fn void Ui.release(&self, Element* element)
 	element.local_drawings.free();
 	*element = { };
 	self.free_elements.push(element);
+}
+
+<*
+ Cuts a borrowed subtree out of the tree without recycling any of it: elements,
+ widgets, layout caches and paint caches all survive, and whoever built them
+ still owns them. The detaching half of `release`, and what a `borrowed` child
+ gets in its place.
+
+ The parent's own child list is deliberately left alone — this runs from inside
+ the loop over that list, which `release` clears wholesale a few lines later,
+ and removing entries mid-iteration would skip the siblings behind them.
+
+ What it does do is the pointer bookkeeping `release` does, for the same reason
+ and with the same climb: a subtree that has left the tree is off screen, so a
+ focus or a pointer capture left aimed inside it would keep sending events
+ somewhere nobody can see, and the keyboard is handed up to the nearest element
+ that is still standing rather than dropped.
+
+ @param element : `The root of the borrowed subtree.`
+*>
+fn void Ui.detach(&self, Element* element)
+{
+	self.forget(element);
+
+	// Only the root of the borrowed subtree loses its parent — the links inside
+	// it are the caller's tree and stay exactly as they were. A null parent is
+	// also what tells the next `borrow_content` that this element is free to be
+	// taken again.
+	element.parent = null;
+}
+
+<*
+ Drops every interactivity pointer that aims into a subtree, leaving the subtree
+ itself untouched. The half of `release` that is about the Ui rather than about
+ the memory; `detach` is its only caller.
+
+ @param element : `The root of the subtree the Ui should stop pointing at.`
+*>
+fn void Ui.forget(&self, Element* element)
+{
+	// Depth first, so the focus climbs out one level at a time and comes to rest
+	// on the first element still in the tree — `release`'s rule, and the reason
+	// it is spelled out there.
+	foreach (child : element.children) self.forget(child);
+	if (self.hovered == element) self.hovered = null;
+	if (self.captured == element) self.captured = null;
+	if (self.focused == element) self.focused = element.parent;
 }
 
 <*

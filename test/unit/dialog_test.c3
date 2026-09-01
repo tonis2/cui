@@ -24,6 +24,11 @@ const Vec2 OUTSIDE = { 10.0, 10.0 };
 struct DialogBody (Widget)
 {
 	Vec2 size;
+
+	// Something only this element can remember. Content that was released and
+	// rebuilt comes back with a fresh widget and a zero here; borrowed content
+	// comes back with what was written into it.
+	int remembered;
 }
 
 fn Element* build_body(Ui* ui) => ui.@node((DialogBody) { .size = BODY });
@@ -255,4 +260,179 @@ fn void toggling_twice_leaves_it_open() @test
 	ui.flush();
 	test::@check(dialog.open);
 	test::@check(ui.find(DialogFrame)!!.size.x == PANEL_W);
+}
+
+// ---------------------------------------------------------------------------
+// Borrowed content: an element the caller builds, owns and keeps, handed to the
+// dialog instead of a builder. Closing must cut it loose rather than release it,
+// and re-opening must attach the very same element back.
+
+int body_unmounts;
+
+<*
+ The same window as `dialog_ui`, with the panel's content built here and kept
+ here. The UnmountProbe under it is the witness: cui releasing the subtree behind
+ the test's back would fire it.
+
+ @param out : `Receives the borrowed element; the caller gives it back with Ui.unmount.`
+*>
+fn Ui* borrowed_ui(Element** out)
+{
+	closes = 0;
+	behind = { };
+	body_unmounts = 0;
+
+	Ui* ui = cui::new_ui(DIALOG_WINDOW);
+	Element* content = ui.@node((DialogBody) { .size = BODY },
+		ui.@node((UnmountProbe) { .count = &body_unmounts }));
+	*out = content;
+
+	@canvas(ui)
+	{
+		@tree((Stack) { })
+		{
+			@node((EventProbe) { .pref = DIALOG_WINDOW, .rec = &behind });
+			@node((Dialog) { .title = "Controls", .content = content, .on_close = &note_close });
+		};
+	};
+	ui.flush();
+	return ui;
+}
+
+fn void borrowed_content_stands_in_for_the_builder() @test
+{
+	Element* content;
+	Ui* ui = borrowed_ui(&content);
+	defer ui.free();
+	defer ui.unmount(content); // the owner's job, and the only thing that frees it
+
+	open_dialog(ui);
+
+	// It lands where a built body lands: in the frame, under the bar, between
+	// the insets — and it is the panel's whole content, so the panel is the
+	// same size as one built around the same box.
+	Element* frame = ui.find(DialogFrame)!!;
+	test::@check(content.parent == frame);
+	cui_tests::eq_vec2(frame.size, { PANEL_W, PANEL_H });
+	cui_tests::eq_vec2(content.absolute, { CENTRED.x + 14.0, CENTRED.y + 30.0 + 12.0 });
+}
+
+fn void closing_detaches_borrowed_content() @test
+{
+	Element* content;
+	Ui* ui = borrowed_ui(&content);
+	defer ui.free();
+	defer ui.unmount(content);
+
+	Element* elem = open_dialog(ui);
+	elem.widget_as(Dialog).set_open(elem, false);
+	ui.flush();
+
+	// The panel went with the close and the content did not: no unmount, its own
+	// child still under it, its widget still readable — cut loose, not recycled.
+	test::@error(ui.find(DialogFrame), cui::WIDGET_NOT_FOUND);
+	test::@error(ui.find(DialogBody), cui::WIDGET_NOT_FOUND);
+	test::eq(body_unmounts, 0);
+	test::eq(content.parent == null, true);
+	test::eq(content.children.len(), 1);
+	cui_tests::eq_vec2(content.widget_as(DialogBody).size, BODY);
+}
+
+fn void reopening_attaches_the_same_element() @test
+{
+	Element* content;
+	Ui* ui = borrowed_ui(&content);
+	defer ui.free();
+	defer ui.unmount(content);
+
+	Element* elem = open_dialog(ui);
+	Dialog* dialog = elem.widget_as(Dialog);
+	content.widget_as(DialogBody).remembered = 7;
+
+	dialog.set_open(elem, false);
+	ui.flush();
+	dialog.set_open(elem, true);
+	ui.flush();
+
+	// The same element, in the same place, remembering what was written into it
+	// — which is the whole point of borrowing rather than building.
+	test::eq(ui.find(DialogBody)!! == content, true);
+	test::eq(content.parent == ui.find(DialogFrame)!!, true);
+	test::eq(content.widget_as(DialogBody).remembered, 7);
+	test::eq(body_unmounts, 0);
+	cui_tests::eq_vec2(content.absolute, { CENTRED.x + 14.0, CENTRED.y + 30.0 + 12.0 });
+
+	// And the dialog is a dialog either way: ESC still closes it, once.
+	Key[1] escape = { Key.ESCAPE };
+	cui_tests::frame(ui, OUTSIDE, keys: escape[..]);
+	ui.flush();
+	test::eq(dialog.open, false);
+	test::eq(closes, 2);
+}
+
+// ---------------------------------------------------------------------------
+// ConfirmDialog: the message is owned, which makes the buffer something `ask`
+// can be handed a view of.
+
+int confirms;
+int declines;
+
+fn void note_confirm(Ui* ui)
+{
+	confirms++;
+}
+
+fn void note_decline(Ui* ui)
+{
+	declines++;
+}
+
+const String CONFIRM_ID = "confirm";
+
+fn Ui* confirm_ui()
+{
+	confirms = 0;
+	declines = 0;
+
+	Ui* ui = cui::new_ui(DIALOG_WINDOW);
+	@canvas(ui)
+	{
+		@node((ConfirmDialog) { .title = "Careful" }).with_id(CONFIRM_ID);
+	};
+	ui.flush();
+	return ui;
+}
+
+<*
+ Re-asking with the panel's own message.
+
+ A caller with nothing new to say hands `message.str_view()` straight back —
+ changing only the callbacks, or re-posting a question after something else
+ rebuilt the tree. `ask` clears that buffer before appending to it, so without a
+ copy this is `mem::copy` over overlapping ranges: a contract failure, not a
+ wrong answer.
+*>
+fn void asking_again_with_its_own_message_is_safe() @test
+{
+	Ui* ui = confirm_ui();
+	defer ui.free();
+
+	Element* elem = ui.find_id(CONFIRM_ID)!!;
+	ConfirmDialog* panel = elem.widget_as(ConfirmDialog);
+
+	panel.ask(elem, "Replace 17 dots?", &note_confirm, &note_decline);
+	ui.flush();
+	test::eq(panel.asking(elem), true);
+
+	// The same bytes, out of the buffer they are already in.
+	panel.ask(elem, panel.message.str_view(), &note_confirm, null);
+	ui.flush();
+
+	test::eq(panel.asking(elem), true);
+	test::eq(panel.message.str_view(), "Replace 17 dots?");
+
+	// Re-asking is not an answer: neither callback has run, and the first
+	// question's decline was replaced rather than fired.
+	test::eq(confirms, 0);
+	test::eq(declines, 0);
 }

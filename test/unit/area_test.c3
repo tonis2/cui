@@ -376,3 +376,141 @@ fn void merge_collapses_a_whole_subtree() @test
 	test::@check(count(ui, AView) == 1);
 	test::@check(count(ui, AreaSplitter) == 0);
 }
+
+// ---------------------------------------------------------------------------
+// Borrowed view content: a view that hands over an element the caller keeps,
+// instead of a builder cui calls and frees. A tab switch has to cut it loose
+// rather than release it, and switching back has to hand the same one over.
+
+// The third tab, in the same fontless 24px-per-tab strip.
+const Vec2 TAB_C = { TAB_W * 2.5, STRIP_H * 0.5 };
+
+struct CView (Widget)
+{
+	Vec2 size;
+
+	// Something only this element can remember: a rebuilt view comes back with a
+	// fresh widget and a zero here.
+	int remembered;
+}
+
+int c_unmounts;
+Element* t_content;
+
+AreaView[3] t_borrowed_views = {
+	{ .name = "A", .build = &build_a },
+	{ .name = "B", .build = &build_b },
+	{ .name = "C" }, // .content, filled in below — it needs a Ui to exist first
+};
+
+<*
+ The same host as `area_ui`, with a third view whose content is built here and
+ kept here. The UnmountProbe under it is the witness: cui releasing the subtree
+ behind the test's back would fire it.
+*>
+fn Ui* borrowed_area_ui()
+{
+	c_unmounts = 0;
+
+	Ui* ui = cui::new_ui(AREA_WINDOW);
+	t_content = ui.@node((CView) { }, ui.@node((UnmountProbe) { .count = &c_unmounts }));
+	t_borrowed_views[2].content = t_content;
+
+	t_layout.init(t_borrowed_views[..]);
+	@canvas(ui)
+	{
+		@node((AreaHost) { .areas = &t_layout });
+	};
+	ui.flush();
+	return ui;
+}
+
+fn void a_borrowed_view_is_attached_not_built() @test
+{
+	Ui* ui = borrowed_area_ui();
+	defer ui.free();
+	defer t_layout.free();
+	defer ui.unmount(t_content); // the owner's job, and the only thing that frees it
+
+	click(ui, TAB_C);
+
+	// The caller's own element, filling the pane under the strip — exactly where
+	// a built view would have gone.
+	test::eq(ui.find(CView)!! == t_content, true);
+	cui_tests::eq_vec2(t_content.size, { AREA_WINDOW.x, AREA_WINDOW.y - STRIP_H });
+	cui_tests::eq_vec2(t_content.absolute, { 0, STRIP_H });
+}
+
+fn void switching_away_detaches_and_back_reattaches() @test
+{
+	Ui* ui = borrowed_area_ui();
+	defer ui.free();
+	defer t_layout.free();
+	defer ui.unmount(t_content);
+
+	click(ui, TAB_C);
+	t_content.widget_as(CView).remembered = 7;
+
+	click(ui, TAB_A);
+	test::@error(ui.find(CView), cui::WIDGET_NOT_FOUND);
+	test::eq(t_content.parent == null, true);
+	test::eq(t_content.children.len(), 1);
+	test::eq(c_unmounts, 0);
+
+	click(ui, TAB_C);
+
+	// The same element, back in the same place, still remembering — which is the
+	// one thing a built view cannot do.
+	test::eq(ui.find(CView)!! == t_content, true);
+	test::eq(t_content.widget_as(CView).remembered, 7);
+	test::eq(c_unmounts, 0);
+	cui_tests::eq_vec2(t_content.absolute, { 0, STRIP_H });
+}
+
+<*
+ Both leaves of a fresh split offer every view and both start on the one that
+ was showing — so both would take the borrowed element, and an element has one
+ parent. The pane that asks second gets an empty box instead.
+*>
+fn void one_borrowed_view_hangs_in_one_pane() @test
+{
+	Ui* ui = borrowed_area_ui();
+	defer ui.free();
+	defer t_layout.free();
+	defer ui.unmount(t_content);
+
+	click(ui, TAB_C);
+	split(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 }, "Split Vertical");
+
+	test::@check(!t_layout.root.is_leaf());
+	test::@check(count(ui, AreaTabStrip) == 2);
+	test::@check(count(ui, CView) == 1);
+	test::eq(t_content.parent != null, true);
+	test::eq(c_unmounts, 0);
+}
+
+<*
+ A structural change releases the whole pane tree from the host down, which is
+ the deepest a borrowed element ever sits — and it still comes back.
+*>
+fn void merging_the_split_keeps_the_borrowed_element() @test
+{
+	Ui* ui = borrowed_area_ui();
+	defer ui.free();
+	defer t_layout.free();
+	defer ui.unmount(t_content);
+
+	click(ui, TAB_C);
+	t_content.widget_as(CView).remembered = 7;
+	split(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 }, "Split Vertical");
+
+	// Right on the divider, which is where the merge entries live.
+	rclick(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 });
+	pick(ui, "Merge Left");
+
+	test::@check(t_layout.root.is_leaf());
+	test::eq(ui.find(CView)!! == t_content, true);
+	test::eq(t_content.widget_as(CView).remembered, 7);
+	test::eq(c_unmounts, 0);
+	cui_tests::eq_vec2(t_content.size, { AREA_WINDOW.x, AREA_WINDOW.y - STRIP_H });
+}

@@ -160,6 +160,11 @@ fn Element* ConfirmDialog.build(&self, Element* elem) @dynamic
  perfectly good argument. Asking again while a question is already up replaces
  it — the newer question is the one the user is looking at.
 
+ **`message` may be a view into this panel's own buffer.** Re-asking with
+ nothing new to say is `ask.message.str_view()` coming straight back in — the
+ caller changing only the callbacks, or re-posting the question after the tree
+ was rebuilt. It is copied before anything is cleared, so callers need not know.
+
  @param elem : `The ConfirmDialog's own element.`
  @param message : `What is being asked. Copied; the caller keeps ownership of the original.`
  @param confirm : `Run when the confirming button is pressed.`
@@ -167,9 +172,16 @@ fn Element* ConfirmDialog.build(&self, Element* elem) @dynamic
 *>
 fn void ConfirmDialog.ask(&self, Element* elem, String message, OnClick confirm, OnClick decline = null)
 {
+	// Into the temp allocator first, for `FileBrowser.go_to`'s reason: `clear`
+	// frees nothing, so appending a slice of this very buffer back into it is an
+	// overlapping copy — a contract failure in `mem::copy` rather than a quiet
+	// wrong answer — and the growth the append may trigger would move the bytes
+	// out from under the slice.
+	String wanted = message.tcopy();
+
 	if (!self.message.data()) self.message.init(mem);
 	self.message.clear();
-	self.message.append(message);
+	self.message.append(wanted);
 
 	self.on_confirm = confirm;
 	self.on_decline = decline;

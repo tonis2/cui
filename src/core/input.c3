@@ -489,16 +489,18 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 	}
 	// Raised children first, because the search runs in reverse PAINT order and
 	// a raise is a change to the paint order — an open dropdown has to take the
-	// click that lands on the field it is covering.
+	// click that lands on the field it is covering. `raise_path`, not `raised`,
+	// for the reason emit uses it: the raise belongs to the whole branch down to
+	// the popup, not only to the widget that opened it.
 	foreach_r (child : element.children)
 	{
-		if (!child.raised) continue;
+		if (!child.raise_path) continue;
 		Element* hit = self.hit_test_element(child, point);
 		if (hit) return hit;
 	}
 	foreach_r (child : element.children)
 	{
-		if (child.raised) continue;
+		if (child.raise_path) continue;
 		Element* hit = self.hit_test_element(child, point);
 		if (hit) return hit;
 	}

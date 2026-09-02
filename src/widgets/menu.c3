@@ -612,9 +612,10 @@ fn void MenuSeparator.paint(&self, Element* elem, Painter* painter) @dynamic
 
  While open the element sets `Element.raised`, so the popup paints and
  hit-tests after everything beside it — the field under a dropdown in the same
- form is covered by it rather than the other way round. The raise is against its
- SIBLINGS: a subtree mounted after this one, a dialog over the form, is still on
- top, which is the order an embedder wrote.
+ form is covered by it rather than the other way round. The raise carries up the
+ ancestors (`Element.raise_path`), so a chooser buried in a Row inside a Column
+ still comes out over the rows below it; floors keep their order, since a raised
+ branch stays in place among the other raised ones.
 *>
 struct Select (Widget)
 {

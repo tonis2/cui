@@ -12,7 +12,10 @@
  **It sizes itself to its content** and expects a `Scroll` above it, the shape
  every list in cui takes: there is no windowing here, no virtualisation and no
  scrollbar of its own. A directory of ten thousand files measures ten thousand
- rows, which is affordable because a row is a rect and two strings.
+ rows, which is affordable because a row is a rect and two strings. Given a box
+ smaller than the listing — a panel that capped it, or a caller who forgot the
+ Scroll — it paints the rows that fit and stops, rather than down over whatever
+ the panel is floating on.
 
  The listing is a snapshot, taken when the directory changes and not refreshed
  behind the user's back — `rescan` is how a caller asks for the current truth.
@@ -378,6 +381,11 @@ fn void FileBrowser.paint(&self, Element* elem, Painter* painter) @dynamic
 	for (int row = 0; row < (int)self.rows(); row++)
 	{
 		float y = (float)row * style.row_height;
+		// A listing is taller than its box whenever it was given one — no
+		// Scroll above it, or a panel that capped it — and a widget painting
+		// rows past its own rect is drawing over whatever is beside the panel.
+		// Under a Scroll the box IS the content, so nothing is lost here.
+		if (elem.size.y > 0 && y >= elem.size.y) break;
 		bool selected = self.chosen == row + 1;
 
 		if (selected || self.lit == row + 1)

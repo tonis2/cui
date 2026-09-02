@@ -415,13 +415,22 @@ struct Element
 	// widget that owns it, so without this it lands in that widget's slot in the
 	// paint order and the fields BELOW it in the same form cover it.
 	//
-	// A stacking context per parent rather than one layer over the window: a
-	// raise lifts a subtree above the ones beside it and never above a whole
-	// floor of the interface mounted after it, so an embedder that builds its
-	// layers out of siblings — a dialog over a HUD — keeps the order it wrote.
 	// Set from `build()` or `layout()`, like `ignores_pointer`, and cleared for
 	// free by `release`.
 	bool raised;
+
+	// A raise carries up: this is "somewhere under here something is raised",
+	// computed by `mark_raises` before every emit and read instead of `raised`
+	// by both the paint order and the hit test. Without the climb a raise only
+	// beats the siblings of the widget ITSELF, so a dropdown two containers deep
+	// in a form still loses to the rows under that form — which is the whole
+	// bug, since a Select is nearly always inside a Row inside a Column.
+	//
+	// Relative order survives inside each pass, and that is what keeps an
+	// embedder's floors in the order it wrote them: a modal on a later floor is
+	// raised too, so it is still the last of the raised ones. Do not set it —
+	// set `raised`.
+	bool raise_path;
 
 	// Paint cache, in element-local coordinates. Emitting shifts copies by the
 	// absolute origin, so a moved-but-clean element never re-paints.
@@ -1909,6 +1918,8 @@ fn void Ui.flush(&self)
 		// alongside the drawings; slot 0 is always "no clip".
 		self.canvas.clips.clear();
 		self.canvas.clips.push(NO_CLIP_ENTRY);
+		// Before the emit, because the paint order reads what it writes.
+		self.mark_raises(self.root);
 		self.emit(self.root, { 0, 0 }, 0, 0);
 		self.canvas.drawings_dirty = true;
 		self.canvas.clips_dirty = true;
@@ -2097,16 +2108,38 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 	bool raised;
 	foreach (child : element.children)
 	{
-		if (child.raised) { raised = true; continue; }
+		if (child.raise_path) { raised = true; continue; }
 		self.emit(child, absolute, slot, clip);
 	}
 	if (raised)
 	{
 		foreach (child : element.children)
 		{
-			if (child.raised) self.emit(child, absolute, slot, clip);
+			if (child.raise_path) self.emit(child, absolute, slot, clip);
 		}
 	}
+}
+
+<*
+ Carries every `raised` up its ancestors into `raise_path`, which is what the
+ emit walk and the hit test actually order by.
+
+ One bottom-up walk before each emit rather than bookkeeping on every write:
+ `raised` is a plain field widgets assign from `build`, and a frame that paints
+ is already walking every element anyway.
+
+ @param element : `The subtree root to mark.`
+ @return `True when this subtree holds a raise, so the caller can raise itself.`
+*>
+fn bool Ui.mark_raises(&self, Element* element)
+{
+	bool held = element.raised;
+	foreach (child : element.children)
+	{
+		if (self.mark_raises(child)) held = true;
+	}
+	element.raise_path = held;
+	return held;
 }
 
 <*

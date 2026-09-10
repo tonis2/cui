@@ -1,26 +1,7 @@
 {
   "provides": "cui",
-
-  // cui compiles its own sources and nothing else. Windowing (c3w), image
-  // decoding, font rasterisation and the Vulkan bindings are separate
-  // libraries the consumer installs alongside cui.c3l -- they are named here,
-  // not vendored, so a project that already uses c3w or image links one copy
-  // instead of two colliding ones.
-  //
-  // c3c 0.8 does not fetch a transitive dependency on its own: it only checks
-  // that a library named here is among the ones the consuming project already
-  // listed. So a consumer's project.json needs all five:
-  //
-  //   "dependencies": ["cui", "vk", "c3w", "image", "font"]
-  //
-  // See README.md "Install".
   "dependencies": ["vk", "c3w", "image", "font"],
-
   "sources": ["src/**"],
-
-  // No target carries sources or linked-libraries: the platform work belongs to
-  // window.c3l, which brings its own frameworks for the target it is built for.
-  // The entries exist because c3c errors on a target a library does not list.
   "targets": {
     "macos-x64": {},
     "macos-aarch64": {},

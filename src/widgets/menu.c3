@@ -176,6 +176,60 @@ fn bool PopupPanel.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	return event.kind == MouseEventKind.PRESS || event.kind == MouseEventKind.RELEASE;
 }
 
+<*
+ One action row for a cursor popup or another free-floating menu. Unlike the
+ internal MenuItemRow it has no MenuBar to close: the callback owns dismissal,
+ which lets the same row live in a Dialog popup, an AreaHost overlay, or any
+ other floating surface.
+*>
+struct PopupMenuItem (Widget)
+{
+	MenuItem item;
+	MenuStyle style;
+	float width; // 0 = the ordinary popup menu minimum
+	bool hovered;
+}
+
+fn Vec2 PopupMenuItem.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	MenuStyle s = self.style.resolved();
+	return constraints.constrain({ self.width > 0 ? self.width : PANEL_MIN_W, s.item_height });
+}
+
+fn void PopupMenuItem.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	MenuStyle s = self.style.resolved();
+	if (self.hovered && !self.item.disabled)
+	{
+		painter.rect({ 2, 0 }, { elem.size.x - 4, elem.size.y }, {
+			.color = s.hover_color,
+			.border_radius = { 4.0, 4.0, 4.0, 4.0 },
+		});
+	}
+	Color ink = self.item.disabled ? s.dim_color : s.text_color;
+	Vec2 measured = elem.ui.text.measure(s.font, self.item.label, s.text_size);
+	painter.text({ s.pad_x, (elem.size.y - measured.y) * 0.5f }, self.item.label,
+		{ .font = s.font, .size = s.text_size, .color = ink });
+}
+
+fn void PopupMenuItem.on_hover(&self, Element* elem, bool entered) @dynamic
+{
+	self.hovered = entered;
+	if (entered && !self.item.disabled) elem.set_cursor(Cursor.POINTING_HAND);
+	elem.request_paint();
+}
+
+fn bool PopupMenuItem.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (event.button != MouseButton.LEFT) return false;
+	if (event.kind == MouseEventKind.PRESS) return true;
+	if (event.kind != MouseEventKind.RELEASE) return false;
+	bool inside = event.pos.x >= 0 && event.pos.y >= 0
+		&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+	if (inside && !self.item.disabled && self.item.on_select) self.item.on_select(elem.ui);
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // MenuBar
 

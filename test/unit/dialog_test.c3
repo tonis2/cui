@@ -45,7 +45,7 @@ fn void note_close(Ui* ui)
  A window with something interactive filling it and a dialog over the top, so
  every check can ask what the pointer reached as well as what the dialog did.
 *>
-fn Ui* dialog_ui(bool modal = false, bool close_outside = false)
+fn Ui* dialog_ui(bool modal = false, bool close_outside = false, bool popup = false)
 {
 	closes = 0;
 	behind = { };
@@ -61,6 +61,8 @@ fn Ui* dialog_ui(bool modal = false, bool close_outside = false)
 				.body = &build_body,
 				.modal = modal,
 				.close_outside = close_outside,
+				.popup = popup,
+				.popup_insets = { 14, 12, 14, 12 },
 				.on_close = &note_close,
 			});
 		};
@@ -237,6 +239,29 @@ fn void close_outside_dismisses_from_the_backdrop() @test
 	click(ui, OUTSIDE);
 	test::@check(!elem.widget_as(Dialog).open);
 	test::eq(closes, 1);
+	test::eq(behind.presses, 0);
+}
+
+fn void popup_dialog_has_no_window_chrome_or_scrim_and_still_dismisses() @test
+{
+	Ui* ui = dialog_ui(modal: true, close_outside: true, popup: true);
+	defer ui.free();
+	Element* elem = open_dialog(ui);
+
+	test::@error(ui.find(DialogFrame), cui::WIDGET_NOT_FOUND);
+	test::@error(ui.find(DialogTitleBar), cui::WIDGET_NOT_FOUND);
+	test::@error(ui.find_id(widgets::DIALOG_CLOSE_ID), cui::WIDGET_NOT_FOUND);
+	Element* panel = ui.find(PopupPanel)!!;
+	cui_tests::eq_vec2(panel.size, { BODY.x + 28.0, BODY.y + 24.0 });
+	cui_tests::eq_vec2(panel.absolute,
+		{ (DIALOG_WINDOW.x - panel.size.x) * 0.5f, (DIALOG_WINDOW.y - panel.size.y) * 0.5f });
+
+	// PopupPanel consumes its surface. The transparent modal catcher covers the
+	// rest of the window only to dismiss; Dialog.paint draws no scrim in popup mode.
+	click(ui, panel.absolute + (Vec2){ 4, 4 });
+	test::@check(elem.widget_as(Dialog).open);
+	click(ui, OUTSIDE);
+	test::@check(!elem.widget_as(Dialog).open);
 	test::eq(behind.presses, 0);
 }
 

@@ -171,6 +171,11 @@ struct Dialog (Widget)
 	bool open;
 	bool modal; // dim and block everything behind it
 	bool close_outside; // modal only: a press on the backdrop closes the dialog
+	// Context menus need the dialog's floating placement, outside-click catcher
+	// and Escape handling without window chrome. In popup mode the body is put
+	// directly on a PopupPanel: no title bar, close button, or dimmed backdrop.
+	bool popup;
+	Insets popup_insets; // padding around popup content; ignored by ordinary dialogs
 	OnClick on_close; // optional; called whenever the dialog goes from open to closed
 	OnDialogClose on_close_ctx; // the same, handed `ctx`; both run if both are set
 	Vec2 at; // the panel's top-left in UI coordinates; written by layout
@@ -195,12 +200,6 @@ fn Element* Dialog.build(&self, Element* elem) @dynamic
 
 	DialogStyle s = self.style.resolved();
 
-	// The bar's own needs, folded into the panel's minimum here rather than in
-	// the frame: this is where the title is, and the frame's job is to negotiate
-	// one width out of the numbers it is handed.
-	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x
-		+ s.pad_x + DIALOG_CLOSE_SIZE;
-
 	// Borrowed content wins over both builders: an element that already exists is
 	// the answer to what this panel holds, and building a second one beside it
 	// would only be something to throw away.
@@ -211,6 +210,26 @@ fn Element* Dialog.build(&self, Element* elem) @dynamic
 		case self.body_ctx != null: inner = self.body_ctx(ui, self.ctx);
 		default: inner = self.body(ui);
 	}
+	if (self.popup)
+	{
+		return ui.@node((PopupPanel) {
+			.style = {
+				.color = s.panel_color,
+				.border_width = 1.0,
+				.border_color = s.panel_border,
+				.border_radius = { s.radius, s.radius, s.radius, s.radius },
+			},
+			.insets = self.popup_insets,
+			.shadow = s.shadow,
+			.shadow_color = DIALOG_SHADOW_COLOR,
+		}, inner);
+	}
+
+	// The bar's own needs, folded into the panel's minimum here rather than in
+	// the frame: this is where the title is, and the frame's job is to negotiate
+	// one width out of the numbers it is handed.
+	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x
+		+ s.pad_x + DIALOG_CLOSE_SIZE;
 
 	Element* close = ui.@node((DialogCloseButton) { .style = s, .host = elem })
 		.with_id(DIALOG_CLOSE_ID);
@@ -263,7 +282,7 @@ fn Vec2 Dialog.layout(&self, Element* elem, Constraints constraints) @dynamic
 *>
 fn void Dialog.paint(&self, Element* elem, Painter* painter) @dynamic
 {
-	if (!self.open || !self.modal) return;
+	if (!self.open || !self.modal || self.popup) return;
 	painter.rect({ 0, 0 }, elem.size, { .color = self.style.resolved().scrim_color });
 }
 

@@ -207,8 +207,14 @@ fn void PopupMenuItem.paint(&self, Element* elem, Painter* painter) @dynamic
 		});
 	}
 	Color ink = self.item.disabled ? s.dim_color : s.text_color;
+	if (self.item.checked)
+	{
+		float h = elem.size.y;
+		painter.line({ 8.0, h * 0.52f }, { 11.0, h * 0.68f }, 1.6f, ink);
+		painter.line({ 11.0, h * 0.68f }, { 17.0, h * 0.32f }, 1.6f, ink);
+	}
 	Vec2 measured = elem.ui.text.measure(s.font, self.item.label, s.text_size);
-	painter.text({ s.pad_x, (elem.size.y - measured.y) * 0.5f }, self.item.label,
+	painter.text({ CHECK_GUTTER, (elem.size.y - measured.y) * 0.5f }, self.item.label,
 		{ .font = s.font, .size = s.text_size, .color = ink });
 }
 

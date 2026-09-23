@@ -131,7 +131,11 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.circle(
 		center,
 		radius,
-		{ .color = { 0.13, 0.15, 0.19, 1.0 }, .border_width = 2.0f, .border_color = { 0.32, 0.35, 0.42, 1.0 }, }
+		{
+			.color = { 0.13, 0.15, 0.19, 1.0 },
+			.border_width = 2.0f,
+			.border_color = { 0.32, 0.35, 0.42, 1.0 },
+		}
 	);
 
 	// Tick lines around the rim.
@@ -160,7 +164,7 @@ fn void Dial.paint(&self, Element* elem, Painter* painter) @dynamic
 // threaded in, the way a Flutter callback reaches other widgets through its own.
 fn void reset_dial(Ui* ui)
 {
-	ui.@modify(Dial; d)
+	ui.@modify(Dial ; d)
 	{
 		d.value = 0.0;
 		io::printfn("[layout] reset clicked -> %.2f", d.value);
@@ -169,7 +173,7 @@ fn void reset_dial(Ui* ui)
 
 fn void bump_dial(Ui* ui)
 {
-	ui.@modify(Dial; d)
+	ui.@modify(Dial ; d)
 	{
 		d.value = math::clamp(d.value + 0.1f, 0.0f, 1.0f);
 		io::printfn("[layout] bump clicked -> %.2f", d.value);
@@ -181,7 +185,7 @@ fn void bump_dial(Ui* ui)
 // one stamped "teal" — resolved once, mutated, repainted.
 fn void recolor_card(Ui* ui)
 {
-	ui.@modify_id("teal", Rectangle; card)
+	ui.@modify_id("teal", Rectangle ; card)
 	{
 		Vec4 c = (Vec4)card.style.color;
 		card.style.color = c.y > c.x ? (Color) { 0.55, 0.30, 0.50, 1.0 } : (Color) { 0.16, 0.45, 0.42, 1.0 };
@@ -224,7 +228,13 @@ fn void main(String[] args)
 	{
 		@tree((Padding) { .insets = widgets::insets_all(24.0) })
 		{
-			@tree((Column) { .gap = 24.0, .main_align = CENTER, .cross_align = CENTER, })
+			@tree(
+				(Column) {
+					.gap = 24.0,
+					.main_align = CENTER,
+					.cross_align = CENTER,
+				}
+			)
 			{
 				// The full-width textured header.
 				@node(
@@ -246,9 +256,13 @@ fn void main(String[] args)
 					Element* teal_card = @node(
 						(Rectangle) {
 							.size = { 260.0, 240.0 },
-							.style = { .color = { 0.16, 0.45, 0.42, 1.0 }, .border_radius = { 16.0, 16.0, 16.0, 16.0 } },
+							.style = {
+								.color = { 0.16, 0.45, 0.42, 1.0 },
+								.border_radius = { 16.0, 16.0, 16.0, 16.0 }
+							},
 						}
-					).with_id("teal");
+					)
+						.with_id("teal");
 					teal_card.set_cursor(Cursor.POINTING_HAND);
 
 					@node((Dial) { .size = { 260.0, 300.0 }, .value = 0.72 });
@@ -268,7 +282,14 @@ fn void main(String[] args)
 				// A shelf of small tiles: centered as a group, bottoms lined up
 				// by CrossAlign.END inside the row's fixed height. A plain loop,
 				// since the tiles only differ by data.
-				@tree((Row) { .size = { content_width, 130.0 }, .gap = 16.0, .main_align = CENTER, .cross_align = END, })
+				@tree(
+					(Row) {
+						.size = { content_width, 130.0 },
+						.gap = 16.0,
+						.main_align = CENTER,
+						.cross_align = END,
+					}
+				)
 				{
 					foreach (tile : tiles)
 					{
@@ -289,22 +310,40 @@ fn void main(String[] args)
 					(Button) {
 						.size = { 130.0, 40.0 },
 						.style = { .color = { 0.20, 0.22, 0.28, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.hover_style = { .color = { 0.28, 0.31, 0.40, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.press_style = { .color = { 0.16, 0.17, 0.22, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = {
+							.color = { 0.28, 0.31, 0.40, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
+						.press_style = {
+							.color = { 0.16, 0.17, 0.22, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
 						.on_click = &reset_dial,
 					},
 					(Button) {
 						.size = { 130.0, 40.0 },
 						.style = { .color = { 0.75, 0.45, 0.15, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.hover_style = { .color = { 0.88, 0.55, 0.20, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.press_style = { .color = { 0.60, 0.35, 0.12, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = {
+							.color = { 0.88, 0.55, 0.20, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
+						.press_style = {
+							.color = { 0.60, 0.35, 0.12, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
 						.on_click = &bump_dial,
 					},
 					(Button) {
 						.size = { 130.0, 40.0 },
 						.style = { .color = { 0.42, 0.30, 0.52, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.hover_style = { .color = { 0.52, 0.38, 0.64, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
-						.press_style = { .color = { 0.34, 0.24, 0.42, 1.0 }, .border_radius = { 10.0, 10.0, 10.0, 10.0 } },
+						.hover_style = {
+							.color = { 0.52, 0.38, 0.64, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
+						.press_style = {
+							.color = { 0.34, 0.24, 0.42, 1.0 },
+							.border_radius = { 10.0, 10.0, 10.0, 10.0 }
+						},
 						.on_click = &recolor_card,
 					}
 				);

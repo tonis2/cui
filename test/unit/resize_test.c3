@@ -20,8 +20,8 @@ fn void a_resize_relays_the_tree_out() @test
 	// Asks for more than any window has: `Probe.layout` constrains what it asks
 	// for, so it comes back sized to whatever it was offered, and it counts the
 	// calls — which a plain fill-parent widget does not.
-	Element* filler = ui.@node((Probe){ .pref = {10_000, 10_000}, .layouts = &layouts });
-	ui.build(ui.@node((Stack){}, filler));
+	Element* filler = ui.@node((Probe) { .pref = { 10_000, 10_000 }, .layouts = &layouts });
+	ui.build(ui.@node((Stack) { }, filler));
 	ui.flush();
 
 	cui_tests::eq_vec2(filler.size, cui_tests::WINDOW);
@@ -41,14 +41,17 @@ fn void a_resize_moves_what_it_did_not_resize() @test
 	defer ui.free();
 
 	int paints;
-	Element* badge = ui.@node((Probe){ .pref = {40, 20}, .paints = &paints });
-	ui.build(ui.@node((Stack){}, ui.@node((Anchored){ .h = END, .v = END }, badge)));
+	Element* badge = ui.@node((Probe) { .pref = { 40, 20 }, .paints = &paints });
+	ui.build(ui.@node((Stack) { }, ui.@node((Anchored) { .h = END, .v = END }, badge)));
 	ui.flush();
 
-	cui_tests::eq_vec2(badge.absolute, {
-		cui_tests::WINDOW.x - 40,
-		cui_tests::WINDOW.y - 20,
-	});
+	cui_tests::eq_vec2(
+		badge.absolute,
+		{
+			cui_tests::WINDOW.x - 40,
+			cui_tests::WINDOW.y - 20,
+		}
+	);
 
 	// The badge is the same 40x20 it was, so nothing about it is dirty and its
 	// `paint` does not re-run — but the corner it is pinned to has moved, and the
@@ -56,7 +59,7 @@ fn void a_resize_moves_what_it_did_not_resize() @test
 	ui.resize(BIGGER);
 	ui.flush();
 
-	cui_tests::eq_vec2(badge.size, {40, 20});
+	cui_tests::eq_vec2(badge.size, { 40, 20 });
 	test::eq(paints, 1);
 	cui_tests::eq_vec2(badge.absolute, { BIGGER.x - 40, BIGGER.y - 20 });
 }
@@ -66,8 +69,8 @@ fn void a_resize_is_the_new_screen() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* rect = ui.@node((Rectangle){ .size = {30, 20} });
-	ui.build(ui.@node((Stack){}, rect));
+	Element* rect = ui.@node((Rectangle) { .size = { 30, 20 } });
+	ui.build(ui.@node((Stack) { }, rect));
 	ui.flush();
 
 	// What a widget deciding its shape reads — a dropdown asking whether it has
@@ -82,7 +85,7 @@ fn void the_size_it_already_is_costs_nothing() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	ui.build(ui.@node((Stack){}, ui.@node((Rectangle){ .size = {30, 20} })));
+	ui.build(ui.@node((Stack) { }, ui.@node((Rectangle) { .size = { 30, 20 } })));
 	ui.flush();
 	ui.frame_requested = false; // the render loop consumed it
 

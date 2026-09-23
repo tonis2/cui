@@ -36,19 +36,19 @@ const float TEXT_BAKE_PX = 48;
 *>
 const float TEXT_SPREAD = 8;
 
-const uint ATLAS_SIZE = 1024;   // atlas is square, R8, ATLAS_SIZE² bytes
-const uint ATLAS_GAP = 1;       // px between packed glyphs
+const uint ATLAS_SIZE = 1024; // atlas is square, R8, ATLAS_SIZE² bytes
+const uint ATLAS_GAP  = 1;    // px between packed glyphs
 
 // One baked glyph in the atlas. Geometry is in pixels at TEXT_BAKE_PX;
 // Painter.text scales by (style size / TEXT_BAKE_PX) when emitting.
 struct GlyphSlot
 {
-	Vec4 uv;         // atlas UV rect {u0, v0, u1, v1}
+	Vec4 uv; // atlas UV rect {u0, v0, u1, v1}
 	float bearing_x; // left bitmap edge relative to the pen
 	float bearing_y; // top bitmap edge above the baseline
-	float width;     // bitmap size in px
+	float width; // bitmap size in px
 	float height;
-	float advance;   // horizontal advance in px
+	float advance; // horizontal advance in px
 	bool has_bitmap; // false: nothing to draw (space, or the atlas is full)
 }
 
@@ -65,7 +65,7 @@ struct TextSystem
 {
 	List{font::Font} fonts;
 	HashMap{ulong, GlyphSlot} glyphs; // key: FontId << 32 | glyph index
-	char[] atlas;                     // ATLAS_SIZE x ATLAS_SIZE, R8
+	char[] atlas; // ATLAS_SIZE x ATLAS_SIZE, R8
 	uint atlas_width;
 	uint atlas_height;
 
@@ -75,9 +75,9 @@ struct TextSystem
 	uint shelf_y;
 	uint shelf_height;
 
-	bool dirty;          // atlas pixels changed since the backend's last upload
+	bool dirty; // atlas pixels changed since the backend's last upload
 	bool atlas_full_warned;
-	Texture texture;     // backend-assigned atlas handle; NO_TEXTURE until then
+	Texture texture; // backend-assigned atlas handle; NO_TEXTURE until then
 }
 
 fn void TextSystem.init(&self)
@@ -97,7 +97,7 @@ fn void TextSystem.free(&self)
 	self.fonts.free();
 	self.glyphs.free();
 	if (self.atlas.len > 0) alloc::free(mem, self.atlas);
-	self.atlas = {};
+	self.atlas = { };
 }
 
 <*
@@ -138,16 +138,16 @@ fn FontId? Ui.load_font_bytes(&self, char[] data)
 *>
 fn Vec2 TextSystem.measure(&self, FontId font_id, String str, float size = 0)
 {
-	if ((sz)font_id >= self.fonts.len()) return {};
+	if ((sz)font_id >= self.fonts.len()) return { };
 	font::Font f = self.fonts[font_id];
 	if (size <= 0) size = DEFAULT_TEXT_SIZE;
-	float scale = f.scale_for_px(size);
+	float scale       = f.scale_for_px(size);
 	font::VMetrics vm = f.vmetrics();
 
 	long advance_units = 0;
-	uint prev_glyph = 0;
-	bool first = true;
-	usz i = 0;
+	uint prev_glyph    = 0;
+	bool first         = true;
+	usz i              = 0;
 	while (i < str.len)
 	{
 		uint glyph = f.glyph_index(decode_rune(str, &i));
@@ -175,16 +175,16 @@ fn GlyphSlot TextSystem.glyph(&self, FontId font_id, uint glyph_index)
 
 fn GlyphSlot TextSystem.bake(&self, FontId font_id, uint glyph_index)
 {
-	font::Font f = self.fonts[font_id];
+	font::Font f           = self.fonts[font_id];
 	font::SdfBitmap? baked = f.bake_sdf(glyph_index, TEXT_BAKE_PX, TEXT_SPREAD);
-	if (catch baked) return {};
+	if (catch baked) return { };
 	font::SdfBitmap bitmap = baked;
 	defer bitmap.free();
 
 	GlyphSlot slot = { .advance = bitmap.advance };
 	if (bitmap.is_empty()) return slot;
 
-	uint width = bitmap.width;
+	uint width  = bitmap.width;
 	uint height = bitmap.height;
 	if (self.shelf_x + width + ATLAS_GAP > self.atlas_width)
 	{
@@ -196,7 +196,11 @@ fn GlyphSlot TextSystem.bake(&self, FontId font_id, uint glyph_index)
 	{
 		if (!self.atlas_full_warned)
 		{
-			io::printfn("cui: glyph atlas is full (%dx%d); further new glyphs will not render", self.atlas_width, self.atlas_height);
+			io::printfn(
+				"cui: glyph atlas is full (%dx%d); further new glyphs will not render",
+				self.atlas_width,
+				self.atlas_height
+			);
 			self.atlas_full_warned = true;
 		}
 		return slot;
@@ -229,9 +233,9 @@ fn GlyphSlot TextSystem.bake(&self, FontId font_id, uint glyph_index)
 *>
 struct TextStyle
 {
-	FontId font;   // from Ui.load_font; 0 = the first loaded font
-	float size;    // em size in px; 0 uses DEFAULT_TEXT_SIZE
-	Color color;   // text color — the zero default is fully transparent
+	FontId font; // from Ui.load_font; 0 = the first loaded font
+	float size; // em size in px; 0 uses DEFAULT_TEXT_SIZE
+	Color color; // text color — the zero default is fully transparent
 }
 
 <*
@@ -246,21 +250,21 @@ struct TextStyle
 *>
 fn Vec2 Painter.text(&self, Vec2 pos, String str, TextStyle style = { })
 {
-	Ui* ui = self.element.ui;
+	Ui* ui           = self.element.ui;
 	TextSystem* text = &ui.text;
-	if ((sz)style.font >= text.fonts.len()) return {};
+	if ((sz)style.font >= text.fonts.len()) return { };
 	font::Font f = text.fonts[style.font];
-	float size = style.size > 0 ? style.size : DEFAULT_TEXT_SIZE;
+	float size   = style.size > 0 ? style.size : DEFAULT_TEXT_SIZE;
 
-	float scale = f.scale_for_px(size);           // font units -> px
-	float glyph_scale = size / TEXT_BAKE_PX;      // bake px -> px
+	float scale       = f.scale_for_px(size); // font units -> px
+	float glyph_scale = size / TEXT_BAKE_PX; // bake px -> px
 	font::VMetrics vm = f.vmetrics();
-	float baseline = pos.y + (float)vm.ascent * scale;
+	float baseline    = pos.y + (float)vm.ascent * scale;
 
-	long pen_units = 0;
+	long pen_units  = 0;
 	uint prev_glyph = 0;
-	bool first = true;
-	usz i = 0;
+	bool first      = true;
+	usz i           = 0;
 	while (i < str.len)
 	{
 		uint glyph = f.glyph_index(decode_rune(str, &i));

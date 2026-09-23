@@ -2,7 +2,7 @@ module cui;
 import std::math;
 
 // The GPU contract for embedding cui in an existing Vulkan engine.
-//
+// 
 // cui core produces a Canvas (drawings + transform palette + clips, see
 // canvas.c3); this file provides everything a backend needs to render it: the
 // compiled SPIR-V and the CPU-side layouts of the shader's uniform block and
@@ -20,7 +20,7 @@ char[*] shader_spirv = $embed("../shaders/shader.spv");
 <*
  Name of the vertex entry point in `shader_spirv`.
 *>
-const ZString SHADER_VERTEX_ENTRY   = "vertexMain";
+const ZString SHADER_VERTEX_ENTRY = "vertexMain";
 
 <*
  Name of the fragment entry point in `shader_spirv`.

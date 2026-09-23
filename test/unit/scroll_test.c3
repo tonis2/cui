@@ -10,14 +10,16 @@ import std::core::test;
 
 fn Element* fixture(Ui* ui, Element** out_scroll = null)
 {
-	Element* column = ui.@node((Column){},
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }));
-	Element* scroll = ui.@node((Scroll){ .size = {100, 100} }, column);
+	Element* column = ui.@node(
+		(Column) { },
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } })
+	);
+	Element* scroll = ui.@node((Scroll) { .size = { 100, 100 } }, column);
 	if (out_scroll) *out_scroll = scroll;
-	ui.build(ui.@node((Stack){}, scroll));
+	ui.build(ui.@node((Stack) { }, scroll));
 	ui.flush();
 	return column;
 }
@@ -32,10 +34,10 @@ fn void scroll_layout_and_viewport() @test
 	Element* scroll;
 	Element* column = fixture(ui, &scroll);
 
-	cui_tests::eq_vec2(scroll.size, {100, 100});
+	cui_tests::eq_vec2(scroll.size, { 100, 100 });
 	test::eq(scroll.children.len(), 2);
-	cui_tests::eq_vec2(column.size, {80, 400});
-	cui_tests::eq_vec2(column.offset, {0, 0});
+	cui_tests::eq_vec2(column.size, { 80, 400 });
+	cui_tests::eq_vec2(column.offset, { 0, 0 });
 	test::eq(scroll.clips, true);
 }
 
@@ -47,18 +49,18 @@ fn void scroll_clamps_at_both_ends() @test
 
 	Element* scroll;
 	Element* column = fixture(ui, &scroll);
-	Scroll* widget = scroll.widget_as(Scroll);
+	Scroll* widget  = scroll.widget_as(Scroll);
 
-	cui_tests::frame(ui, {50, 50}, scroll: -1); // wheel down one unit
+	cui_tests::frame(ui, { 50, 50 }, scroll: -1); // wheel down one unit
 	test::eq(widget.scroll_offset, 40.0f);
-	cui_tests::eq_vec2(column.offset, {0, -40});
+	cui_tests::eq_vec2(column.offset, { 0, -40 });
 
-	cui_tests::frame(ui, {50, 50}, scroll: -100); // far past the end
+	cui_tests::frame(ui, { 50, 50 }, scroll: -100); // far past the end
 	test::eq(widget.scroll_offset, 300.0f);
 
-	cui_tests::frame(ui, {50, 50}, scroll: 100); // far past the top
+	cui_tests::frame(ui, { 50, 50 }, scroll: 100); // far past the top
 	test::eq(widget.scroll_offset, 0.0f);
-	cui_tests::eq_vec2(column.offset, {0, 0});
+	cui_tests::eq_vec2(column.offset, { 0, 0 });
 }
 
 // A mid-range wheel is consumed by the Scroll; at the limit it bubbles so an
@@ -69,21 +71,23 @@ fn void scroll_consumes_then_bubbles_at_limit() @test
 	defer ui.free();
 
 	EventRecord rec;
-	Element* column = ui.@node((Column){},
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }));
-	Element* scroll = ui.@node((Scroll){ .size = {100, 100} }, column);
-	Element* outer = ui.@node((EventProbe){ .pref = {200, 100}, .rec = &rec }, scroll);
-	ui.build(ui.@node((Stack){}, outer));
+	Element* column = ui.@node(
+		(Column) { },
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } })
+	);
+	Element* scroll = ui.@node((Scroll) { .size = { 100, 100 } }, column);
+	Element* outer  = ui.@node((EventProbe) { .pref = { 200, 100 }, .rec = &rec }, scroll);
+	ui.build(ui.@node((Stack) { }, outer));
 	ui.flush();
 
-	cui_tests::frame(ui, {50, 50}, scroll: -1); // 0 -> 40: consumed
+	cui_tests::frame(ui, { 50, 50 }, scroll: -1); // 0 -> 40: consumed
 	test::eq(rec.scrolls, 0);
 
-	cui_tests::frame(ui, {50, 50}, scroll: 1); // 40 -> 0: consumed
+	cui_tests::frame(ui, { 50, 50 }, scroll: 1); // 40 -> 0: consumed
 	test::eq(rec.scrolls, 0);
 
-	cui_tests::frame(ui, {50, 50}, scroll: 1); // already at 0: bubbles out
+	cui_tests::frame(ui, { 50, 50 }, scroll: 1); // already at 0: bubbles out
 	test::eq(rec.scrolls, 1);
 }
 
@@ -95,10 +99,10 @@ fn void scroll_offset_moves_child_absolute() @test
 	defer ui.free();
 
 	Element* scroll;
-	Element* column = fixture(ui, &scroll);
+	Element* column      = fixture(ui, &scroll);
 	Element* second_card = column.children[1];
 
-	cui_tests::frame(ui, {50, 50}, scroll: -1); // offset 40
+	cui_tests::frame(ui, { 50, 50 }, scroll: -1); // offset 40
 	ui.flush();
 
 	test::eq(second_card.absolute.y, 60.0f); // 100 - 40
@@ -112,16 +116,16 @@ fn void scroll_gates_hits_below_viewport() @test
 	defer ui.free();
 
 	Element* scroll;
-	Element* column = fixture(ui, &scroll);
-	Element* top_card = column.children[0];
+	Element* column      = fixture(ui, &scroll);
+	Element* top_card    = column.children[0];
 	Element* fourth_card = column.children[3]; // content y 300..400, off-screen
 
-	cui_tests::frame(ui, {50, 50});
+	cui_tests::frame(ui, { 50, 50 });
 	test::eq(ui.hovered == top_card, true);
 
 	// No point inside the window can reach the fourth card: its rect is below
 	// the viewport and the clip gate stops the descent.
-	cui_tests::frame(ui, {50, 99});
+	cui_tests::frame(ui, { 50, 99 });
 	test::eq(ui.hovered == fourth_card, false);
 	test::eq(fourth_card.absolute.y, 300.0f);
 }
@@ -138,12 +142,12 @@ fn void thumb_geometry() @test
 	Element* thumb = scroll.children[1];
 
 	// track = 100 - 2*2 = 96; proportional length 96 * 100/400 = 24 = THUMB_MIN.
-	cui_tests::eq_vec2(thumb.size, {6, 24});
-	cui_tests::eq_vec2(thumb.offset, {92, 2});
+	cui_tests::eq_vec2(thumb.size, { 6, 24 });
+	cui_tests::eq_vec2(thumb.offset, { 92, 2 });
 	test::eq(thumb.widget_as(ScrollThumb).visible, true);
 
 	// At max scroll the thumb sits at the end of its travel: 2 + (96-24) = 74.
-	cui_tests::frame(ui, {50, 50}, scroll: -100);
+	cui_tests::frame(ui, { 50, 50 }, scroll: -100);
 	test::eq(thumb.offset.y, 74.0f);
 }
 
@@ -154,17 +158,16 @@ fn void thumb_hidden_when_content_fits() @test
 	defer ui.free();
 
 	EventRecord rec;
-	Element* scroll = ui.@node((Scroll){ .size = {100, 100} },
-		ui.@node((Rectangle){ .size = {80, 50} }));
-	Element* outer = ui.@node((EventProbe){ .pref = {200, 100}, .rec = &rec }, scroll);
-	ui.build(ui.@node((Stack){}, outer));
+	Element* scroll = ui.@node((Scroll) { .size = { 100, 100 } }, ui.@node((Rectangle) { .size = { 80, 50 } }));
+	Element* outer = ui.@node((EventProbe) { .pref = { 200, 100 }, .rec = &rec }, scroll);
+	ui.build(ui.@node((Stack) { }, outer));
 	ui.flush();
 
 	Element* thumb = scroll.children[1];
 	test::eq(thumb.widget_as(ScrollThumb).visible, false);
 	test::eq(thumb.drawing_count, 0);
 
-	cui_tests::frame(ui, {50, 50}, scroll: -1);
+	cui_tests::frame(ui, { 50, 50 }, scroll: -1);
 	test::eq(rec.scrolls, 1); // nothing to scroll: bubbles out
 }
 
@@ -174,15 +177,17 @@ fn void initial_offset_clamped() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* column = ui.@node((Column){},
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }),
-		ui.@node((Rectangle){ .size = {80, 100} }));
-	Element* scroll = ui.@node((Scroll){ .size = {100, 100}, .scroll_offset = 1000 }, column);
-	ui.build(ui.@node((Stack){}, scroll));
+	Element* column = ui.@node(
+		(Column) { },
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } }),
+		ui.@node((Rectangle) { .size = { 80, 100 } })
+	);
+	Element* scroll = ui.@node((Scroll) { .size = { 100, 100 }, .scroll_offset = 1000 }, column);
+	ui.build(ui.@node((Stack) { }, scroll));
 	ui.flush();
 
 	test::eq(scroll.widget_as(Scroll).scroll_offset, 300.0f);
-	cui_tests::eq_vec2(column.offset, {0, -300});
+	cui_tests::eq_vec2(column.offset, { 0, -300 });
 }

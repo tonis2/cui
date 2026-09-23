@@ -11,18 +11,18 @@
  - `set_transform` — one matrix write, palette re-upload. No layout, no paint.
  - `request_paint` — that element's `paint()` re-runs; everything else is cache.
  - `request_layout` — the dirty spine re-layouts (the constraint cache prunes
-   the rest), then the display list is re-emitted.
+ the rest), then the display list is re-emitted.
  - `request_build` — a composite drops its built subtree and re-runs `build()`,
-   then layout + paint as above (`request_paint` on a build widget routes here
-   — see `Element.request_paint`).
+ then layout + paint as above (`request_paint` on a build widget routes here
+ — see `Element.request_paint`).
  - `invalidate` — every element whose hook read the named provided value
-   (`Element.watch`) is invalidated in the phase it read it from. One tree walk
-   plus whichever of the above the watchers asked for.
+ (`Element.watch`) is invalidated in the phase it read it from. One tree walk
+ plus whichever of the above the watchers asked for.
  - `resize` — the root constraints changed, so the whole tree re-layouts and the
-   whole display list is re-emitted. The embedder's call, made when the window
-   moved; the most expensive of these and the rarest.
+ whole display list is re-emitted. The embedder's call, made when the window
+ moved; the most expensive of these and the rarest.
  - nothing — `flush()` returns immediately; the GPU redraws the retained
-   display list without any upload.
+ display list without any upload.
 
  Invalidation is per element and does not propagate: a parent's `request_paint`
  does not reach its children and a child's does not reach its parent. Where two
@@ -142,10 +142,12 @@ fn Constraints Constraints.deflate(self, Vec2 by)
 *>
 fn Vec2 Constraints.fill(self, Vec2 size)
 {
-	return self.constrain({
-		size.x > 0 ? size.x : self.max.x,
-		size.y > 0 ? size.y : self.max.y,
-	});
+	return self.constrain(
+		{
+			size.x > 0 ? size.x : self.max.x,
+			size.y > 0 ? size.y : self.max.y,
+		}
+	);
 }
 
 <*
@@ -210,7 +212,7 @@ const Color BLACK = { 0.0, 0.0, 0.0, 1.0 };
 <*
  Opaque mid grey. Historical name — kept because demos reference it.
 *>
-const Color BLUE  = { 0.5, 0.5, 0.5, 1.0 };
+const Color BLUE = { 0.5, 0.5, 0.5, 1.0 };
 
 
 // Multiplies rgb rather than dropping alpha: over a dark viewport those look
@@ -219,7 +221,7 @@ const Color BLUE  = { 0.5, 0.5, 0.5, 1.0 };
 fn Color Color.dim(self, float amount)
 {
 	Vec4 rgba = (Vec4)self;
-	return (Color){ rgba.x * amount, rgba.y * amount, rgba.z * amount, rgba.w };
+	return (Color) { rgba.x * amount, rgba.y * amount, rgba.z * amount, rgba.w };
 }
 
 <*
@@ -242,48 +244,48 @@ fn Color Color.dim(self, float amount)
  widgets already implement to light themselves up. Button is the worked example.
 
  - `build` — compose this widget out of existing widgets: return a subtree made
-   with `elem.ui.@node` — the framework attaches it as the element's single
-   child on the flush after the element enters the tree (a build widget takes
-   no @node children of its own; the built subtree IS its content). With
-   `layout` omitted, the element sizes itself to the built subtree. After
-   mutating fields, call `elem.request_build()` (or use `ui.@modify`) to
-   regenerate the subtree. Must be pure: read own fields, produce nodes — state
-   that must survive a rebuild lives on the composite, not inside the built
-   subtree. See test/composite.c3 and build.md.
+ with `elem.ui.@node` — the framework attaches it as the element's single
+ child on the flush after the element enters the tree (a build widget takes
+ no @node children of its own; the built subtree IS its content). With
+ `layout` omitted, the element sizes itself to the built subtree. After
+ mutating fields, call `elem.request_build()` (or use `ui.@modify`) to
+ regenerate the subtree. Must be pure: read own fields, produce nodes — state
+ that must survive a rebuild lives on the composite, not inside the built
+ subtree. See test/composite.c3 and build.md.
  - `mount` — the element entered the tree; runs once, just before its first
-   layout, with the parent chain already wired. The home for element properties
-   that never change: `elem.ignores_pointer`, `elem.clips` / `clip_radii`, and
-   `set_cursor` for a widget that speaks for its whole subtree. A property
-   computed from constraints or from mutable fields belongs in `layout`
-   instead, which re-runs; this does not. Not a safe place to acquire anything
-   that `unmount` must release: an element released before it was ever laid out
-   — a subtree built and replaced in the same frame — gets the `unmount` without
-   ever having got the `mount`. Allocate in `build` or on first use.
+ layout, with the parent chain already wired. The home for element properties
+ that never change: `elem.ignores_pointer`, `elem.clips` / `clip_radii`, and
+ `set_cursor` for a widget that speaks for its whole subtree. A property
+ computed from constraints or from mutable fields belongs in `layout`
+ instead, which re-runs; this does not. Not a safe place to acquire anything
+ that `unmount` must release: an element released before it was ever laid out
+ — a subtree built and replaced in the same frame — gets the `unmount` without
+ ever having got the `mount`. Allocate in `build` or on first use.
  - `layout` — given constraints, return own size; lay out children through
-   `elem.layout_child` / `elem.place_child`. A content-sized leaf is one line:
-   `return constraints.constrain(wanted);` — see Label. Omitted: a build widget
-   delegates to its built subtree; otherwise the size field or the fill default
-   decides, and children get loose constraints and keep their offsets. Reach
-   for `Constraints.loose` / `tight` / `deflate` / `fill` rather than writing
-   the ranges out by hand. Re-runs on every resize, which is what makes it the
-   place for the element properties `mount` cannot answer for: a `media_box`
-   sized from the constraints, a clip radius read from a mutable style.
+ `elem.layout_child` / `elem.place_child`. A content-sized leaf is one line:
+ `return constraints.constrain(wanted);` — see Label. Omitted: a build widget
+ delegates to its built subtree; otherwise the size field or the fill default
+ decides, and children get loose constraints and keep their offsets. Reach
+ for `Constraints.loose` / `tight` / `deflate` / `fill` rather than writing
+ the ranges out by hand. Re-runs on every resize, which is what makes it the
+ place for the element properties `mount` cannot answer for: a `media_box`
+ sized from the constraints, a clip radius read from a mutable style.
  - `paint` — emit primitives in element-local coordinates. Omitted: the element
-   draws nothing itself (pure container).
+ draws nothing itself (pure container).
  - `on_mouse` — press/release/move/scroll, hit-tested and bubbling: the deepest
-   element under the pointer gets it first; return true to consume. Consuming a
-   PRESS captures the mouse until that button releases.
+ element under the pointer gets it first; return true to consume. Consuming a
+ PRESS captures the mouse until that button releases.
  - `on_hover` — pointer entered (true) / left (false) this element.
  - `on_key` — key press/release edges, delivered to the focused element (left
-   click focuses; see `Element.request_focus`), bubbling like `on_mouse`.
+ click focuses; see `Element.request_focus`), bubbling like `on_mouse`.
  - `update` — called every frame with the frame's dt — for animations and
-   polling `ui.input`; mutate state then `request_paint()`.
+ polling `ui.input`; mutate state then `request_paint()`.
  - `unmount` — free whatever the widget allocated; called whenever its element
-   leaves the tree, including when it leaves only to be rebuilt (which mounts
-   the new one again). Fires unconditionally, so it is the wider of the pair:
-   see the caveat on `mount`. The widget struct itself stays caller-owned.
-   Takes the element like every other hook, so a widget can still reach
-   `inherit` on the way out and release symmetrically with what it acquired.
+ leaves the tree, including when it leaves only to be rebuilt (which mounts
+ the new one again). Fires unconditionally, so it is the wider of the pair:
+ see the caveat on `mount`. The widget struct itself stays caller-owned.
+ Takes the element like every other hook, so a widget can still reach
+ `inherit` on the way out and release symmetrically with what it acquired.
 
  The built-in implementations (Rectangle, Column, Row, Stack, Padding, Clip,
  Scroll, Button) live in module `cui::widgets`; apps write their own against
@@ -396,7 +398,7 @@ struct Element
 	// element to whatever is painted behind it. Children are unaffected — they
 	// are tested first and hit normally — so a transparent container still
 	// delivers events to interactive descendants.
-	//
+	// 
 	// Set from layout(), like clips. Widgets that paint decoration over an
 	// interactive surface want it: without it, a Label overlaid on a viewport
 	// wins the hit test (deepest rect containing the point, whether or not it
@@ -404,7 +406,7 @@ struct Element
 	// underneath — so the label becomes a dead zone, and it also takes the
 	// cursor down to ARROW, since hover stops at the label and nothing there
 	// ever asked for the viewport's crosshair.
-	//
+	// 
 	// Deliberately opt-in rather than "skip elements with no handlers": a
 	// modal scrim, a disabled overlay and a drag blocker are all exactly an
 	// element that handles nothing and must block everything.
@@ -414,7 +416,7 @@ struct Element
 	// built in. An open dropdown is the whole reason: a popup is a child of the
 	// widget that owns it, so without this it lands in that widget's slot in the
 	// paint order and the fields BELOW it in the same form cover it.
-	//
+	// 
 	// Set from `build()` or `layout()`, like `ignores_pointer`, and cleared for
 	// free by `release`.
 	bool raised;
@@ -425,7 +427,7 @@ struct Element
 	// beats the siblings of the widget ITSELF, so a dropdown two containers deep
 	// in a form still loses to the rows under that form — which is the whole
 	// bug, since a Select is nearly always inside a Row inside a Column.
-	//
+	// 
 	// Relative order survives inside each pass, and that is what keeps an
 	// embedder's floors in the order it wrote them: a modal on a later floor is
 	// raised too, so it is still the last of the raised ones. Do not set it —
@@ -451,7 +453,7 @@ struct Element
 	// The screen this element publishes to its subtree: `Element.media` answers
 	// with the nearest non-zero box at or above the caller, and with the window
 	// when there is none. Zero — the default — is "not a screen".
-	//
+	// 
 	// A size rather than a flag, and set from `layout()` BEFORE the children are
 	// laid out, because that is the only moment the answer both exists and is
 	// early enough to be useful: `size` below is not assigned until the widget's
@@ -466,10 +468,10 @@ struct Element
 	// parent nulled, nothing recycled, nothing freed — instead of recycling it,
 	// so a caller that hands a subtree to a widget still owns every element in
 	// it afterwards and can patch it and attach it somewhere else.
-	//
+	// 
 	// Only the recursion is filtered: `Ui.release(borrowed)` on the element
 	// ITSELF still releases it, which is how the owner eventually gives it back.
-	//
+	// 
 	// The case it exists for is a widget whose content is handed in rather than
 	// built — `Dialog.content`, `AreaView.content`, and `widgets::borrow_content`
 	// which sets this. Every other element in the tree is owned by the tree, and
@@ -624,7 +626,7 @@ faultdef NOT_PROVIDED;
 
  @param $Type : `The provided type itself, not its pointer — inherit(AppState).`
  @return `Pointer to the provided value.`
- @return? NOT_PROVIDED
+ @return ? NOT_PROVIDED
 *>
 macro Ui.inherit(&self, $Type)
 {
@@ -665,9 +667,9 @@ fn void Ui.free(&self)
  by nested `@node` calls. Attach the finished tree with `Ui.build`, or graft it
  onto a live element with `Element.append`.
 
-     ui.build(ui.@node((Column){ .gap = 8.0 },
-         ui.@node((Rectangle){ .size = {100, 40} }),
-         ui.@node((Rectangle){ .size = {100, 40} })));
+ ui.build(ui.@node((Column){ .gap = 8.0 },
+ ui.@node((Rectangle){ .size = {100, 40} }),
+ ui.@node((Rectangle){ .size = {100, 40} })));
 
  The scoped builder (`@canvas` / `@tree` / `@node`) is sugar over this and reads
  better for whole trees; this stays the detached primitive.
@@ -766,7 +768,7 @@ macro bool Element.is_widget(&self, $Type)
 
  @param $Type : `The provided type itself, not its pointer.`
  @return `Pointer to the provided value.`
- @return? NOT_PROVIDED
+ @return ? NOT_PROVIDED
 *>
 macro Element.inherit(&self, $Type) => self.ui.inherit($Type);
 
@@ -791,7 +793,7 @@ macro Element.inherit(&self, $Type) => self.ui.inherit($Type);
 
  @param $Type : `The provided type itself, not its pointer.`
  @return `Pointer to the provided value.`
- @return? NOT_PROVIDED
+ @return ? NOT_PROVIDED
 *>
 macro Element.watch(&self, $Type)
 {
@@ -855,7 +857,7 @@ fn void Element.clear_watches(&self, WatchKind kind)
 macro void Ui.@watching(&self, Element* element, WatchKind kind; @body())
 {
 	element.clear_watches(kind);
-	Element* outer = self.watcher;
+	Element* outer       = self.watcher;
 	WatchKind outer_kind = self.watch_kind;
 	self.watcher = element;
 	self.watch_kind = kind;
@@ -888,7 +890,7 @@ faultdef WIDGET_NOT_FOUND;
  @param $Type : `The widget type to look for.`
  @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
  @return `The first element whose widget is $Type.`
- @return? WIDGET_NOT_FOUND : `No element in the tree carries a $Type widget.`
+ @return ? WIDGET_NOT_FOUND : `No element in the tree carries a $Type widget.`
 *>
 macro Ui.find(&self, $Type)
 {
@@ -921,7 +923,7 @@ fn Element* find_by_type(Element* elem, typeid type) @private
  @param $Type : `The widget type to look for.`
  @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
  @return `A pointer to the first $Type widget in the tree.`
- @return? WIDGET_NOT_FOUND : `No element in the tree carries a $Type widget.`
+ @return ? WIDGET_NOT_FOUND : `No element in the tree carries a $Type widget.`
 *>
 macro Ui.get_widget(&self, $Type)
 {
@@ -971,7 +973,7 @@ fn Element* Element.with_id(&self, String id)
 
  @param id : `The name given with with_id.`
  @return `The element carrying the id.`
- @return? WIDGET_NOT_FOUND : `No element in the tree carries that id.`
+ @return ? WIDGET_NOT_FOUND : `No element in the tree carries that id.`
 *>
 fn Element*? Ui.find_id(&self, String id)
 {
@@ -990,7 +992,7 @@ fn Element*? Ui.find_id(&self, String id)
 
  @param id : `The name given with with_id.`
  @return `The element carrying the id.`
- @return? WIDGET_NOT_FOUND : `No element in this subtree carries that id.`
+ @return ? WIDGET_NOT_FOUND : `No element in this subtree carries that id.`
 *>
 fn Element*? Element.find_id(&self, String id)
 {
@@ -1031,7 +1033,7 @@ fn Element* find_by_id(Element* elem, String id) @private
  @param $Type : `The widget type of that node.`
  @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
  @return `A pointer to the widget of the element carrying the id.`
- @return? WIDGET_NOT_FOUND : `No element in the tree carries that id.`
+ @return ? WIDGET_NOT_FOUND : `No element in the tree carries that id.`
 *>
 macro Ui.get_widget_id(&self, String id, $Type)
 {
@@ -1056,7 +1058,7 @@ macro Ui.request_paint_id(&self, String id)
  Walks the tree a single time, hands the body the typed widget, then
  `request_paint()`s the element, so
 
-     ui.@modify(Dial; d) { d.value = 0; };
+ ui.@modify(Dial; d) { d.value = 0; };
 
  is the one-walk equal of `find` + `widget_as` + `request_paint`. The body runs
  only if the node exists (a silent no-op otherwise), and the invalidation is
@@ -1081,7 +1083,7 @@ macro void Ui.@modify(&self, $Type; @body(widget))
  The id-keyed twin of `@modify` — names the node instead of finding it by type
  (still passing $Type to type the widget):
 
-     ui.@modify_id("teal", Rectangle; card) { card.style.color = red; };
+ ui.@modify_id("teal", Rectangle; card) { card.style.color = red; };
 
  @param id : `The name given with with_id.`
  @param $Type : `The widget type of that node.`
@@ -1101,13 +1103,13 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 // first match in tree order. Use these when a widget type or an id is
 // deliberately duplicated across the tree (one HUD per split pane): reaching
 // only the first HUD leaves every other pane stale.
-//
+// 
 // All three take the body inline instead of returning a list, so no match
 // outlives the call and nothing has to be freed. The traversal follows the
 // parent pointers rather than pushing a stack, so it allocates nothing at all
 // and is cheap enough to call from a render loop. Visit order is pre-order: an
 // element before its children, children left to right.
-//
+// 
 // Implementation note for anyone tempted to simplify: the walk cannot be
 // recursive. A tree's depth is a runtime value and macro recursion in C3 only
 // terminates on compile-time bounds, and a plain `fn` walker cannot stand in
@@ -1116,10 +1118,10 @@ macro void Ui.@modify_id(&self, String id, $Type; @body(widget))
 <*
  Runs the body once for every element in the tree.
 
-     ui.@walk(; elem)
-     {
-         if (elem.is_widget(Viewport) || elem.has_id("hud")) elem.request_paint();
-     };
+ ui.@walk(; elem)
+ {
+ if (elem.is_widget(Viewport) || elem.has_id("hud")) elem.request_paint();
+ };
 
  The unfiltered primitive under `@each` and `@each_id`. Reach for it when one
  pass has to answer several questions: three `@each` calls are three walks of
@@ -1147,7 +1149,7 @@ macro void Ui.@walk(&self; @body(elem))
 		while (walk != root && walk.parent)
 		{
 			Element* parent = walk.parent;
-			sz after = child_slot(parent, walk) + 1;
+			sz after        = child_slot(parent, walk) + 1;
 			if (after < parent.children.len())
 			{
 				next = parent.children[after];
@@ -1175,7 +1177,7 @@ fn sz child_slot(Element* parent, Element* child) @private
 <*
  Runs the body for every element whose widget is exactly $Type.
 
-     ui.@each(Viewport; elem) { elem.request_paint(); };
+ ui.@each(Viewport; elem) { elem.request_paint(); };
 
  @param $Type : `The widget type to visit.`
  @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
@@ -1221,14 +1223,14 @@ tlocal Ui* ambient_ui @private;
  the body `@tree` and `@node` need no ui and attach themselves to the enclosing
  node:
 
-     `@canvas(ui)`
-     `{`
-     `    @tree((Column){ .gap = 8.0 })`
-     `    {`
-     `        @node((Rectangle){ .size = {100, 40} });`
-     `        for (int i = 0; i < 4; i++) @node((Rectangle){ .size = {80, 20} });`
-     `    };`
-     `};`
+ `@canvas(ui)`
+ `{`
+ `    @tree((Column){ .gap = 8.0 })`
+ `    {`
+ `        @node((Rectangle){ .size = {100, 40} });`
+ `        for (int i = 0; i < 4; i++) @node((Rectangle){ .size = {80, 20} });`
+ `    };`
+ `};`
 
  The single node built at the top level of the body becomes the UI root. Both
  inner macros return the `Element*`, so handles still chain —
@@ -1241,9 +1243,9 @@ tlocal Ui* ambient_ui @private;
 *>
 macro void @canvas(Ui* ui; @body()) @builtin
 {
-	Ui* prev_ui = ambient_ui;
+	Ui* prev_ui        = ambient_ui;
 	Element* prev_root = ui.scoped_root;
-	sz prev_floor = ui.scope_floor;
+	sz prev_floor      = ui.scope_floor;
 	ambient_ui = ui;
 	ui.scoped_root = null;
 	ui.scope_floor = ui.build_stack.len();
@@ -1268,9 +1270,9 @@ macro void @canvas(Ui* ui; @body()) @builtin
 *>
 macro Element* @subtree(Ui* ui; @body()) @builtin
 {
-	Ui* prev_ui = ambient_ui;
+	Ui* prev_ui        = ambient_ui;
 	Element* prev_root = ui.scoped_root;
-	sz prev_floor = ui.scope_floor;
+	sz prev_floor      = ui.scope_floor;
 	ambient_ui = ui;
 	ui.scoped_root = null;
 	ui.scope_floor = ui.build_stack.len();
@@ -1299,7 +1301,7 @@ macro Element* @subtree(Ui* ui; @body()) @builtin
 *>
 macro Element* @tree(widget; @body()) @builtin
 {
-	Ui* scope_ui = ambient_ui;
+	Ui* scope_ui  = ambient_ui;
 	Element* elem = scope_ui.@node(widget);
 	scope_ui.attach_scoped(elem);
 	scope_ui.build_stack.push(elem);
@@ -1315,9 +1317,9 @@ macro Element* @tree(widget; @body()) @builtin
  attached as children in order — a one-call subtree for the common row-of-leaves
  shape, without a `@tree` body:
 
-     `@node((Row){ .gap = 16.0 },`
-     `    (Button){ .on_click = &reset },`
-     `    (Button){ .on_click = &bump });`
+ `@node((Row){ .gap = 16.0 },`
+ `    (Button){ .on_click = &reset },`
+ `    (Button){ .on_click = &bump });`
 
  Unlike `ui.@node`'s varargs these never take `Element*` — an already-attached
  node passed here would attach twice, and the compiler rejects it (`Element*` is
@@ -1330,15 +1332,16 @@ macro Element* @tree(widget; @body()) @builtin
 *>
 macro Element* @node(widget, ...) @builtin
 {
-	Ui* scope_ui = ambient_ui;
+	Ui* scope_ui  = ambient_ui;
 	Element* elem = scope_ui.@node(widget);
 	scope_ui.attach_scoped(elem);
 	$for var $i = 0; $i < $vaarg.len; $i++:
-	{
-		Element* child = scope_ui.@node($vaarg[$i]);
-		child.parent = elem;
-		elem.children.push(child);
-	}
+
+		{
+			Element* child = scope_ui.@node($vaarg[$i]);
+			child.parent = elem;
+			elem.children.push(child);
+		}
 	$endfor
 	return elem;
 }
@@ -2069,8 +2072,10 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 		{
 			Vec4 parent = self.canvas.clips[inherited_clip].rect;
 			rect = {
-				math::max(rect.x, parent.x), math::max(rect.y, parent.y),
-				math::min(rect.z, parent.z), math::min(rect.w, parent.w),
+				math::max(rect.x, parent.x),
+				math::max(rect.y, parent.y),
+				math::min(rect.z, parent.z),
+				math::min(rect.w, parent.w),
 			};
 			if (rect.z < rect.x) rect.z = rect.x;
 			if (rect.w < rect.y) rect.w = rect.y;
@@ -2108,7 +2113,11 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 	bool raised;
 	foreach (child : element.children)
 	{
-		if (child.raise_path) { raised = true; continue; }
+		if (child.raise_path)
+		{
+			raised = true;
+			continue;
+		}
 		self.emit(child, absolute, slot, clip);
 	}
 	if (raised)

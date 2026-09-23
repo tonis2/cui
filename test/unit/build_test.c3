@@ -15,7 +15,7 @@ fn Element* Inner.build(&self, Element* elem) @dynamic
 {
 	// The leaf's width is baked from v at build time — a repaint alone could
 	// never change it; only a rebuild can.
-	return elem.ui.@node((Rectangle){ .size = { self.v * 100.0f, 10.0f } }).with_id("fill");
+	return elem.ui.@node((Rectangle) { .size = { self.v * 100.0f, 10.0f } }).with_id("fill");
 }
 
 struct Outer (Widget)
@@ -26,7 +26,7 @@ struct Outer (Widget)
 fn Element* Outer.build(&self, Element* elem) @dynamic
 {
 	// Nested composite: rebuilding Outer must cascade into a fresh Inner.
-	return elem.ui.@node((Inner){ .v = self.v });
+	return elem.ui.@node((Inner) { .v = self.v });
 }
 
 struct Shedding (Widget)
@@ -36,7 +36,7 @@ struct Shedding (Widget)
 
 fn Element* Shedding.build(&self, Element* elem) @dynamic
 {
-	return elem.ui.@node((UnmountProbe){ .count = self.unmounts });
+	return elem.ui.@node((UnmountProbe) { .count = self.unmounts });
 }
 
 struct Remounting (Widget)
@@ -46,13 +46,13 @@ struct Remounting (Widget)
 
 fn Element* Remounting.build(&self, Element* elem) @dynamic
 {
-	return elem.ui.@node((MountProbe){ .pref = { 20, 10 }, .rec = self.rec });
+	return elem.ui.@node((MountProbe) { .pref = { 20, 10 }, .rec = self.rec });
 }
 
 fn Ui* fixture(float v) @private
 {
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
-	ui.build(ui.@node((Stack){}, ui.@node((Outer){ .v = v })));
+	ui.build(ui.@node((Stack) { }, ui.@node((Outer) { .v = v })));
 	ui.flush();
 	return ui;
 }
@@ -65,8 +65,8 @@ fn void initial_build_attaches_and_sizes() @test
 	Element* outer = ui.find(Outer)!!;
 	test::eq(outer.children.len(), 1);
 	Element* fill = ui.find_id("fill")!!;
-	cui_tests::eq_vec2(fill.size, {50, 10});
-	cui_tests::eq_vec2(outer.size, {50, 10});    // passthrough: composite = subtree
+	cui_tests::eq_vec2(fill.size, { 50, 10 });
+	cui_tests::eq_vec2(outer.size, { 50, 10 }); // passthrough: composite = subtree
 }
 
 fn void modify_rebuilds_through_cascade() @test
@@ -76,7 +76,7 @@ fn void modify_rebuilds_through_cascade() @test
 
 	// request_paint routes to request_build on a paint-less build widget, so
 	// @modify regenerates the whole subtree — including the nested Inner.
-	ui.@modify(Outer; o)
+	ui.@modify(Outer ; o)
 	{
 		o.v = 0.75f;
 	};
@@ -85,7 +85,7 @@ fn void modify_rebuilds_through_cascade() @test
 
 	Element* fill = ui.find_id("fill")!!;
 	test::eq(fill.size.x, 75.0f);
-	test::eq(ui.find(Inner)!!.widget_as(Inner).v, 0.75f);   // fresh Inner, new config
+	test::eq(ui.find(Inner)!!.widget_as(Inner).v, 0.75f); // fresh Inner, new config
 }
 
 fn void request_build_on_nested_composite_only() @test
@@ -107,14 +107,14 @@ fn void composite_handle_survives_rebuild() @test
 	defer ui.free();
 
 	Element* outer = ui.find(Outer)!!;
-	ui.@modify(Outer; o)
+	ui.@modify(Outer ; o)
 	{
 		o.v = 0.75f;
 	};
 	ui.flush();
 
-	test::@check(ui.find(Outer)!! == outer);     // rebuild replaces children, not self
-	test::eq(ui.free_elements.len(), 0);         // old elements recycled in place
+	test::@check(ui.find(Outer)!! == outer); // rebuild replaces children, not self
+	test::eq(ui.free_elements.len(), 0); // old elements recycled in place
 }
 
 fn void rebuild_fires_unmount_on_old_subtree() @test
@@ -123,14 +123,14 @@ fn void rebuild_fires_unmount_on_old_subtree() @test
 	defer ui.free();
 
 	int unmounts;
-	Element* shed = ui.@node((Shedding){ .unmounts = &unmounts });
-	ui.build(ui.@node((Stack){}, shed));
+	Element* shed = ui.@node((Shedding) { .unmounts = &unmounts });
+	ui.build(ui.@node((Stack) { }, shed));
 	ui.flush();
 	test::eq(unmounts, 0);
 
 	shed.request_build();
 	ui.flush();
-	test::eq(unmounts, 1);                       // old UnmountProbe released
+	test::eq(unmounts, 1); // old UnmountProbe released
 
 	shed.request_build();
 	ui.flush();
@@ -148,23 +148,23 @@ fn void mount_runs_once_before_the_first_layout() @test
 	defer ui.free();
 
 	MountRecord rec;
-	Element* probe = ui.@node((MountProbe){ .pref = {80, 30}, .rec = &rec });
-	Element* mid = ui.@node((Stack){}, probe);
-	ui.build(ui.@node((Stack){}, mid));
+	Element* probe = ui.@node((MountProbe) { .pref = { 80, 30 }, .rec = &rec });
+	Element* mid   = ui.@node((Stack) { }, probe);
+	ui.build(ui.@node((Stack) { }, mid));
 	ui.flush();
 
 	test::eq(rec.mounts, 1);
-	test::eq(rec.depth_at_mount, 2);             // probe -> mid -> root, all wired
-	test::eq(rec.layouts_at_mount, 0);           // ahead of the element's own layout
-	cui_tests::eq_vec2(rec.size_at_mount, {0, 0});
-	cui_tests::eq_vec2(probe.size, {80, 30});    // and the layout still ran
+	test::eq(rec.depth_at_mount, 2); // probe -> mid -> root, all wired
+	test::eq(rec.layouts_at_mount, 0); // ahead of the element's own layout
+	cui_tests::eq_vec2(rec.size_at_mount, { 0, 0 });
+	cui_tests::eq_vec2(probe.size, { 80, 30 }); // and the layout still ran
 
 	// What it declared outlives the pass it declared it in.
-	cui_tests::frame(ui, {10, 10});
+	cui_tests::frame(ui, { 10, 10 });
 	test::eq(ui.cursor, Cursor.CROSSHAIR);
 
 	// Relayouts do not re-mount: a resize is not a new element.
-	ui.size = {380, 90};
+	ui.size = { 380, 90 };
 	ui.root.request_layout();
 	ui.flush();
 	test::eq(rec.mounts, 1);
@@ -181,15 +181,15 @@ fn void a_rebuilt_subtree_mounts_again() @test
 	defer ui.free();
 
 	MountRecord rec;
-	Element* host = ui.@node((Remounting){ .rec = &rec });
-	ui.build(ui.@node((Stack){}, host));
+	Element* host = ui.@node((Remounting) { .rec = &rec });
+	ui.build(ui.@node((Stack) { }, host));
 	ui.flush();
 	test::eq(rec.mounts, 1);
 
 	host.request_build();
 	ui.flush();
-	test::eq(rec.mounts, 2);                     // fresh element, fresh mount
-	test::eq(ui.free_elements.len(), 0);         // and it is the recycled one
+	test::eq(rec.mounts, 2); // fresh element, fresh mount
+	test::eq(ui.free_elements.len(), 0); // and it is the recycled one
 }
 
 fn void request_paint_routes_only_for_paintless_build() @test
@@ -198,13 +198,13 @@ fn void request_paint_routes_only_for_paintless_build() @test
 	defer ui.free();
 
 	Element* outer = ui.find(Outer)!!;
-	Element* fill = ui.find_id("fill")!!;
+	Element* fill  = ui.find_id("fill")!!;
 
-	outer.request_paint();                       // build widget: routes to rebuild
+	outer.request_paint(); // build widget: routes to rebuild
 	test::@check(outer.dirty.build);
 	test::@check(ui.build_pending);
 
-	fill.request_paint();                        // plain widget: stays a repaint
+	fill.request_paint(); // plain widget: stays a repaint
 	test::@check(!fill.dirty.build);
 	test::@check(fill.dirty.paint);
 }

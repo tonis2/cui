@@ -1,7 +1,7 @@
 <*
  A single line of editable text.
 
- 	`@node((TextField) { .placeholder = "file name", .on_submit = &chosen });`
+ `@node((TextField) { .placeholder = "file name", .on_submit = &chosen });`
 
  The first widget in cui to read `Input.text`, which the platform layer has been
  filling all along — c3w's `get_text` on every backend. That is the field's whole
@@ -59,7 +59,7 @@ alias OnChange = fn void(Ui* ui, String text);
 // repeats once it does. Close to what a desktop defaults to: the pause is what
 // keeps a single tap from deleting two characters, and the interval is fast
 // enough to clear a path without the user counting the deletions.
-const float REPEAT_DELAY = 0.4;
+const float REPEAT_DELAY    = 0.4;
 const float REPEAT_INTERVAL = 0.035;
 
 <*
@@ -159,7 +159,7 @@ fn void TextField.mount(&self, Element* elem) @dynamic
 }
 
 // The buffer, made if it is not there yet.
-//
+// 
 // `mount` runs at the element's first layout, not when it is built — so a caller
 // that fills a freshly built field in (`set_text` from a composite's builder)
 // reaches it before mount does. Both go through here, and whichever is first
@@ -234,7 +234,7 @@ fn void TextField.select_all(&self, Element* elem)
 fn bool TextField.delete_selection(&self)
 {
 	usz start = self.selection_start();
-	usz end = self.selection_end();
+	usz end   = self.selection_end();
 	if (start == end) return false;
 
 	self.text.delete((sz)start, (sz)(end - start));
@@ -260,7 +260,7 @@ fn Vec2 TextField.layout(&self, Element* elem, Constraints constraints) @dynamic
 	// Measured against a fixed sample rather than the current text: a field whose
 	// height changed with what was typed in it would move everything under it on
 	// every keystroke. "Mg" carries both an ascender and a descender.
-	float line = elem.ui.text.measure(0, "Mg", style.text_size).y;
+	float line   = elem.ui.text.measure(0, "Mg", style.text_size).y;
 	float height = line + style.padding.y * 2.0f;
 
 	return constraints.constrain({ self.width > 0.0f ? self.width : constraints.max.x, height });
@@ -270,15 +270,19 @@ fn void TextField.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	TextFieldStyle style = self.style.resolved();
 
-	painter.rect({ 0, 0 }, elem.size, {
-		.color = style.background,
-		.border_color = self.focused ? style.border_focused : style.border,
-		.border_width = style.border_width,
-		.border_radius = style.border_radius,
-	});
+	painter.rect(
+		{ 0, 0 },
+		elem.size,
+		{
+			.color = style.background,
+			.border_color = self.focused ? style.border_focused : style.border,
+			.border_width = style.border_width,
+			.border_radius = style.border_radius,
+		}
+	);
 
-	String shown = self.text.str_view();
-	Vec2 at = { style.padding.x, style.padding.y };
+	String shown       = self.text.str_view();
+	Vec2 at            = { style.padding.x, style.padding.y };
 	float inner_height = elem.size.y - style.padding.y * 2.0f;
 
 	// Under the text, and only while focused — for the same reason as the caret:
@@ -287,7 +291,7 @@ fn void TextField.paint(&self, Element* elem, Painter* painter) @dynamic
 	if (self.focused && self.has_selection())
 	{
 		float from = self.offset_of(elem, self.selection_start());
-		float to = self.offset_of(elem, self.selection_end());
+		float to   = self.offset_of(elem, self.selection_end());
 		painter.rect({ at.x + from, at.y }, { to - from, inner_height }, { .color = style.selection });
 	}
 
@@ -307,7 +311,8 @@ fn void TextField.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.rect(
 		{ at.x + self.offset_of(elem, self.caret), at.y },
 		{ style.caret_width, inner_height },
-		{ .color = style.caret });
+		{ .color = style.caret }
+	);
 }
 
 <*
@@ -366,7 +371,11 @@ fn void TextField.update(&self, Element* elem, float dt) @dynamic
 	bool printable = false;
 	foreach (char c : typed)
 	{
-		if (c >= 0x20 && c != 0x7f) { printable = true; break; }
+		if (c >= 0x20 && c != 0x7f)
+		{
+			printable = true;
+			break;
+		}
 	}
 	if (!printable) return;
 
@@ -377,7 +386,7 @@ fn void TextField.update(&self, Element* elem, float dt) @dynamic
 	foreach (char c : typed)
 	{
 		if (c < 0x20 || c == 0x7f) continue;
-		self.text.insert_chars_at((sz)self.caret, (String)&&(char[1]){ c });
+		self.text.insert_chars_at((sz)self.caret, (String)&&(char[1]) { c });
 		self.caret++;
 	}
 	self.anchor = self.caret;
@@ -559,8 +568,7 @@ fn void TextField.move_caret(&self, Key key, bool extend)
 // still hold the frame loop awake for as long as the key was down.
 fn bool repeats(Key key) @local
 {
-	return key == Key.BACKSPACE || key == Key.DELETE
-		|| key == Key.LEFT_ARROW || key == Key.RIGHT_ARROW;
+	return key == Key.BACKSPACE || key == Key.DELETE || key == Key.LEFT_ARROW || key == Key.RIGHT_ARROW;
 }
 
 // The modifiers, read from the frame's held-key set: cui delivers Shift and
@@ -637,8 +645,8 @@ fn void TextField.on_hover(&self, Element* elem, bool entered) @dynamic
 fn usz TextField.caret_for(&self, Element* elem, float x)
 {
 	TextFieldStyle style = self.style.resolved();
-	String shown = self.text.str_view();
-	float wanted = x - style.padding.x;
+	String shown         = self.text.str_view();
+	float wanted         = x - style.padding.x;
 	if (wanted <= 0.0f) return 0;
 
 	float previous = 0.0f;
@@ -660,7 +668,7 @@ fn usz TextField.caret_for(&self, Element* elem, float x)
 fn usz TextField.previous_boundary(&self)
 {
 	String shown = self.text.str_view();
-	usz i = self.caret;
+	usz i        = self.caret;
 	while (i > 0)
 	{
 		i--;
@@ -673,7 +681,7 @@ fn usz TextField.previous_boundary(&self)
 fn usz TextField.next_boundary(&self)
 {
 	String shown = self.text.str_view();
-	usz i = self.caret;
+	usz i        = self.caret;
 	while (i < shown.len)
 	{
 		i++;

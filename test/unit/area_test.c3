@@ -12,10 +12,10 @@ import std::math;
 const Vec2 AREA_WINDOW = { 800.0, 600.0 };
 
 // With the default style and no font: tabs are 24px wide from x = 0.
-const float TAB_W = 2.0 * 12.0;
+const float TAB_W   = 2.0 * 12.0;
 const float STRIP_H = 24.0;
-const Vec2 TAB_A = { TAB_W * 0.5, STRIP_H * 0.5 };
-const Vec2 TAB_B = { TAB_W * 1.5, STRIP_H * 0.5 };
+const Vec2 TAB_A    = { TAB_W * 0.5, STRIP_H * 0.5 };
+const Vec2 TAB_B    = { TAB_W * 1.5, STRIP_H * 0.5 };
 
 // Two marker views: distinct types, so find/@each can tell panes apart.
 struct AView (Widget)
@@ -91,7 +91,10 @@ fn void split(Ui* ui, Vec2 at, String how)
 macro usz count(Ui* ui, $Type)
 {
 	usz n = 0;
-	ui.@each($Type; elem) { n++; };
+	ui.@each($Type ; elem)
+	{
+		n++;
+	};
 	return n;
 }
 
@@ -157,7 +160,7 @@ fn void split_side_makes_two_panes_keeping_view() @test
 	test::@check(count(ui, AreaSplitter) == 1);
 
 	// Even split: each pane gets (800 - splitter) / 2.
-	float first = (AREA_WINDOW.x - 5.0f) * 0.5f;
+	float first   = (AREA_WINDOW.x - 5.0f) * 0.5f;
 	Element* pane = ui.find(BView)!!;
 	test::@check(pane.size.x == first || pane.size.x == AREA_WINDOW.x - 5.0f - first);
 }
@@ -185,7 +188,7 @@ fn void splitter_drag_moves_ratio_and_clamps() @test
 	test::@check(math::abs(t_layout.root.ratio - 100.0f / total) < 0.001f);
 
 	usz seen = 0;
-	ui.@each(AView; elem)
+	ui.@each(AView ; elem)
 	{
 		seen++;
 		test::@check(math::abs(elem.size.x - 100.0f) < 0.6f || math::abs(elem.size.x - (total - 100.0f)) < 0.6f);

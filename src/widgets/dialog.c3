@@ -212,30 +212,30 @@ fn Element* Dialog.build(&self, Element* elem) @dynamic
 	}
 	if (self.popup)
 	{
-		return ui.@node((PopupPanel) {
-			.style = {
-				.color = s.panel_color,
-				.border_width = 1.0,
-				.border_color = s.panel_border,
-				.border_radius = { s.radius, s.radius, s.radius, s.radius },
+		return ui.@node(
+			(PopupPanel) {
+				.style = {
+					.color = s.panel_color,
+					.border_width = 1.0,
+					.border_color = s.panel_border,
+					.border_radius = { s.radius, s.radius, s.radius, s.radius },
+				},
+				.insets = self.popup_insets,
+				.shadow = s.shadow,
+				.shadow_color = DIALOG_SHADOW_COLOR,
 			},
-			.insets = self.popup_insets,
-			.shadow = s.shadow,
-			.shadow_color = DIALOG_SHADOW_COLOR,
-		}, inner);
+			inner
+		);
 	}
 
 	// The bar's own needs, folded into the panel's minimum here rather than in
 	// the frame: this is where the title is, and the frame's job is to negotiate
 	// one width out of the numbers it is handed.
-	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x
-		+ s.pad_x + DIALOG_CLOSE_SIZE;
+	float head = 2 * s.pad_x + ui.text.measure(s.font, self.title, s.text_size).x + s.pad_x + DIALOG_CLOSE_SIZE;
 
-	Element* close = ui.@node((DialogCloseButton) { .style = s, .host = elem })
-		.with_id(DIALOG_CLOSE_ID);
+	Element* close = ui.@node((DialogCloseButton) { .style = s, .host = elem }).with_id(DIALOG_CLOSE_ID);
 	Element* bar = ui.@node((DialogTitleBar) { .title = self.title, .style = s, .host = elem }, close);
-	return ui.@node((DialogFrame) { .style = s, .min_width = math::max(s.min_width, head) },
-		bar, inner);
+	return ui.@node((DialogFrame) { .style = s, .min_width = math::max(s.min_width, head) }, bar, inner);
 }
 
 <*
@@ -264,10 +264,11 @@ fn Vec2 Dialog.layout(&self, Element* elem, Constraints constraints) @dynamic
 
 	// Centred until someone drags it, and clamped onto the screen either way —
 	// which is also what stops a drag from posting the panel off the edge.
-	Vec2 wanted = self.placed ? self.at : (Vec2) {
-		screen.origin.x + (screen.size.x - panel.x) * 0.5f,
-		screen.origin.y + (screen.size.y - panel.y) * 0.5f,
-	};
+	Vec2 wanted = self.placed ? self.at
+		: (Vec2) {
+			screen.origin.x + (screen.size.x - panel.x) * 0.5f,
+			screen.origin.y + (screen.size.y - panel.y) * 0.5f,
+		};
 	self.at = screen.clamp_rect(wanted, panel);
 	elem.place_child(0, self.at - elem.absolute);
 
@@ -376,9 +377,9 @@ struct DialogFrame (Widget)
 *>
 fn Vec2 DialogFrame.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	DialogStyle s = self.style;
+	DialogStyle s     = self.style;
 	Constraints inner = constraints.deflate({ 2 * s.pad_x, s.title_height + 2 * s.pad_y });
-	Vec2 body = elem.layout_child(1, cui::loose(inner.max));
+	Vec2 body         = elem.layout_child(1, cui::loose(inner.max));
 
 	float width = math::min(math::max(body.x + 2 * s.pad_x, self.min_width), constraints.max.x);
 	elem.layout_child(0, cui::tight({ width, s.title_height }));
@@ -391,17 +392,21 @@ fn Vec2 DialogFrame.layout(&self, Element* elem, Constraints constraints) @dynam
 fn void DialogFrame.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	DialogStyle s = self.style;
-	Vec4 radii = { s.radius, s.radius, s.radius, s.radius };
+	Vec4 radii    = { s.radius, s.radius, s.radius, s.radius };
 	if (s.shadow > 0)
 	{
 		painter.rect_shadow({ 0, 0 }, elem.size, s.shadow, DIALOG_SHADOW_COLOR, radii);
 	}
-	painter.rect({ 0, 0 }, elem.size, {
-		.color = s.panel_color,
-		.border_width = 1.0,
-		.border_color = s.panel_border,
-		.border_radius = radii,
-	});
+	painter.rect(
+		{ 0, 0 },
+		elem.size,
+		{
+			.color = s.panel_color,
+			.border_width = 1.0,
+			.border_color = s.panel_border,
+			.border_radius = radii,
+		}
+	);
 }
 
 fn bool DialogFrame.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
@@ -460,16 +465,26 @@ fn void DialogTitleBar.paint(&self, Element* elem, Painter* painter) @dynamic
 
 	// Rounded at the top and square at the bottom: the bar is the top of the
 	// panel, not a card sitting on it.
-	painter.rect({ 0, 0 }, elem.size, {
-		.color = s.title_color,
-		.border_radius = { s.radius, s.radius, 0.0, 0.0 },
-	});
+	painter.rect(
+		{ 0, 0 },
+		elem.size,
+		{
+			.color = s.title_color,
+			.border_radius = { s.radius, s.radius, 0.0, 0.0 },
+		}
+	);
 	painter.rect({ 0, elem.size.y - 1 }, { elem.size.x, 1 }, { .color = s.panel_border });
 
 	Vec2 text = elem.ui.text.measure(s.font, self.title, s.text_size);
-	painter.text({ s.pad_x, (elem.size.y - text.y) * 0.5f }, self.title, {
-		.font = s.font, .size = s.text_size, .color = s.text_color,
-	});
+	painter.text(
+		{ s.pad_x, (elem.size.y - text.y) * 0.5f },
+		self.title,
+		{
+			.font = s.font,
+			.size = s.text_size,
+			.color = s.text_color,
+		}
+	);
 }
 
 <*
@@ -553,8 +568,8 @@ fn bool DialogCloseButton.on_mouse(&self, Element* elem, MouseEvent event) @dyna
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0
-				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
+				&& event.pos.y < elem.size.y;
 
 			// Closing releases this element's whole subtree — deferred to the build
 			// pass by `request_build`, which is what makes it safe from in here.

@@ -24,13 +24,21 @@ const float TRACK_W = ROW.x - TRACK_X - STYLE.value_width - STYLE.gap;
 const float TRAVEL = TRACK_W - STYLE.handle_width;
 
 // What the callbacks report, since an OnSlide carries no context back.
-float changed_to @local = 0.0;
-int changes @local = 0;
+float changed_to @local   = 0.0;
+int changes @local        = 0;
 float committed_to @local = 0.0;
-int commits @local = 0;
+int commits @local        = 0;
 
-fn void note_change(Ui* ui, float value) @local { changed_to = value; changes++; }
-fn void note_commit(Ui* ui, float value) @local { committed_to = value; commits++; }
+fn void note_change(Ui* ui, float value) @local
+{
+	changed_to = value;
+	changes++;
+}
+fn void note_commit(Ui* ui, float value) @local
+{
+	committed_to = value;
+	commits++;
+}
 
 // The pixel where `fraction` of the track is, in window coordinates: the middle
 // of the handle when it sits there.
@@ -115,7 +123,8 @@ fn void a_drag_reports_live_and_the_release_once() @test
 
 	test::eq(commits, 1);
 	test::@check(math::abs(committed_to - 75.0f) < 0.01f, "the release reported a different value than the drag left");
-	test::@check(slider.widget_as(Slider).value == committed_to, "the release reported a value the widget did not hold");
+	test::@check(slider.widget_as(Slider)
+		.value == committed_to, "the release reported a value the widget did not hold");
 }
 
 <*
@@ -175,13 +184,13 @@ fn void a_curve_stretches_the_low_end() @test
 	cui_tests::frame(ui, at_fraction(0.5), left: true);
 
 	// Half the track is a quarter of the range, not half of it.
-	test::@check(math::abs(slider.widget_as(Slider).value - 2500.0f) < 1.0f,
-		"a squared curve did not put a quarter of the range at half the track");
+	test::@check(math::abs(slider.widget_as(Slider)
+		.value - 2500.0f) < 1.0f, "a squared curve did not put a quarter of the range at half the track");
 
 	// And it round-trips: the fraction the value comes back as is the one the
 	// press was at, which is what keeps the handle under the pointer.
-	test::@check(math::abs(slider.widget_as(Slider).fraction() - 0.5f) < 0.01f,
-		"the value did not map back to the fraction it was taken from");
+	test::@check(math::abs(slider.widget_as(Slider)
+		.fraction() - 0.5f) < 0.01f, "the value did not map back to the fraction it was taken from");
 }
 
 <*

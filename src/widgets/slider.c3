@@ -1,7 +1,7 @@
 <*
  A number that is tuned rather than typed: caption, track, readout, on one row.
 
-     `@node((Slider) { .label = "Damping", .value = 0.9, .max = 1.0, .decimals = 2, .on_change = &damping_moved });`
+ `@node((Slider) { .label = "Damping", .value = 0.9, .max = 1.0, .decimals = 2, .on_change = &damping_moved });`
 
  The control for a value whose right answer is found by watching something move
  — a spring rate, a gain, an opacity. A text field asks the user to know the
@@ -34,7 +34,7 @@ import std::math;
 <*
  A slider callback, carrying the value the track is now at.
 
-     `fn void gain_moved(Ui* ui, float value) { ui.inherit(Mixer)!!.gain = value; }`
+ `fn void gain_moved(Ui* ui, float value) { ui.inherit(Mixer)!!.gain = value; }`
 *>
 alias OnSlide = fn void(Ui* ui, float value);
 
@@ -141,7 +141,7 @@ fn float Slider.fraction(&self)
 	if (span == 0.0f) return 0.0f;
 
 	float linear = math::clamp((self.value - self.min) / span, 0.0f, 1.0f);
-	float curve = self.curve > 0.0f ? self.curve : 1.0f;
+	float curve  = self.curve > 0.0f ? self.curve : 1.0f;
 	return curve == 1.0f ? linear : (float)math::pow((double)linear, 1.0 / (double)curve);
 }
 
@@ -153,7 +153,7 @@ fn float Slider.fraction(&self)
 fn float Slider.value_at(&self, float fraction)
 {
 	float curve = self.curve > 0.0f ? self.curve : 1.0f;
-	float t = math::clamp(fraction, 0.0f, 1.0f);
+	float t     = math::clamp(fraction, 0.0f, 1.0f);
 	if (curve != 1.0f) t = (float)math::pow((double)t, (double)curve);
 
 	float value = self.min + (self.max - self.min) * t;
@@ -168,8 +168,8 @@ fn float Slider.value_at(&self, float fraction)
 <*
  The number as it is drawn, written into `buffer`.
 
- 	`char[SLIDER_READOUT_MAX] scratch;`
- 	`String shown = slider.readout(&scratch);`
+ `char[SLIDER_READOUT_MAX] scratch;`
+ `String shown = slider.readout(&scratch);`
 
  Exposed because a caller laying out its own columns has to know how wide the
  number comes to, and because it is the one part of the paint worth checking
@@ -219,7 +219,7 @@ fn Vec2 Slider.track_span(&self, Element* elem)
 {
 	SliderStyle s = self.style.resolved();
 
-	float left = s.label_width > 0.0f ? s.label_width + s.gap : 0.0f;
+	float left  = s.label_width > 0.0f ? s.label_width + s.gap : 0.0f;
 	float right = s.value_width > 0.0f ? s.value_width + s.gap : 0.0f;
 	float width = math::max(elem.size.x - left - right, 0.0f);
 	return { left, width };
@@ -238,37 +238,53 @@ fn void Slider.paint(&self, Element* elem, Painter* painter) @dynamic
 	Vec2 span = self.track_span(elem);
 	float top = (elem.size.y - s.track_height) * 0.5f;
 
-	painter.rect({ span.x, top }, { span.y, s.track_height }, {
-		.color = s.track,
-		.border_radius = s.border_radius,
-	});
+	painter.rect(
+		{ span.x, top },
+		{ span.y, s.track_height },
+		{
+			.color = s.track,
+			.border_radius = s.border_radius,
+		}
+	);
 
 	// The handle rides inside the groove rather than off both ends of it, so the
 	// value at the far right is reachable with the pointer still on the widget.
 	float travel = math::max(span.y - s.handle_width, 0.0f);
-	float at = self.fraction() * travel;
+	float at     = self.fraction() * travel;
 
 	if (!self.disabled && at > 0.0f)
 	{
-		painter.rect({ span.x, top }, { at + s.handle_width * 0.5f, s.track_height }, {
-			.color = self.dragging || self.hovered ? s.hover_fill : s.fill,
-			.border_radius = s.border_radius,
-		});
+		painter.rect(
+			{ span.x, top },
+			{ at + s.handle_width * 0.5f, s.track_height },
+			{
+				.color = self.dragging || self.hovered ? s.hover_fill : s.fill,
+				.border_radius = s.border_radius,
+			}
+		);
 	}
 
-	painter.rect({ span.x + at, top - 3.0f }, { s.handle_width, s.track_height + 6.0f }, {
-		.color = self.disabled ? s.dim_color : s.handle,
-		.border_radius = s.border_radius,
-	});
+	painter.rect(
+		{ span.x + at, top - 3.0f },
+		{ s.handle_width, s.track_height + 6.0f },
+		{
+			.color = self.disabled ? s.dim_color : s.handle,
+			.border_radius = s.border_radius,
+		}
+	);
 
 	if (self.label.len > 0 && s.label_width > 0.0f)
 	{
 		Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
-		painter.text({ 0, (elem.size.y - text.y) * 0.5f }, self.label, {
-			.font = s.font,
-			.size = s.text_size,
-			.color = self.disabled ? s.dim_color : s.label_color,
-		});
+		painter.text(
+			{ 0, (elem.size.y - text.y) * 0.5f },
+			self.label,
+			{
+				.font = s.font,
+				.size = s.text_size,
+				.color = self.disabled ? s.dim_color : s.label_color,
+			}
+		);
 	}
 
 	if (s.value_width <= 0.0f) return;
@@ -280,11 +296,15 @@ fn void Slider.paint(&self, Element* elem, Painter* painter) @dynamic
 	// Right-aligned in its column: a stack of sliders whose numbers grow a digit
 	// should not shuffle sideways as they are dragged.
 	Vec2 number = elem.ui.text.measure(s.font, shown, s.text_size);
-	painter.text({ elem.size.x - number.x, (elem.size.y - number.y) * 0.5f }, shown, {
-		.font = s.font,
-		.size = s.text_size,
-		.color = self.disabled ? s.dim_color : s.value_color,
-	});
+	painter.text(
+		{ elem.size.x - number.x, (elem.size.y - number.y) * 0.5f },
+		shown,
+		{
+			.font = s.font,
+			.size = s.text_size,
+			.color = self.disabled ? s.dim_color : s.value_color,
+		}
+	);
 }
 
 <*
@@ -351,7 +371,7 @@ fn void Slider.take(&self, Element* elem, float x)
 {
 	SliderStyle s = self.style.resolved();
 
-	Vec2 span = self.track_span(elem);
+	Vec2 span    = self.track_span(elem);
 	float travel = math::max(span.y - s.handle_width, 0.0f);
 	if (travel <= 0.0f) return;
 

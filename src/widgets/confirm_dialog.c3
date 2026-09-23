@@ -2,11 +2,11 @@
  A question with two answers: the panel that asks before something is thrown
  away.
 
- 	`@node((ConfirmDialog) { .title = "Apply body plan" }).with_id("confirm");`
+ `@node((ConfirmDialog) { .title = "Apply body plan" }).with_id("confirm");`
 
- 	`ConfirmDialog* ask = ui.get_widget_id("confirm", ConfirmDialog)!!;`
- 	`Element* at = ui.find_id("confirm")!!;`
- 	`ask.ask(at, string::tformat("Replace %d dots?", n), &on_replace, &on_keep);`
+ `ConfirmDialog* ask = ui.get_widget_id("confirm", ConfirmDialog)!!;`
+ `Element* at = ui.find_id("confirm")!!;`
+ `ask.ask(at, string::tformat("Replace %d dots?", n), &on_replace, &on_keep);`
 
  It is a `Dialog` underneath and looks like one, so a confirmation and a key
  reference are the same object on screen. What it adds is the part a `Dialog`
@@ -135,26 +135,27 @@ fn Element* ConfirmDialog.build(&self, Element* elem) @dynamic
 	bool open = self.open_when_built;
 	self.open_when_built = false;
 
-	return elem.ui.@node((Dialog) {
-		.title = self.title,
-		.body_ctx = &confirm_body,
-		.ctx = elem,
-		.style = self.style,
-		.modal = true,
-		.open = open,
-
-		// A question about to delete work is not answered by a click beside it,
-		// so the backdrop does not dismiss. The × and ESC still do, and both
-		// count as declining.
-		.close_outside = false,
-		.on_close_ctx = &confirm_dismissed,
-	}).with_id(CONFIRM_PANEL_ID);
+	return elem.ui.@node(
+		(Dialog) {
+			.title = self.title,
+			.body_ctx = &confirm_body,
+			.ctx = elem,
+			.style = self.style,
+			.modal = true,
+			.open = open, // A question about to delete work is not answered by a click beside it,
+			// so the backdrop does not dismiss. The × and ESC still do, and both
+			// count as declining.
+			.close_outside = false,
+			.on_close_ctx = &confirm_dismissed,
+		}
+	)
+		.with_id(CONFIRM_PANEL_ID);
 }
 
 <*
  Puts a question up.
 
- 	`ask.ask(elem, "Replace the rig?", &replace, &keep);`
+ `ask.ask(elem, "Replace the rig?", &replace, &keep);`
 
  The message is copied, so a `tformat` result or any other temporary is a
  perfectly good argument. Asking again while a question is already up replaces
@@ -253,9 +254,9 @@ fn void ConfirmDialog.withdraw(&self, Element* elem)
 *>
 fn Element* confirm_body(Ui* ui, any ctx) @local
 {
-	Element* host = anycast(ctx, Element)!!;
-	ConfirmDialog* self = host.widget_as(ConfirmDialog);
-	DialogStyle s = self.style.resolved();
+	Element* host        = anycast(ctx, Element)!!;
+	ConfirmDialog* self  = host.widget_as(ConfirmDialog);
+	DialogStyle s        = self.style.resolved();
 	ConfirmButtonStyle b = self.buttons.resolved();
 
 	// One Label per line, because `Label` is a single run of text and a question
@@ -263,16 +264,20 @@ fn Element* confirm_body(Ui* ui, any ctx) @local
 	// into the widget's own buffer, which is why `ask` rebuilds the panel when it
 	// changes the message under an open one.
 	Element* lines = ui.@node((Column) { .gap = CONFIRM_LINE_GAP });
-	String rest = self.message.str_view();
+	String rest    = self.message.str_view();
 	while (rest.len > 0)
 	{
 		String line = wrap_line(ui, rest, s.font, s.text_size, CONFIRM_TEXT_W);
-		lines.append(ui.@node((Label) {
-			.text = line,
-			.font = s.font,
-			.size = s.text_size,
-			.color = s.text_color,
-		}));
+		lines.append(
+			ui.@node(
+				(Label) {
+					.text = line,
+					.font = s.font,
+					.size = s.text_size,
+					.color = s.text_color,
+				}
+			)
+		);
 
 		rest = rest[line.len..];
 		while (rest.len > 0 && rest[0] == ' ') rest = rest[1..];
@@ -284,8 +289,7 @@ fn Element* confirm_body(Ui* ui, any ctx) @local
 	return ui.@node(
 		(Column) { .size = { CONFIRM_TEXT_W, 0 }, .gap = b.gap },
 		lines,
-		ui.@node((Row) { .main_align = END },
-		ui.@node((ConfirmActions) { .host = host, .style = b, .font = s.font }))
+		ui.@node((Row) { .main_align = END }, ui.@node((ConfirmActions) { .host = host, .style = b, .font = s.font }))
 	);
 }
 
@@ -324,7 +328,7 @@ fn String wrap_line(Ui* ui, String text, FontId font, float size, float width) @
 // every route that means "no".
 fn void confirm_dismissed(Ui* ui, any ctx) @local
 {
-	Element* host = anycast(ctx, Element)!!;
+	Element* host       = anycast(ctx, Element)!!;
 	ConfirmDialog* self = host.widget_as(ConfirmDialog);
 
 	if (self.answering) return;
@@ -390,18 +394,30 @@ fn void ConfirmActions.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	ConfirmDialog* owner = self.host.widget_as(ConfirmDialog);
 	ConfirmButtonStyle s = self.style.resolved();
-	Vec4 radii = { s.radius, s.radius, s.radius, s.radius };
+	Vec4 radii           = { s.radius, s.radius, s.radius, s.radius };
 
 	Color decline_fill = s.fill;
-	if (self.held == 1) { decline_fill = s.press; }
-	else if (self.lit == 1) { decline_fill = s.hover; }
+	if (self.held == 1)
+	{
+		decline_fill = s.press;
+	}
+	else if (self.lit == 1)
+	{
+		decline_fill = s.hover;
+	}
 
 	Color confirm_fill = self.held == 2 ? s.press : s.accent;
 
-	painter.rect({ self.decline_x, 0 }, { self.decline_w, s.height },
-		{ .color = decline_fill, .border_radius = radii });
-	painter.rect({ self.confirm_x, 0 }, { self.confirm_w, s.height },
-		{ .color = confirm_fill, .border_radius = radii });
+	painter.rect(
+		{ self.decline_x, 0 },
+		{ self.decline_w, s.height },
+		{ .color = decline_fill, .border_radius = radii }
+	);
+	painter.rect(
+		{ self.confirm_x, 0 },
+		{ self.confirm_w, s.height },
+		{ .color = confirm_fill, .border_radius = radii }
+	);
 
 	self.label(elem, painter, owner.decline_text(), self.decline_x, self.decline_w, s.text, s);
 	self.label(elem, painter, owner.confirm_text(), self.confirm_x, self.confirm_w, s.accent_text, s);
@@ -410,11 +426,22 @@ fn void ConfirmActions.paint(&self, Element* elem, Painter* painter) @dynamic
 // Centred in its button, both ways. Measured rather than assumed, since the
 // button was sized around this same measurement.
 fn void ConfirmActions.label(
-	&self, Element* elem, Painter* painter, String text, float x, float w, Color ink, ConfirmButtonStyle s)
+	&self,
+	Element* elem,
+	Painter* painter,
+	String text,
+	float x,
+	float w,
+	Color ink,
+	ConfirmButtonStyle s
+)
 {
 	Vec2 run = elem.ui.text.measure(self.font, text, s.text_size);
-	painter.text({ x + (w - run.x) * 0.5f, (s.height - run.y) * 0.5f }, text,
-		{ .font = self.font, .size = s.text_size, .color = ink });
+	painter.text(
+		{ x + (w - run.x) * 0.5f, (s.height - run.y) * 0.5f },
+		text,
+		{ .font = self.font, .size = s.text_size, .color = ink }
+	);
 }
 
 fn void ConfirmActions.on_hover(&self, Element* elem, bool entered) @dynamic
@@ -470,7 +497,7 @@ fn bool ConfirmActions.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 fn void ConfirmActions.answer(&self, Element* elem, bool confirmed)
 {
 	ConfirmDialog* owner = self.host.widget_as(ConfirmDialog);
-	OnClick chosen = confirmed ? owner.on_confirm : owner.on_decline;
+	OnClick chosen       = confirmed ? owner.on_confirm : owner.on_decline;
 
 	owner.answering = true;
 	owner.withdraw(self.host);

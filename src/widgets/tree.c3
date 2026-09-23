@@ -32,15 +32,15 @@ alias OnRow = fn void(Ui* ui, usz row);
 struct TreeStyle
 {
 	Color text;
-	Color selected;      // the fill behind the selected row
+	Color selected; // the fill behind the selected row
 	Color selected_text;
 	Color hover;
-	Color trailing;      // the right-hand column: a count, a size, a note
-	Color mark;          // the disclosure triangle
+	Color trailing; // the right-hand column: a count, a size, a note
+	Color mark; // the disclosure triangle
 	float row_height;
 	float text_size;
-	float padding;       // left and right inset inside a row
-	float indent;        // per level of depth
+	float padding; // left and right inset inside a row
+	float indent; // per level of depth
 	Vec4 radius;
 }
 
@@ -164,42 +164,58 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 
 	foreach (usz i, row : self.rows)
 	{
-		float y = (float)i * style.row_height;
-		bool chosen = i == self.selected;
+		float y      = (float)i * style.row_height;
+		bool chosen  = i == self.selected;
 		bool hovered = self.lit == (int)i + 1 && !chosen;
 
 		if (chosen || hovered)
 		{
-			painter.rect({ 0, y }, { elem.size.x, style.row_height }, {
-				.color = chosen ? style.selected : style.hover,
-				.border_radius = style.radius,
-			});
+			painter.rect(
+				{ 0, y },
+				{ elem.size.x, style.row_height },
+				{
+					.color = chosen ? style.selected : style.hover,
+					.border_radius = style.radius,
+				}
+			);
 		}
 
 		float text_y = y + (style.row_height - style.text_size) * 0.5f - 1.0f;
-		float x = self.text_x(style, row.depth);
+		float x      = self.text_x(style, row.depth);
 
 		if (row.expandable)
 		{
 			// Left of the label in the indent its children will sit at, so the marks
 			// of one level line up down the column whatever their labels are.
-			painter.text({ x - style.indent, text_y }, row.expanded ? "v" : ">", {
-				.size = style.text_size,
-				.color = chosen ? style.selected_text : style.mark,
-			});
+			painter.text(
+				{ x - style.indent, text_y },
+				row.expanded ? "v" : ">",
+				{
+					.size = style.text_size,
+					.color = chosen ? style.selected_text : style.mark,
+				}
+			);
 		}
 
-		painter.text({ x, text_y }, row.label, {
-			.size = style.text_size,
-			.color = chosen ? style.selected_text : style.text,
-		});
+		painter.text(
+			{ x, text_y },
+			row.label,
+			{
+				.size = style.text_size,
+				.color = chosen ? style.selected_text : style.text,
+			}
+		);
 
 		if (row.trailing.len == 0) continue;
 		float trailing_w = elem.ui.text.measure(0, row.trailing, style.text_size).x;
-		painter.text({ elem.size.x - style.padding - trailing_w, text_y }, row.trailing, {
-			.size = style.text_size,
-			.color = chosen ? style.selected_text : style.trailing,
-		});
+		painter.text(
+			{ elem.size.x - style.padding - trailing_w, text_y },
+			row.trailing,
+			{
+				.size = style.text_size,
+				.color = chosen ? style.selected_text : style.trailing,
+			}
+		);
 	}
 }
 
@@ -256,3 +272,101 @@ fn void Tree.on_hover(&self, Element* elem, bool entered) @dynamic
 	self.lit = 0;
 	elem.request_paint();
 }
+
+// ---------------------------------------------------------------------------
+
+<*
+ Asked at every build for the rows an `EmptyStateTree` shows, and which one
+ starts selected (past the end for none). The rows are copied, so the answer
+ may borrow — and may be freed before the next build.
+*>
+alias TreeRowsFn = fn TreeRow[](Element* elem, usz* selected);
+
+<*
+ A Tree that says so when it has no rows.
+
+ A bare `Tree` with no rows lays out flat and paints nothing, which inside a
+ bordered box reads as a panel that failed to build. This one is as wide as it
+ is offered and paints `empty` where the rows would be.
+
+ `@node((EmptyStateTree) { .rows_of = &plan_rows, .empty = "No plans.", .style = STYLE })`
+
+ The Tree is its only child and gets `tree_id`, so a caller finds and drives it
+ as it would a bare Tree. `request_build` on this element asks for the rows again.
+*>
+struct EmptyStateTree (Widget)
+{
+	TreeRowsFn rows_of;
+	OnRow on_select;
+	TreeStyle style;
+	String empty; // borrowed; painted in place of the rows
+	Color empty_color;
+	String tree_id; // borrowed; given to the Tree child when set
+
+	TreeRow[] rows; // owned copy of the last build's rows
+}
+
+fn void EmptyStateTree.release(&self)
+{
+	foreach (row : self.rows)
+	{
+		if (row.label.len > 0) row.label.free(mem);
+		if (row.trailing.len > 0) row.trailing.free(mem);
+	}
+	if (self.rows.len > 0) alloc::free(mem, self.rows);
+	self.rows = { };
+}
+
+fn Element* EmptyStateTree.build(&self, Element* elem) @dynamic
+{
+	usz selected    = ~(usz)0; // none, unless the answer says otherwise
+	TreeRow[] given = self.rows_of(elem, &selected);
+	self.release();
+	if (given.len > 0)
+	{
+		self.rows = alloc::new_array(mem, TreeRow, (sz)given.len);
+		foreach (usz i, row : given)
+		{
+			self.rows[i] = row;
+			self.rows[i].label = row.label.len > 0 ? row.label.copy(mem) : "";
+			self.rows[i].trailing = row.trailing.len > 0 ? row.trailing.copy(mem) : "";
+		}
+	}
+
+	return @subtree(elem.ui)
+	{
+		Element* tree = @node(
+			(Tree) {
+				.rows = self.rows,
+				.selected = selected,
+				.on_select = self.on_select,
+				.style = self.style,
+			}
+		);
+		if (self.tree_id.len > 0) tree.with_id(self.tree_id);
+	};
+}
+
+fn Vec2 EmptyStateTree.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	if (elem.children.len() == 0) return constraints.constrain({ constraints.max.x, 0 });
+
+	Vec2 inner = elem.layout_child(0, constraints);
+	elem.place_child(0, { 0, 0 });
+	return constraints.constrain({ constraints.max.x, inner.y });
+}
+
+fn void EmptyStateTree.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	if (self.rows.len > 0) return;
+	painter.text(
+		{ self.style.padding, self.style.padding },
+		self.empty,
+		{
+			.size = self.style.text_size,
+			.color = self.empty_color,
+		}
+	);
+}
+
+fn void EmptyStateTree.unmount(&self, Element* elem) @dynamic => self.release();

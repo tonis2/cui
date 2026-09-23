@@ -17,10 +17,11 @@ import std::io;
 <*
  The matrices a camera hands the shader, ready for upload.
 *>
-struct UniformData {
-    Matrix4f projection;
-    Matrix4f view;
-    Vec3 eye;
+struct UniformData
+{
+	Matrix4f projection;
+	Matrix4f view;
+	Vec3 eye;
 }
 
 <*
@@ -28,14 +29,15 @@ struct UniformData {
  view axis. UI rendering uses it through `ui_view`, which makes canvas pixels map
  one-to-one to screen pixels.
 *>
-struct Camera {
-    Vec3 target;
-    Vec3 eye;
-    Matrix4f perspective;
-    Matrix4f view;
-    float pitch;
-    float yaw;
-    float zoom_value;
+struct Camera
+{
+	Vec3 target;
+	Vec3 eye;
+	Matrix4f perspective;
+	Matrix4f view;
+	float pitch;
+	float yaw;
+	float zoom_value;
 }
 
 <*
@@ -49,16 +51,24 @@ struct Camera {
  @param max_zoom : `Far plane distance.`
  @return `The camera.`
 *>
-fn Camera new(Vec3 target = {0.0, 0.0, 0.0}, Vec3 eye = {0.0, 0.0, 0.0}, float aspect = 0.8, float view = 45, float min_zoom = 0.1, float max_zoom = 500) {
-    return {
-        target,
-        eye,
-        matrix::perspective{float}(math::deg_to_rad(view), aspect, min_zoom, max_zoom),
-        matrix::look_at{float}(eye, target, {0.0, 1.0, 0.0}),
-        0,
-        0,
-        -eye.z
-    };
+fn Camera new(
+	Vec3 target = { 0.0, 0.0, 0.0 },
+	Vec3 eye = { 0.0, 0.0, 0.0 },
+	float aspect = 0.8,
+	float view = 45,
+	float min_zoom = 0.1,
+	float max_zoom = 500
+)
+{
+	return {
+		target,
+		eye,
+		matrix::perspective{float}(math::deg_to_rad(view), aspect, min_zoom, max_zoom),
+		matrix::look_at{float}(eye, target, { 0.0, 1.0, 0.0 }),
+		0,
+		0,
+		-eye.z
+	};
 }
 
 <*
@@ -68,22 +78,21 @@ fn Camera new(Vec3 target = {0.0, 0.0, 0.0}, Vec3 eye = {0.0, 0.0, 0.0}, float a
  @param x_offset : `Yaw change, in degrees.`
  @param y_offset : `Pitch change, in degrees.`
 *>
-fn void Camera.rotate (Camera* self, float x_offset, float y_offset) {
-    self.yaw += x_offset;
-    self.pitch += y_offset;
+fn void Camera.rotate(Camera* self, float x_offset, float y_offset)
+{
+	self.yaw += x_offset;
+	self.pitch += y_offset;
 
-    if (self.pitch > 89.0) self.pitch = 89.0;
-    if (self.pitch < -89.0) self.pitch = -89.0;
+	if (self.pitch > 89.0) self.pitch = 89.0;
+	if (self.pitch < -89.0) self.pitch = -89.0;
 
-    float yaw = math::deg_to_rad(self.yaw);
-    float pitch = math::deg_to_rad(self.pitch);
+	float yaw   = math::deg_to_rad(self.yaw);
+	float pitch = math::deg_to_rad(self.pitch);
 
-    self.eye = { math::cos(yaw) * math::cos(pitch),
-                 math::sin(pitch),
-                 math::sin(yaw) * math::cos(pitch) };
+	self.eye = { math::cos(yaw) * math::cos(pitch), math::sin(pitch), math::sin(yaw) * math::cos(pitch) };
 
-    self.view = matrix::look_at{float}(self.eye, self.target, {0.0, 1.0, 0.0});
-    self.view.m23 = self.zoom_value;
+	self.view = matrix::look_at{float}(self.eye, self.target, { 0.0, 1.0, 0.0 });
+	self.view.m23 = self.zoom_value;
 }
 
 <*
@@ -92,10 +101,11 @@ fn void Camera.rotate (Camera* self, float x_offset, float y_offset) {
 
  @param value : `The zoom delta; negative moves closer.`
 *>
-fn void Camera.zoom(Camera* self, float value) {
-    if (self.zoom_value + value > 0) return;
-    self.zoom_value += value;
-    self.view.m23 += value;
+fn void Camera.zoom(Camera* self, float value)
+{
+	if (self.zoom_value + value > 0) return;
+	self.zoom_value += value;
+	self.view.m23 += value;
 }
 
 <*
@@ -114,18 +124,18 @@ fn void Camera.zoom(Camera* self, float value) {
 *>
 fn Matrix4f Camera.ui_view(&self)
 {
-    float sx = 2.0f / self.perspective.m00;     // = 2 * aspect / f
-    float sy = 2.0f / self.perspective.m11;     // = 2 / f
-    Matrix4f v = self.view;
-    v.m00 *= sx;
-    v.m10 *= sx;
-    v.m20 *= sx;
-    v.m30 *= sx;
-    v.m01 *= sy;
-    v.m11 *= sy;
-    v.m21 *= sy;
-    v.m31 *= sy;
-    return v;
+	float sx   = 2.0f / self.perspective.m00; // = 2 * aspect / f
+	float sy   = 2.0f / self.perspective.m11; // = 2 / f
+	Matrix4f v = self.view;
+	v.m00 *= sx;
+	v.m10 *= sx;
+	v.m20 *= sx;
+	v.m30 *= sx;
+	v.m01 *= sy;
+	v.m11 *= sy;
+	v.m21 *= sy;
+	v.m31 *= sy;
+	return v;
 }
 
 <*
@@ -133,10 +143,11 @@ fn Matrix4f Camera.ui_view(&self)
 
  @return `Projection, view and eye position.`
 *>
-fn UniformData Camera.matrix(Camera self) {
-    return {
-        self.perspective,
-        self.view,
-        self.eye,
-    };
+fn UniformData Camera.matrix(Camera self)
+{
+	return {
+		self.perspective,
+		self.view,
+		self.eye,
+	};
 }

@@ -39,7 +39,7 @@ import vk;
  one, vk::init works through its own defaults — the executable directory, the
  `macos-aarch64/` directory vulkan.c3l ships, and a system SDK.
 
- @return? vk::LOADER_NOT_FOUND : `No loader anywhere — neither bundled nor installed.`
+ @return ? vk::LOADER_NOT_FOUND : `No loader anywhere — neither bundled nor installed.`
 *>
 fn void? init_loader() @feat(DARWIN & !SYSTEM_VULKAN)
 {
@@ -56,7 +56,7 @@ fn void? init_loader() @feat(DARWIN & !SYSTEM_VULKAN)
  loader is the only correct one, or SYSTEM_VULKAN asked cui to keep out of the
  way. `vk::init` opens the loader by its installed platform name.
 
- @return? vk::LOADER_NOT_FOUND : `No system loader installed.`
+ @return ? vk::LOADER_NOT_FOUND : `No system loader installed.`
 *>
 fn void? init_loader() @feat(!DARWIN | SYSTEM_VULKAN)
 {
@@ -70,7 +70,7 @@ fn void? init_loader() @feat(!DARWIN | SYSTEM_VULKAN)
  Finding nothing is not an error: the loader then discovers an installed driver
  itself, which is what happens when developing against a system Vulkan SDK.
 
- @return? vk::DRIVER_NOT_LOADED : `No bundled driver — fall back to the loader's own discovery.`
+ @return ? vk::DRIVER_NOT_LOADED : `No bundled driver — fall back to the loader's own discovery.`
 *>
 fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @feat(DARWIN & !SYSTEM_VULKAN)
 {
@@ -86,7 +86,7 @@ fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @feat(DARWIN & !SY
  to keep out of the way. The loader then discovers an installed driver in the
  usual manner, which is the only correct thing to do in both cases.
 
- @return? vk::DRIVER_NOT_LOADED : `Always — there is no bundled driver in this build.`
+ @return ? vk::DRIVER_NOT_LOADED : `Always — there is no bundled driver in this build.`
 *>
 fn vk::PFN_vkGetInstanceProcAddrLUNARG? find_bundled_driver() @feat(!DARWIN | SYSTEM_VULKAN)
 {

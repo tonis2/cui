@@ -8,8 +8,8 @@
 
  Two calls per frame:
 
-     `pass.upload(ui, window_size)!;   // outside a render pass`
-     `pass.record(cmd, extent)!;       // inside one`
+ `pass.upload(ui, window_size)!;   // outside a render pass`
+ `pass.record(cmd, extent)!;       // inside one`
 
  `upload` flushes the Ui and moves everything that changed to the GPU; `record`
  binds and emits a single instanced draw. They are separate because engines
@@ -39,59 +39,60 @@ import vk;
  Create with `new_canvas_pass`, feed with `upload`, draw with `record`, release
  with `free`. Textures come from `load_image` / `load_pixels`.
 *>
-struct CanvasPass {
-    // The UI camera. `ui_view()` bakes in the scale that makes canvas
-    // coordinates land on exact pixels under the perspective projection, so
-    // this is not a camera the host is meant to move — it exists so the shader
-    // gets matrices, and `upload` keeps it sized to the viewport.
-    Camera camera;
+struct CanvasPass
+{
+	// The UI camera. `ui_view()` bakes in the scale that makes canvas
+	// coordinates land on exact pixels under the perspective projection, so
+	// this is not a camera the host is meant to move — it exists so the shader
+	// gets matrices, and `upload` keeps it sized to the viewport.
+	Camera camera;
 
-    Device device;
-    vk::DeviceQueue queue;
-    vk::MemoryAllocator* allocator;  // borrowed; the host owns it
+	Device device;
+	vk::DeviceQueue queue;
+	vk::MemoryAllocator* allocator; // borrowed; the host owns it
 
-    // One copy per in-flight slot, not one buffer each — see CANVAS_SLOTS.
-    vk::Memory[CANVAS_SLOTS] canvas_buffers;
-    vk::Memory[CANVAS_SLOTS] transform_buffers;
-    vk::Memory[CANVAS_SLOTS] clip_buffers;
-    vk::Memory[CANVAS_SLOTS] uniform_buffers;
+	// One copy per in-flight slot, not one buffer each — see CANVAS_SLOTS.
+	vk::Memory[CANVAS_SLOTS] canvas_buffers;
+	vk::Memory[CANVAS_SLOTS] transform_buffers;
+	vk::Memory[CANVAS_SLOTS] clip_buffers;
+	vk::Memory[CANVAS_SLOTS] uniform_buffers;
 
-    // The copy the last `upload` wrote, and the one `record` reads from.
-    uint slot;
+	// The copy the last `upload` wrote, and the one `record` reads from.
+	uint slot;
 
-    // How many times each list has changed, against the count each copy holds.
-    // A list left alone since the last frame still has to be written into a
-    // copy that predates it, so the canvas's own dirty flags cannot decide an
-    // upload on their own: they say "changed since anyone looked", and what is
-    // needed here is "changed since this copy was filled".
-    uint drawings_revision;
-    uint transforms_revision;
-    uint clips_revision;
-    uint[CANVAS_SLOTS] drawings_in_slot;
-    uint[CANVAS_SLOTS] transforms_in_slot;
-    uint[CANVAS_SLOTS] clips_in_slot;
+	// How many times each list has changed, against the count each copy holds.
+	// A list left alone since the last frame still has to be written into a
+	// copy that predates it, so the canvas's own dirty flags cannot decide an
+	// upload on their own: they say "changed since anyone looked", and what is
+	// needed here is "changed since this copy was filled".
+	uint drawings_revision;
+	uint transforms_revision;
+	uint clips_revision;
+	uint[CANVAS_SLOTS] drawings_in_slot;
+	uint[CANVAS_SLOTS] transforms_in_slot;
+	uint[CANVAS_SLOTS] clips_in_slot;
 
-    DescriptorImages textures;
+	DescriptorImages textures;
 
-    // A DescriptorImageInfo is sampler + view only, so the images behind them
-    // have to be owned separately or nothing can destroy them. Parallel to
-    // `textures`.
-    vk::ImageList texture_images;
-    vk::Image atlas_image;      // the Ui's glyph atlas, once created (see sync_text);
-                                // owned by texture_images, this is a bare handle
-                                // for update_atlas_image
+	// A DescriptorImageInfo is sampler + view only, so the images behind them
+	// have to be owned separately or nothing can destroy them. Parallel to
+	// `textures`.
+	vk::ImageList texture_images;
+	vk::Image atlas_image; // the Ui's glyph atlas, once created (see sync_text);
+	// owned by texture_images, this is a bare handle
+	// for update_atlas_image
 
-    RenderState pipeline;
-    DescriptorSetLayout descriptor_layout;
-    sz pipeline_texture_count;  // texture count the pipeline was built for;
-                                // 0 = not built yet (see rebuild_pipeline)
+	RenderState pipeline;
+	DescriptorSetLayout descriptor_layout;
+	sz pipeline_texture_count; // texture count the pipeline was built for;
+	// 0 = not built yet (see rebuild_pipeline)
 
-    vk::Format color_format;
-    vk::Format depth_format;    // FORMAT_UNDEFINED when the host's pass has no
-                                // depth attachment
+	vk::Format color_format;
+	vk::Format depth_format; // FORMAT_UNDEFINED when the host's pass has no
+	// depth attachment
 
-    Vec2 uniform_size;          // window size the uniform buffer holds
-    sz draw_count;              // drawings uploaded by the last `upload`
+	Vec2 uniform_size; // window size the uniform buffer holds
+	sz draw_count; // drawings uploaded by the last `upload`
 }
 
 <*
@@ -120,9 +121,9 @@ const CANVAS_SLOTS = 2;
 // Initial GPU buffer capacities, per slot. Buffers are sized by what the UI
 // actually draws: whenever an upload outgrows its buffer, the buffer is
 // reallocated at the next power of two (see ensure_capacity).
-const INITIAL_DRAWINGS = 64;
+const INITIAL_DRAWINGS   = 64;
 const INITIAL_TRANSFORMS = 16;
-const INITIAL_CLIPS = 16;
+const INITIAL_CLIPS      = 16;
 
 <*
  Builds the buffers and texture array for a canvas pass.
@@ -137,87 +138,98 @@ const INITIAL_CLIPS = 16;
  @param depth_format : `Format of the depth attachment, or FORMAT_UNDEFINED when the host's pass has none. cui never tests or writes depth; this only has to match the pass it is recorded into.`
  @param window_size : `Logical size of the surface, in the same pixels the Ui lays out in.`
 *>
-fn CanvasPass? new_canvas_pass(Device device, vk::MemoryAllocator* allocator, vk::DeviceQueue queue,
-                   vk::Format color_format, vk::Format depth_format, Vec2 window_size)
+fn CanvasPass? new_canvas_pass(
+	Device device,
+	vk::MemoryAllocator* allocator,
+	vk::DeviceQueue queue,
+	vk::Format color_format,
+	vk::Format depth_format,
+	Vec2 window_size
+)
 {
-    CanvasPass pass = {
-        .device = device,
-        .queue = queue,
-        .allocator = allocator,
-        .color_format = color_format,
-        .depth_format = depth_format,
-        .camera = camera::new(eye: {0.0, 0.0, 1.0}, aspect: window_size.x / window_size.y,
-                              min_zoom: 0.1, max_zoom: 10),
-        .uniform_size = window_size,
-    };
+	CanvasPass pass = {
+		.device = device,
+		.queue = queue,
+		.allocator = allocator,
+		.color_format = color_format,
+		.depth_format = depth_format,
+		.camera = camera::new(
+			eye: { 0.0, 0.0, 1.0 },
+			aspect: window_size.x / window_size.y,
+			min_zoom: 0.1,
+			max_zoom: 10
+		),
+		.uniform_size = window_size,
+	};
 
-    // The heap by name: both lists live as long as the pass, and a zeroed List
-    // takes the temp allocator on its first push — which in a host that renders
-    // inside a `@pool()` is memory the frame gives back. See `cui::new_ui`.
-    pass.textures.init(mem, 0);
-    pass.texture_images.init(mem, 0);
+	// The heap by name: both lists live as long as the pass, and a zeroed List
+	// takes the temp allocator on its first push — which in a host that renders
+	// inside a `@pool()` is memory the frame gives back. See `cui::new_ui`.
+	pass.textures.init(mem, 0);
+	pass.texture_images.init(mem, 0);
 
-    // 1x1 white placeholder in texture slot 1 so the sampler-array binding is
-    // never empty; user images get their handles from load_image/load_pixels.
-    char[4] white_pixel = { 255, 255, 255, 255 };
-    vk::Image white_image;
-    pass.textures.load_rgba(white_pixel[..], 1, 1, allocator, queue, &white_image)!;
-    pass.texture_images.push(white_image);
+	// 1x1 white placeholder in texture slot 1 so the sampler-array binding is
+	// never empty; user images get their handles from load_image/load_pixels.
+	char[4] white_pixel = { 255, 255, 255, 255 };
+	vk::Image white_image;
+	pass.textures.load_rgba(white_pixel[..], 1, 1, allocator, queue, &white_image)!;
+	pass.texture_images.push(white_image);
 
-    // Slang's cbuffer matrix layout reads column-major bytes, which is exactly
-    // how Matrix4f stores them, so the matrices go up as-is — no transpose
-    // anywhere. A matrix filled row-major collapses clip w to 0.
-    ShaderUniforms uniform_data = {
-        pass.camera.perspective,
-        pass.camera.ui_view(),
-        window_size,
-    };
+	// Slang's cbuffer matrix layout reads column-major bytes, which is exactly
+	// how Matrix4f stores them, so the matrices go up as-is — no transpose
+	// anywhere. A matrix filled row-major collapses clip w to 0.
+	ShaderUniforms uniform_data = {
+		pass.camera.perspective,
+		pass.camera.ui_view(),
+		window_size,
+	};
 
-    // Retained display list + transform palette + clip list, one copy per slot.
-    // The copies are independent buffers rather than offsets into one, so that
-    // growing the copy this frame outgrew leaves the others — and what they
-    // already hold — alone.
-    for (uint i = 0; i < CANVAS_SLOTS; i++) {
-        pass.uniform_buffers[i] = vk::new_buffer(
-            allocator,
-            usage: BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-            data: &uniform_data,
-            data_size: ShaderUniforms::size,
-        )!;
+	// Retained display list + transform palette + clip list, one copy per slot.
+	// The copies are independent buffers rather than offsets into one, so that
+	// growing the copy this frame outgrew leaves the others — and what they
+	// already hold — alone.
+	for (uint i = 0; i < CANVAS_SLOTS; i++)
+	{
+		pass.uniform_buffers[i] = vk::new_buffer(
+			allocator,
+			usage: BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+			data: &uniform_data,
+			data_size: ShaderUniforms::size,
+		)!;
 
-        pass.canvas_buffers[i] = vk::new_buffer(
-            allocator,
-            usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-            data: null,
-            data_size: Drawing::size * INITIAL_DRAWINGS,
-        )!;
+		pass.canvas_buffers[i] = vk::new_buffer(
+			allocator,
+			usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+			properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+			data: null,
+			data_size: Drawing::size * INITIAL_DRAWINGS,
+		)!;
 
-        pass.transform_buffers[i] = vk::new_buffer(
-            allocator,
-            usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-            data: null,
-            data_size: Matrix4f::size * INITIAL_TRANSFORMS,
-        )!;
+		pass.transform_buffers[i] = vk::new_buffer(
+			allocator,
+			usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+			properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+			data: null,
+			data_size: Matrix4f::size * INITIAL_TRANSFORMS,
+		)!;
 
-        pass.clip_buffers[i] = vk::new_buffer(
-            allocator,
-            usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-            data: null,
-            data_size: ClipEntry::size * INITIAL_CLIPS,
-        )!;
-    }
+		pass.clip_buffers[i] = vk::new_buffer(
+			allocator,
+			usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+			properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+			data: null,
+			data_size: ClipEntry::size * INITIAL_CLIPS,
+		)!;
+	}
 
-    // Ahead of every slot's 0, so the first upload into each fills it whatever
-    // the canvas's dirty flags happen to say.
-    pass.drawings_revision = 1;
-    pass.transforms_revision = 1;
-    pass.clips_revision = 1;
+	// Ahead of every slot's 0, so the first upload into each fills it whatever
+	// the canvas's dirty flags happen to say.
+	pass.drawings_revision = 1;
+	pass.transforms_revision = 1;
+	pass.clips_revision = 1;
 
-    return pass;
+	return pass;
 }
 
 <*
@@ -232,13 +244,14 @@ fn CanvasPass? new_canvas_pass(Device device, vk::MemoryAllocator* allocator, vk
 *>
 fn void CanvasPass.adopt(&self, vk::MemoryAllocator* allocator)
 {
-    self.allocator = allocator;
-    for (uint i = 0; i < CANVAS_SLOTS; i++) {
-        self.canvas_buffers[i].allocator = allocator;
-        self.transform_buffers[i].allocator = allocator;
-        self.clip_buffers[i].allocator = allocator;
-        self.uniform_buffers[i].allocator = allocator;
-    }
+	self.allocator = allocator;
+	for (uint i = 0; i < CANVAS_SLOTS; i++)
+	{
+		self.canvas_buffers[i].allocator = allocator;
+		self.transform_buffers[i].allocator = allocator;
+		self.clip_buffers[i].allocator = allocator;
+		self.uniform_buffers[i].allocator = allocator;
+	}
 }
 
 <*
@@ -264,66 +277,89 @@ fn void CanvasPass.adopt(&self, vk::MemoryAllocator* allocator)
 *>
 fn void? CanvasPass.upload(&self, Ui* ui, Vec2 window_size)
 {
-    self.sync_text(ui, true)!;
-    ui.flush();
-    self.sync_text(ui, false)!;
+	self.sync_text(ui, true)!;
+	ui.flush();
+	self.sync_text(ui, false)!;
 
-    // First frame, or textures were added since: (re)build the pipeline so the
-    // sampler-array binding matches the texture count.
-    if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
+	// First frame, or textures were added since: (re)build the pipeline so the
+	// sampler-array binding matches the texture count.
+	if (self.pipeline_texture_count != self.textures.len()) self.rebuild_pipeline()!;
 
-    // A different copy from the one the last upload wrote, so this write cannot
-    // land in the one a queued draw is still reading. Safe only because the host
-    // has already waited for the frame CANVAS_SLOTS submissions back — see there.
-    self.slot = (self.slot + 1) % CANVAS_SLOTS;
+	// A different copy from the one the last upload wrote, so this write cannot
+	// land in the one a queued draw is still reading. Safe only because the host
+	// has already waited for the frame CANVAS_SLOTS submissions back — see there.
+	self.slot = (self.slot + 1) % CANVAS_SLOTS;
 
-    if (window_size != self.uniform_size) {
-        self.camera = camera::new(eye: {0.0, 0.0, 1.0}, aspect: window_size.x / window_size.y,
-                                  min_zoom: 0.1, max_zoom: 10);
-        self.uniform_size = window_size;
-    }
-    ShaderUniforms uniform_data = { self.camera.perspective, self.camera.ui_view(), window_size };
-    self.uniform_buffers[self.slot].upload(&uniform_data, ShaderUniforms::size);
+	if (window_size != self.uniform_size)
+	{
+		self.camera = camera::new(
+			eye: { 0.0, 0.0, 1.0 },
+			aspect: window_size.x / window_size.y,
+			min_zoom: 0.1,
+			max_zoom: 10
+		);
+		self.uniform_size = window_size;
+	}
+	ShaderUniforms uniform_data = { self.camera.perspective, self.camera.ui_view(), window_size };
+	self.uniform_buffers[self.slot].upload(&uniform_data, ShaderUniforms::size);
 
-    // Note the change and clear the flag whether or not this slot needs writing:
-    // the flag means "changed since anyone looked", and the slots are what
-    // remember who has seen what. Leaving it set would re-count one change once
-    // per slot and re-upload for ever.
-    Canvas* canvas = &ui.canvas;
-    if (canvas.drawings_dirty) { self.drawings_revision++; canvas.drawings_dirty = false; }
-    if (canvas.transforms_dirty) { self.transforms_revision++; canvas.transforms_dirty = false; }
-    if (canvas.clips_dirty) { self.clips_revision++; canvas.clips_dirty = false; }
+	// Note the change and clear the flag whether or not this slot needs writing:
+	// the flag means "changed since anyone looked", and the slots are what
+	// remember who has seen what. Leaving it set would re-count one change once
+	// per slot and re-upload for ever.
+	Canvas* canvas = &ui.canvas;
+	if (canvas.drawings_dirty)
+	{
+		self.drawings_revision++;
+		canvas.drawings_dirty = false;
+	}
+	if (canvas.transforms_dirty)
+	{
+		self.transforms_revision++;
+		canvas.transforms_dirty = false;
+	}
+	if (canvas.clips_dirty)
+	{
+		self.clips_revision++;
+		canvas.clips_dirty = false;
+	}
 
-    // Re-upload only what this slot is behind on, growing its buffers to
-    // whatever the UI actually produced. A slot brought up to the current
-    // revision holds the current lists, so the counts below describe it too.
-    self.draw_count = canvas.drawings.len();
+	// Re-upload only what this slot is behind on, growing its buffers to
+	// whatever the UI actually produced. A slot brought up to the current
+	// revision holds the current lists, so the counts below describe it too.
+	self.draw_count = canvas.drawings.len();
 
-    if (self.drawings_in_slot[self.slot] != self.drawings_revision) {
-        if (self.draw_count > 0) {
-            self.ensure_capacity(&self.canvas_buffers[self.slot], Drawing::size * self.draw_count)!;
-            self.canvas_buffers[self.slot].upload(canvas.drawings.entries, Drawing::size * self.draw_count);
-        }
-        self.drawings_in_slot[self.slot] = self.drawings_revision;
-    }
+	if (self.drawings_in_slot[self.slot] != self.drawings_revision)
+	{
+		if (self.draw_count > 0)
+		{
+			self.ensure_capacity(&self.canvas_buffers[self.slot], Drawing::size * self.draw_count)!;
+			self.canvas_buffers[self.slot].upload(canvas.drawings.entries, Drawing::size * self.draw_count);
+		}
+		self.drawings_in_slot[self.slot] = self.drawings_revision;
+	}
 
-    if (self.transforms_in_slot[self.slot] != self.transforms_revision) {
-        sz transform_count = canvas.transforms.len();
-        if (transform_count > 0) {
-            self.ensure_capacity(&self.transform_buffers[self.slot], Matrix4f::size * transform_count)!;
-            self.transform_buffers[self.slot].upload(canvas.transforms.entries, Matrix4f::size * transform_count);
-        }
-        self.transforms_in_slot[self.slot] = self.transforms_revision;
-    }
+	if (self.transforms_in_slot[self.slot] != self.transforms_revision)
+	{
+		sz transform_count = canvas.transforms.len();
+		if (transform_count > 0)
+		{
+			self.ensure_capacity(&self.transform_buffers[self.slot], Matrix4f::size * transform_count)!;
+			self.transform_buffers[self.slot].upload(canvas.transforms.entries, Matrix4f::size * transform_count);
+		}
+		self.transforms_in_slot[self.slot] = self.transforms_revision;
+	}
 
-    if (self.clips_in_slot[self.slot] != self.clips_revision) {
-        sz clip_count = canvas.clips.len();
-        if (clip_count > 0) {
-            self.ensure_capacity(&self.clip_buffers[self.slot], ClipEntry::size * clip_count)!;
-            self.clip_buffers[self.slot].upload(canvas.clips.entries, ClipEntry::size * clip_count);
-        }
-        self.clips_in_slot[self.slot] = self.clips_revision;
-    }
+	if (self.clips_in_slot[self.slot] != self.clips_revision)
+	{
+		sz clip_count = canvas.clips.len();
+		if (clip_count > 0)
+		{
+			self.ensure_capacity(&self.clip_buffers[self.slot], ClipEntry::size * clip_count)!;
+			self.clip_buffers[self.slot].upload(canvas.clips.entries, ClipEntry::size * clip_count);
+		}
+		self.clips_in_slot[self.slot] = self.clips_revision;
+	}
 }
 
 <*
@@ -340,41 +376,50 @@ fn void? CanvasPass.upload(&self, Ui* ui, Vec2 window_size)
 *>
 fn void? CanvasPass.record(&self, CommandBuffer command_buffer, Extent2D extent)
 {
-    if (self.pipeline_texture_count == 0 || self.draw_count == 0) return;
+	if (self.pipeline_texture_count == 0 || self.draw_count == 0) return;
 
-    vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
+	vk::cmdBindPipeline(command_buffer, PIPELINE_BIND_POINT_GRAPHICS, self.pipeline.pipeline);
 
-    // Descriptor writes are built here rather than cached so the pBufferInfo /
-    // pImageInfo pointers reference data that is alive at record time.
-    DescriptorBufferInfo[1] uniform_info = {
-        { .buffer = self.uniform_buffers[self.slot].buffer, .offset = 0, .range = ShaderUniforms::size },
-    };
-    WriteDescriptorSet[2] descriptor_writes = {
-        vk::writeDescriptorSet()
-        .setDescriptorType(DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setDstBinding(0)
-        .setBufferInfo(uniform_info[..]),
-        vk::writeDescriptorSet()
-        .setDstBinding(1)
-        .setDescriptorType(DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setImageInfo(self.textures.array_view()),
-    };
-    vk::cmdPushDescriptorSetKHR(command_buffer, PIPELINE_BIND_POINT_GRAPHICS,
-        self.pipeline.pipeline_layout, 0, descriptor_writes.len, &descriptor_writes[0]);
+	// Descriptor writes are built here rather than cached so the pBufferInfo /
+	// pImageInfo pointers reference data that is alive at record time.
+	DescriptorBufferInfo[1] uniform_info = {
+		{ .buffer = self.uniform_buffers[self.slot].buffer, .offset = 0, .range = ShaderUniforms::size },
+	};
+	WriteDescriptorSet[2] descriptor_writes = {
+		vk::writeDescriptorSet()
+		.setDescriptorType(DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+		.setDstBinding(0)
+		.setBufferInfo(uniform_info[..]), vk::writeDescriptorSet().setDstBinding(1)
+			.setDescriptorType(DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+			.setImageInfo(self.textures.array_view()), };
+	vk::cmdPushDescriptorSetKHR(
+		command_buffer,
+		PIPELINE_BIND_POINT_GRAPHICS,
+		self.pipeline.pipeline_layout,
+		0,
+		descriptor_writes.len,
+		&descriptor_writes[0]
+	);
 
-    // The slot `upload` just filled. Addresses are pushed every frame anyway, so
-    // a slot whose buffer moved under ensure_capacity needs nothing extra said.
-    ShaderPushConstants constant_data = {
-        .drawings = self.canvas_buffers[self.slot].address,
-        .transforms = self.transform_buffers[self.slot].address,
-        .clips = self.clip_buffers[self.slot].address,
-    };
-    vk::cmdPushConstants(command_buffer, self.pipeline.pipeline_layout,
-        SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT, 0, ShaderPushConstants::size, &constant_data);
+	// The slot `upload` just filled. Addresses are pushed every frame anyway, so
+	// a slot whose buffer moved under ensure_capacity needs nothing extra said.
+	ShaderPushConstants constant_data = {
+		.drawings = self.canvas_buffers[self.slot].address,
+		.transforms = self.transform_buffers[self.slot].address,
+		.clips = self.clip_buffers[self.slot].address,
+	};
+	vk::cmdPushConstants(
+		command_buffer,
+		self.pipeline.pipeline_layout,
+		SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
+		0,
+		ShaderPushConstants::size,
+		&constant_data
+	);
 
-    // The whole canvas in one instanced draw; the vertex shader indexes
-    // drawings by SV_InstanceID.
-    vk::cmdDraw(command_buffer, 6, (uint)self.draw_count, 0, 0);
+	// The whole canvas in one instanced draw; the vertex shader indexes
+	// drawings by SV_InstanceID.
+	vk::cmdDraw(command_buffer, 6, (uint)self.draw_count, 0, 0);
 }
 
 <*
@@ -389,10 +434,10 @@ fn void? CanvasPass.record(&self, CommandBuffer command_buffer, Extent2D extent)
 *>
 fn cui::Texture? CanvasPass.load_image(&self, String path)
 {
-    vk::Image image;
-    self.textures.loadPath(path, self.allocator, self.queue, &image)!;
-    self.texture_images.push(image);
-    return (cui::Texture)self.textures.len();
+	vk::Image image;
+	self.textures.loadPath(path, self.allocator, self.queue, &image)!;
+	self.texture_images.push(image);
+	return (cui::Texture)self.textures.len();
 }
 
 <*
@@ -407,10 +452,10 @@ fn cui::Texture? CanvasPass.load_image(&self, String path)
 *>
 fn cui::Texture? CanvasPass.load_pixels(&self, char[] rgba, uint width, uint height)
 {
-    vk::Image image;
-    self.textures.load_rgba(rgba, width, height, self.allocator, self.queue, &image)!;
-    self.texture_images.push(image);
-    return (cui::Texture)self.textures.len();
+	vk::Image image;
+	self.textures.load_rgba(rgba, width, height, self.allocator, self.queue, &image)!;
+	self.texture_images.push(image);
+	return (cui::Texture)self.textures.len();
 }
 
 <*
@@ -419,27 +464,28 @@ fn cui::Texture? CanvasPass.load_pixels(&self, char[] rgba, uint width, uint hei
 *>
 fn void CanvasPass.free(&self)
 {
-    self.device.waitIdle();
+	self.device.waitIdle();
 
-    for (uint i = 0; i < CANVAS_SLOTS; i++) {
-        self.uniform_buffers[i].free();
-        self.canvas_buffers[i].free();
-        self.transform_buffers[i].free();
-        self.clip_buffers[i].free();
-    }
+	for (uint i = 0; i < CANVAS_SLOTS; i++)
+	{
+		self.uniform_buffers[i].free();
+		self.canvas_buffers[i].free();
+		self.transform_buffers[i].free();
+		self.clip_buffers[i].free();
+	}
 
-    // Teardown is strictly inside-out, and each step here outlives the one
-    // before it: a view reads an image, an image is bound to allocator memory.
-    foreach (&texture : self.textures) texture.free(self.device);
-    foreach (image : self.texture_images) image.free(self.device);
+	// Teardown is strictly inside-out, and each step here outlives the one
+	// before it: a view reads an image, an image is bound to allocator memory.
+	foreach (&texture : self.textures) texture.free(self.device);
+	foreach (image : self.texture_images) image.free(self.device);
 
-    self.textures.free();
-    self.texture_images.free();
+	self.textures.free();
+	self.texture_images.free();
 
-    // RenderState.free also frees the descriptor layout it holds.
-    if (self.pipeline_texture_count > 0) self.pipeline.free(self.device);
+	// RenderState.free also frees the descriptor layout it holds.
+	if (self.pipeline_texture_count > 0) self.pipeline.free(self.device);
 
-    *self = {};
+	*self = { };
 }
 
 <*
@@ -456,22 +502,38 @@ fn void CanvasPass.free(&self)
 *>
 fn void? CanvasPass.sync_text(&self, Ui* ui, bool creating)
 {
-    cui::TextSystem* text = &ui.text;
-    if (creating) {
-        if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0) {
-            self.textures.load_atlas(text.atlas, text.atlas_width, text.atlas_height,
-                self.allocator, self.queue, &self.atlas_image)!;
-            self.texture_images.push(self.atlas_image);
-            text.texture = (cui::Texture)self.textures.len();
-            text.dirty = false;
-        }
-        return;
-    }
-    if (text.dirty && text.texture != cui::NO_TEXTURE) {
-        vulkan::update_atlas_image(self.atlas_image, text.atlas, text.atlas_width, text.atlas_height,
-            false, self.allocator, self.queue)!;
-        text.dirty = false;
-    }
+	cui::TextSystem* text = &ui.text;
+	if (creating)
+	{
+		if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0)
+		{
+			self.textures.load_atlas(
+				text.atlas,
+				text.atlas_width,
+				text.atlas_height,
+				self.allocator,
+				self.queue,
+				&self.atlas_image
+			)!;
+			self.texture_images.push(self.atlas_image);
+			text.texture = (cui::Texture)self.textures.len();
+			text.dirty = false;
+		}
+		return;
+	}
+	if (text.dirty && text.texture != cui::NO_TEXTURE)
+	{
+		vulkan::update_atlas_image(
+			self.atlas_image,
+			text.atlas,
+			text.atlas_width,
+			text.atlas_height,
+			false,
+			self.allocator,
+			self.queue
+		)!;
+		text.dirty = false;
+	}
 }
 
 <*
@@ -483,72 +545,76 @@ fn void? CanvasPass.sync_text(&self, Ui* ui, bool creating)
 *>
 fn void? CanvasPass.rebuild_pipeline(&self)
 {
-    if (self.pipeline_texture_count > 0) {
-        self.device.waitIdle();
-        self.pipeline.free(self.device);    // also frees the descriptor layout
-    }
+	if (self.pipeline_texture_count > 0)
+	{
+		self.device.waitIdle();
+		self.pipeline.free(self.device); // also frees the descriptor layout
+	}
 
-    self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
-    .setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
-    .setBindings({
-        {
-            .binding = 0,
-            .descriptorType = DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT
-        },
-        {
-            .binding = 1,
-            .descriptorType = DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = (uint)self.textures.len(),
-            .stageFlags = SHADER_STAGE_FRAGMENT_BIT
-        },
-    }).build(self.device)!;
+	self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
+		.setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
+		.setBindings(
+			{
+				{
+					.binding = 0,
+					.descriptorType = DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					.descriptorCount = 1,
+					.stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT
+				},
+				{
+					.binding = 1,
+					.descriptorType = DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = (uint)self.textures.len(),
+					.stageFlags = SHADER_STAGE_FRAGMENT_BIT
+				},
+			}
+		)
+		.build(self.device)!;
 
-    self.pipeline = (RenderState) {
-        .descriptor_layout = self.descriptor_layout,
-        .shaders = {
-            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
-            { .spirv = cui::shader_spirv[..], .entry = cui::SHADER_FRAGMENT_ENTRY, .stage = SHADER_STAGE_FRAGMENT_BIT },
-        },
-        .cull_mode = CULL_MODE_NONE,
-        .front_face = FRONT_FACE_COUNTER_CLOCKWISE,
-        .topology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        // The UI composites over whatever is already there, in paint order.
-        // Leaving depth alone is what lets a host draw 3D underneath it.
-        .enable_depth = false,
-        .push_constants = {
-            {
-                .offset = 0,
-                .size = ShaderPushConstants::size,
-                .stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
-            },
-        },
-        .dynamic_states = {
-            DYNAMIC_STATE_VIEWPORT,
-            DYNAMIC_STATE_SCISSOR,
-        },
-        .blend_attachments = {
-            {
-                .colorWriteMask =
-                    COLOR_COMPONENT_R_BIT |
-                    COLOR_COMPONENT_G_BIT |
-                    COLOR_COMPONENT_B_BIT |
-                    COLOR_COMPONENT_A_BIT,
-                .blendEnable = vk::TRUE,
-                .srcColorBlendFactor = BLEND_FACTOR_SRC_ALPHA,
-                .dstColorBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .colorBlendOp = BLEND_OP_ADD,
-                .srcAlphaBlendFactor = BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .alphaBlendOp = BLEND_OP_ADD,
-            }
-        },
-        .color_attachments = { self.color_format },
-        .depth_format = self.depth_format,
-    }.build(self.device)!;
+	self.pipeline = (RenderState) {
+		.descriptor_layout = self.descriptor_layout,
+		.shaders = {
+			{ .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
+			{
+				.spirv = cui::shader_spirv[..],
+				.entry = cui::SHADER_FRAGMENT_ENTRY,
+				.stage = SHADER_STAGE_FRAGMENT_BIT
+			},
+		},
+		.cull_mode = CULL_MODE_NONE,
+		.front_face = FRONT_FACE_COUNTER_CLOCKWISE,
+		.topology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, // The UI composites over whatever is already there, in paint order.
+		// Leaving depth alone is what lets a host draw 3D underneath it.
+		.enable_depth = false,
+		.push_constants = {
+			{
+				.offset = 0,
+				.size = ShaderPushConstants::size,
+				.stageFlags = SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
+			},
+		},
+		.dynamic_states = {
+			DYNAMIC_STATE_VIEWPORT,
+			DYNAMIC_STATE_SCISSOR,
+		},
+		.blend_attachments = {
+			{
+				.colorWriteMask = COLOR_COMPONENT_R_BIT | COLOR_COMPONENT_G_BIT | COLOR_COMPONENT_B_BIT
+					| COLOR_COMPONENT_A_BIT,
+				.blendEnable = vk::TRUE,
+				.srcColorBlendFactor = BLEND_FACTOR_SRC_ALPHA,
+				.dstColorBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+				.colorBlendOp = BLEND_OP_ADD,
+				.srcAlphaBlendFactor = BLEND_FACTOR_ONE,
+				.dstAlphaBlendFactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+				.alphaBlendOp = BLEND_OP_ADD,
+			}
+		},
+		.color_attachments = { self.color_format },
+		.depth_format = self.depth_format,
+	}.build(self.device)!;
 
-    self.pipeline_texture_count = self.textures.len();
+	self.pipeline_texture_count = self.textures.len();
 }
 
 <*
@@ -562,18 +628,18 @@ fn void? CanvasPass.rebuild_pipeline(&self)
 *>
 fn void? CanvasPass.ensure_capacity(&self, vk::Memory* buffer, sz needed)
 {
-    if (needed <= buffer.size) return;
+	if (needed <= buffer.size) return;
 
-    sz new_size = buffer.size > 0 ? buffer.size : 1024;
-    while (new_size < needed) new_size *= 2;
+	sz new_size = buffer.size > 0 ? buffer.size : 1024;
+	while (new_size < needed) new_size *= 2;
 
-    self.device.waitIdle();
-    buffer.free();
-    *buffer = vk::new_buffer(
-        self.allocator,
-        usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
-        data: null,
-        data_size: new_size,
-    )!;
+	self.device.waitIdle();
+	buffer.free();
+	*buffer = vk::new_buffer(
+		self.allocator,
+		usage: BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+		properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_CACHED_BIT,
+		data: null,
+		data_size: new_size,
+	)!;
 }

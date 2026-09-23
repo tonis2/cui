@@ -8,8 +8,8 @@
  second: whether a dropdown has room to open downwards, whether a one-line hint
  fits at all, whether a panel takes a third of the width or all of it.
 
-     Media m = elem.media();
-     if (m.size.x < 900) ... // the compact arrangement
+ Media m = elem.media();
+ if (m.size.x < 900) ... // the compact arrangement
 
  The screen is not always the window. Any element can declare its own rect the
  screen for everything below it by publishing `Element.media_box` from its
@@ -103,10 +103,10 @@ fn Vec2 Media.clamp_rect(self, Vec2 at, Vec2 size)
 *>
 fn Vec2 Media.drop(self, Vec2 anchor, float anchor_height, Vec2 size)
 {
-	float below = anchor.y + anchor_height;
+	float below      = anchor.y + anchor_height;
 	float room_below = self.origin.y + self.size.y - below;
 	float room_above = anchor.y - self.origin.y;
-	bool flip = size.y > room_below && room_above > room_below;
+	bool flip        = size.y > room_below && room_above > room_below;
 	return self.clamp_rect({ anchor.x, flip ? anchor.y - size.y : below }, size);
 }
 

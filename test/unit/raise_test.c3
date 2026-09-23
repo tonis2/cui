@@ -15,10 +15,10 @@ fn void a_raise_climbs_to_its_ancestors() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* popup = ui.@node((Rectangle){ .size = {100, 50} });
-	Element* row = ui.@node((Row){}, popup);
-	Element* under = ui.@node((Rectangle){ .size = {100, 50} });
-	ui.build(ui.@node((Stack){}, ui.@node((Column){}, row, under)));
+	Element* popup = ui.@node((Rectangle) { .size = { 100, 50 } });
+	Element* row   = ui.@node((Row) { }, popup);
+	Element* under = ui.@node((Rectangle) { .size = { 100, 50 } });
+	ui.build(ui.@node((Stack) { }, ui.@node((Column) { }, row, under)));
 
 	// The control first: nothing raised, so the form paints top to bottom.
 	ui.flush();
@@ -45,19 +45,19 @@ fn void a_raised_popup_takes_the_click() @test
 	// The popup hangs below the head that owns it, over the field under it —
 	// which is what a dropdown is. A Stack lays its children out without placing
 	// them, so the offset survives layout.
-	Element* popup = ui.@node((EventProbe){ .pref = {100, 50}, .rec = &popup_rec });
-	popup.set_offset({0, 50});
-	Element* head = ui.@node((Stack){ .size = {100, 50} }, popup);
-	Element* under = ui.@node((EventProbe){ .pref = {100, 50}, .rec = &under_rec });
-	ui.build(ui.@node((Stack){}, ui.@node((Column){}, head, under)));
+	Element* popup = ui.@node((EventProbe) { .pref = { 100, 50 }, .rec = &popup_rec });
+	popup.set_offset({ 0, 50 });
+	Element* head  = ui.@node((Stack) { .size = { 100, 50 } }, popup);
+	Element* under = ui.@node((EventProbe) { .pref = { 100, 50 }, .rec = &under_rec });
+	ui.build(ui.@node((Stack) { }, ui.@node((Column) { }, head, under)));
 	ui.flush();
 
-	test::eq(ui.hit_test({50, 75}), under);
+	test::eq(ui.hit_test({ 50, 75 }), under);
 
 	popup.raised = true;
 	popup.request_paint();
 	ui.flush();
-	test::eq(ui.hit_test({50, 75}), popup);
+	test::eq(ui.hit_test({ 50, 75 }), popup);
 }
 
 // Floors are siblings, and a raise inside one lifts that whole floor — so the
@@ -68,18 +68,18 @@ fn void floors_keep_their_order() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* dropdown = ui.@node((Rectangle){ .size = {100, 50} });
+	Element* dropdown = ui.@node((Rectangle) { .size = { 100, 50 } });
 	dropdown.raised = true;
-	Element* hud = ui.@node((Stack){}, dropdown);
+	Element* hud = ui.@node((Stack) { }, dropdown);
 
-	Element* modal = ui.@node((Rectangle){ .size = {100, 50} });
+	Element* modal = ui.@node((Rectangle) { .size = { 100, 50 } });
 	modal.raised = true;
-	Element* dialogs = ui.@node((Stack){}, modal);
+	Element* dialogs = ui.@node((Stack) { }, modal);
 
-	ui.build(ui.@node((Stack){}, hud, dialogs));
+	ui.build(ui.@node((Stack) { }, hud, dialogs));
 	ui.flush();
 
 	test::@check(hud.raise_path && dialogs.raise_path, "both floors carry a raise");
 	test::@check(modal.first_drawing > dropdown.first_drawing, "the later floor still paints last");
-	test::eq(ui.hit_test({50, 25}), modal);
+	test::eq(ui.hit_test({ 50, 25 }), modal);
 }

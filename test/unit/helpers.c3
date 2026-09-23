@@ -15,14 +15,17 @@ macro void eq_vec2(Vec2 got, Vec2 want)
 }
 
 // Feed one input frame the way an embedder would.
-fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = {}, bool right = false)
+fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = { }, bool right = false)
 {
-	ui.process_input({
-		.mouse = mouse,
-		.buttons = { left, right, false },
-		.scroll = scroll,
-		.keys_down = keys,
-	}, 0.016f);
+	ui.process_input(
+		{
+			.mouse = mouse,
+			.buttons = { left, right, false },
+			.scroll = scroll,
+			.keys_down = keys,
+		},
+		0.016f
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +91,8 @@ fn Vec2 EventProbe.layout(&self, Element* elem, Constraints c) @dynamic
 	Vec2 size = c.constrain(self.pref);
 	if (elem.children.len() > 0)
 	{
-		elem.layout_child(0, { .min = {0, 0}, .max = size });
-		elem.place_child(0, {0, 0});
+		elem.layout_child(0, { .min = { 0, 0 }, .max = size });
+		elem.place_child(0, { 0, 0 });
 	}
 	return size;
 }

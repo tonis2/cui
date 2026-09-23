@@ -62,7 +62,7 @@ fn usz Grid.columns(&self, float width)
 {
 	if (self.cell.x <= 0) return 1;
 	float usable = width + self.gap_x;
-	usz across = (usz)(usable / (self.cell.x + self.gap_x));
+	usz across   = (usz)(usable / (self.cell.x + self.gap_x));
 	return across > 0 ? across : 1;
 }
 
@@ -87,7 +87,7 @@ fn Vec2 Grid.layout(&self, Element* elem, Constraints constraints) @dynamic
 	};
 
 	usz across = self.columns(avail.x);
-	usz rows = count > 0 ? ((usz)count + across - 1) / across : 0;
+	usz rows   = count > 0 ? ((usz)count + across - 1) / across : 0;
 
 	for (sz i = 0; i < count; i++)
 	{
@@ -95,21 +95,22 @@ fn Vec2 Grid.layout(&self, Element* elem, Constraints constraints) @dynamic
 		// let each child pick its own size and the columns would stop lining up,
 		// which is the one thing this is for.
 		elem.layout_child(i, cui::tight(self.cell));
-		elem.place_child(i, {
-			(float)((usz)i % across) * (self.cell.x + self.gap_x),
-			(float)((usz)i / across) * (self.cell.y + self.gap_y),
-		});
+		elem.place_child(
+			i,
+			{
+				(float)((usz)i % across) * (self.cell.x + self.gap_x),
+				(float)((usz)i / across) * (self.cell.y + self.gap_y),
+			}
+		);
 	}
 
-	float content_h = rows > 0
-		? (float)rows * self.cell.y + (float)(rows - 1) * self.gap_y
-		: 0;
-	float content_w = count > 0
-		? (float)math::min(across, (usz)count) * (self.cell.x + self.gap_x) - self.gap_x
-		: 0;
+	float content_h = rows > 0 ? (float)rows * self.cell.y + (float)(rows - 1) * self.gap_y : 0;
+	float content_w = count > 0 ? (float)math::min(across, (usz)count) * (self.cell.x + self.gap_x) - self.gap_x : 0;
 
-	return constraints.constrain({
-		self.size.x > 0 ? self.size.x : content_w,
-		self.size.y > 0 ? self.size.y : content_h,
-	});
+	return constraints.constrain(
+		{
+			self.size.x > 0 ? self.size.x : content_w,
+			self.size.y > 0 ? self.size.y : content_h,
+		}
+	);
 }

@@ -336,13 +336,16 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	// nothing vertically, and gating on `scroll` alone would drop it entirely.
 	if ((input.scroll != 0 || input.scroll_x != 0) && target)
 	{
-		self.dispatch_mouse(target, {
-			.kind = SCROLL,
-			.absolute = input.mouse,
-			.scroll = input.scroll,
-			.scroll_x = input.scroll_x,
-			.scroll_precise = input.scroll_precise,
-		});
+		self.dispatch_mouse(
+			target,
+			{
+				.kind = SCROLL,
+				.absolute = input.mouse,
+				.scroll = input.scroll,
+				.scroll_x = input.scroll_x,
+				.scroll_precise = input.scroll_precise,
+			}
+		);
 	}
 
 	for (sz b = 0; b < 3; b++)
@@ -394,7 +397,7 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	if (self.root) self.tick(self.root, dt);
 
 	// Effective cursor: the deepest hovered element with a preference wins.
-	//
+	// 
 	// Last, after every handler and every update has run, because a widget that
 	// changes shape in response to input is the common case and resolving before
 	// the dispatch would show the answer to the previous frame's question. The

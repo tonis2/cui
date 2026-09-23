@@ -85,11 +85,9 @@ fn void a_published_box_replaces_the_window_under_it() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* inside = ui.@node((MediaProbe) { });
+	Element* inside  = ui.@node((MediaProbe) { });
 	Element* outside = ui.@node((MediaProbe) { });
-	ui.build(ui.@node((Stack) { },
-		ui.@node((Screen) { .box = { 120, 60 } }, inside),
-		outside));
+	ui.build(ui.@node((Stack) { }, ui.@node((Screen) { .box = { 120, 60 } }, inside), outside));
 	ui.flush();
 
 	cui_tests::eq_vec2(inside.widget_as(MediaProbe).seen.size, { 120, 60 });
@@ -104,8 +102,7 @@ fn void the_innermost_box_wins() @test
 	defer ui.free();
 
 	Element* probe = ui.@node((MediaProbe) { });
-	ui.build(ui.@node((Screen) { .box = { 300, 80 } },
-		ui.@node((Screen) { .box = { 100, 40 } }, probe)));
+	ui.build(ui.@node((Screen) { .box = { 300, 80 } }, ui.@node((Screen) { .box = { 100, 40 } }, probe)));
 	ui.flush();
 
 	cui_tests::eq_vec2(probe.widget_as(MediaProbe).seen.size, { 100, 40 });
@@ -116,7 +113,7 @@ fn void the_origin_is_where_the_box_sits() @test
 	Ui* ui = cui::new_ui(cui_tests::WINDOW);
 	defer ui.free();
 
-	Element* probe = ui.@node((MediaProbe) { });
+	Element* probe  = ui.@node((MediaProbe) { });
 	Element* screen = ui.@node((Screen) { .box = { 120, 60 } }, probe);
 	screen.set_offset({ 40, 25 });
 	ui.build(ui.@node((Stack) { }, screen));
@@ -232,8 +229,8 @@ fn void a_pane_is_the_screen_its_view_is_on() @test
 	// point — a view that sized itself against the window would lay out for
 	// room it cannot draw into.
 	float pane_w = (cui_tests::areas::AREA_WINDOW.x - 5.0f) * 0.5f;
-	usz seen = 0;
-	ui.@each(MediaProbe; elem)
+	usz seen     = 0;
+	ui.@each(MediaProbe ; elem)
 	{
 		seen++;
 		Media m = elem.widget_as(MediaProbe).seen;
@@ -247,8 +244,14 @@ fn void a_pane_is_the_screen_its_view_is_on() @test
 
 usz picked @local = 0;
 
-fn void pick_one(Ui* ui) { picked = 1; }
-fn void pick_two(Ui* ui) { picked = 2; }
+fn void pick_one(Ui* ui)
+{
+	picked = 1;
+}
+fn void pick_two(Ui* ui)
+{
+	picked = 2;
+}
 
 MenuItem[3] short_items = {
 	{ .label = "One", .on_select = &pick_one },
@@ -288,14 +291,14 @@ fn Ui* short_bar_ui(Menu[] menus)
 fn void a_dropdown_stays_on_a_short_screen() @test
 {
 	Menu[1] menus = { { .title = "M", .items = short_items[..] } };
-	Ui* ui = short_bar_ui(menus[..]);
+	Ui* ui        = short_bar_ui(menus[..]);
 	defer ui.free();
 
 	// Open it: fontless, so the title is its 2 * pad_x floor.
 	click_framed(ui, MENU_AIM);
 
 	Element* panel = ui.find(PopupPanel)!!;
-	float height = 3 * 26.0f + 2 * 5.0f;
+	float height   = 3 * 26.0f + 2 * 5.0f;
 	test::eq(panel.size.y, height);
 	// Slid up until its bottom is the screen's, overlapping the bar it hangs
 	// from. Without this it would sit at y = 28 and the last row would be drawn
@@ -307,7 +310,7 @@ fn void a_dropdown_stays_on_a_short_screen() @test
 fn void the_click_that_opens_a_menu_does_not_choose_from_it() @test
 {
 	Menu[1] menus = { { .title = "M", .items = short_items[..] } };
-	Ui* ui = short_bar_ui(menus[..]);
+	Ui* ui        = short_bar_ui(menus[..]);
 	defer ui.free();
 	picked = 0;
 
@@ -324,7 +327,7 @@ fn void the_click_that_opens_a_menu_does_not_choose_from_it() @test
 fn void a_drag_from_the_title_onto_an_item_still_chooses() @test
 {
 	Menu[1] menus = { { .title = "M", .items = short_items[..] } };
-	Ui* ui = short_bar_ui(menus[..]);
+	Ui* ui        = short_bar_ui(menus[..]);
 	defer ui.free();
 	picked = 0;
 
@@ -333,7 +336,7 @@ fn void a_drag_from_the_title_onto_an_item_still_chooses() @test
 	cui_tests::frame(ui, MENU_AIM, left: true);
 	ui.flush();
 	Element* second = ui.find_id("Two")!!;
-	Vec2 on_two = second.absolute + second.size * 0.5f;
+	Vec2 on_two     = second.absolute + second.size * 0.5f;
 	cui_tests::frame(ui, on_two, left: true);
 	cui_tests::frame(ui, on_two, left: false);
 	ui.flush();

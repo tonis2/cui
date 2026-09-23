@@ -8,16 +8,22 @@ import cui_tests;
 import std::core::test;
 import std::math::vector;
 
-const float ROW_H = widgets::DEFAULT_TREE_STYLE.row_height;
+const float ROW_H  = widgets::DEFAULT_TREE_STYLE.row_height;
 const float INDENT = widgets::DEFAULT_TREE_STYLE.indent;
-const float PAD = widgets::DEFAULT_TREE_STYLE.padding;
+const float PAD    = widgets::DEFAULT_TREE_STYLE.padding;
 
 // What the callbacks report, since a bare OnRow carries no context back.
 int selected_row @local = -1;
-int toggled_row @local = -1;
+int toggled_row @local  = -1;
 
-fn void note_select(Ui* ui, usz row) @local { selected_row = (int)row; }
-fn void note_toggle(Ui* ui, usz row) @local { toggled_row = (int)row; }
+fn void note_select(Ui* ui, usz row) @local
+{
+	selected_row = (int)row;
+}
+fn void note_toggle(Ui* ui, usz row) @local
+{
+	toggled_row = (int)row;
+}
 
 // "All" over one collapsible kind and two plans under it — the sidebar shape.
 TreeRow[4] rows @local = {
@@ -32,12 +38,14 @@ fn Element* tree_of(Ui* ui) @local
 	selected_row = -1;
 	toggled_row = -1;
 
-	Element* tree = ui.@node((Tree) {
-		.rows = rows[..],
-		.selected = rows.len, // past the end: nothing selected
-		.on_select = &note_select,
-		.on_toggle = &note_toggle,
-	});
+	Element* tree = ui.@node(
+		(Tree) {
+			.rows = rows[..],
+			.selected = rows.len, // past the end: nothing selected
+			.on_select = &note_select,
+			.on_toggle = &note_toggle,
+		}
+	);
 	ui.build(ui.@node((Stack) { }, tree));
 	ui.flush();
 	return tree;
@@ -59,8 +67,12 @@ fn void the_tree_is_as_tall_as_its_rows() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	test::@check(tree.size.y == (float)rows.len * ROW_H,
-		"four rows came to %.0f rather than %.0f", tree.size.y, (float)rows.len * ROW_H);
+	test::@check(
+		tree.size.y == (float)rows.len * ROW_H,
+		"four rows came to %.0f rather than %.0f",
+		tree.size.y,
+		(float)rows.len * ROW_H
+	);
 	test::@check(tree.size.x == cui_tests::WINDOW.x, "the tree did not take the width it was offered");
 }
 
@@ -76,7 +88,7 @@ fn void a_point_lands_in_the_row_it_is_drawn_in() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
+	Tree* widget  = tree.widget_as(Tree);
 
 	test::eq(widget.row_at(tree, { 200, 1 }), 0);
 	test::eq(widget.row_at(tree, { 200, ROW_H - 1 }), 0);
@@ -100,7 +112,7 @@ fn void clicking_a_row_selects_it() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
+	Tree* widget  = tree.widget_as(Tree);
 
 	cui_tests::frame(ui, on_label(2), left: true);
 	test::eq(selected_row, 2);
@@ -125,7 +137,7 @@ fn void the_mark_toggles_where_the_row_selects() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
+	Tree* widget  = tree.widget_as(Tree);
 
 	// The mark sits in the indent step left of a depth-1 label.
 	float mark_x = PAD + INDENT - INDENT * 0.5f;
@@ -154,12 +166,14 @@ fn void a_plain_row_has_no_mark_to_hit() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
+	Tree* widget  = tree.widget_as(Tree);
 
 	// Row 2 is a plain depth-2 row; this x is where its mark would be if it had one.
 	float mark_x = PAD + 2 * INDENT - INDENT * 0.5f;
-	test::@check(!widget.on_mark(widgets::DEFAULT_TREE_STYLE, 2, { mark_x, 0 }),
-		"a row with nothing to expand offered a disclosure target");
+	test::@check(
+		!widget.on_mark(widgets::DEFAULT_TREE_STYLE, 2, { mark_x, 0 }),
+		"a row with nothing to expand offered a disclosure target"
+	);
 
 	cui_tests::frame(ui, { mark_x, ROW_H * 2.5f }, left: true);
 	test::eq(selected_row, 2);
@@ -179,8 +193,8 @@ fn void the_empty_tail_still_belongs_to_the_tree() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
-	usz before = widget.selected;
+	Tree* widget  = tree.widget_as(Tree);
+	usz before    = widget.selected;
 
 	// Below every row, but inside the element the Stack stretched to the window.
 	cui_tests::frame(ui, { 200, (float)rows.len * ROW_H + 4.0f }, left: true);
@@ -200,7 +214,7 @@ fn void the_hover_clears_when_the_pointer_leaves() @test
 	defer ui.free();
 
 	Element* tree = tree_of(ui);
-	Tree* widget = tree.widget_as(Tree);
+	Tree* widget  = tree.widget_as(Tree);
 
 	cui_tests::frame(ui, on_label(1));
 	test::eq(widget.lit, 2); // index + 1, so 0 can mean none

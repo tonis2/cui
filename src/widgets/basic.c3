@@ -135,7 +135,7 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 	// whatever it was offered itself. That top-down cap is what lets a
 	// fill-width child — a zero size field, a bare container — inherit the
 	// column's width instead of the window's.
-	//
+	// 
 	// A cap rather than `constraints.fill`: fill would raise a size smaller than
 	// the incoming minimum back up to it, and what the children are offered has
 	// to be what this Column was told to be, not what its parent would prefer.
@@ -153,10 +153,12 @@ fn Vec2 Column.layout(&self, Element* elem, Constraints constraints) @dynamic
 		cross = math::max(cross, child_size.x);
 	}
 
-	Vec2 own = constraints.constrain({
-		self.size.x > 0 ? self.size.x : cross,
-		self.size.y > 0 ? self.size.y : content,
-	});
+	Vec2 own = constraints.constrain(
+		{
+			self.size.x > 0 ? self.size.x : cross,
+			self.size.y > 0 ? self.size.y : content,
+		}
+	);
 
 	float leftover = math::max(own.y - content, 0.0f);
 	float cursor   = 0;
@@ -220,10 +222,12 @@ fn Vec2 Row.layout(&self, Element* elem, Constraints constraints) @dynamic
 		cross = math::max(cross, child_size.y);
 	}
 
-	Vec2 own = constraints.constrain({
-		self.size.x > 0 ? self.size.x : content,
-		self.size.y > 0 ? self.size.y : cross,
-	});
+	Vec2 own = constraints.constrain(
+		{
+			self.size.x > 0 ? self.size.x : content,
+			self.size.y > 0 ? self.size.y : cross,
+		}
+	);
 
 	float leftover = math::max(own.x - content, 0.0f);
 	float cursor   = 0;
@@ -589,9 +593,9 @@ fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  app-threaded context yet can still reach the rest of the tree, the way a Flutter
  callback reaches other widgets through its BuildContext:
 
-     `fn void reset_clicked(Ui* ui) {`
-     `    ui.@modify(Dial; d) { d.value = 0; };   // resolve once, mutate, repaint`
-     `}`
+ `fn void reset_clicked(Ui* ui) {`
+ `    ui.@modify(Dial; d) { d.value = 0; };   // resolve once, mutate, repaint`
+ `}`
 *>
 alias OnClick = fn void(Ui* ui);
 
@@ -735,7 +739,7 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 <*
  A toggle callback, carrying the state the box is in **after** the click.
 
-     `fn void rig_toggled(Ui* ui, bool on) { ui.inherit(App)!!.with_rig = on; }`
+ `fn void rig_toggled(Ui* ui, bool on) { ui.inherit(App)!!.with_rig = on; }`
 *>
 alias OnToggle = fn void(Ui* ui, bool checked);
 
@@ -781,7 +785,7 @@ fn CheckboxStyle CheckboxStyle.resolved(self)
 <*
  A tick box with its label beside it: the boolean sibling of Button.
 
-     `@node((Checkbox) { .label = "Export rig", .checked = true, .on_change = &rig_toggled });`
+ `@node((Checkbox) { .label = "Export rig", .checked = true, .on_change = &rig_toggled });`
 
  **The box flips itself and then says so.** `on_change` is told the new state
  rather than asked for it, and the widget has already repainted by the time the
@@ -813,9 +817,7 @@ fn Vec2 Checkbox.layout(&self, Element* elem, Constraints constraints) @dynamic
 	Vec2 own = self.size;
 	if (own.x == 0.0f || own.y == 0.0f)
 	{
-		Vec2 text = self.label.len > 0
-			? elem.ui.text.measure(s.font, self.label, s.text_size)
-			: (Vec2){ 0, 0 };
+		Vec2 text = self.label.len > 0 ? elem.ui.text.measure(s.font, self.label, s.text_size) : (Vec2) { 0, 0 };
 		if (own.x == 0.0f) own.x = s.box + (self.label.len > 0 ? s.gap + text.x : 0.0f);
 		if (own.y == 0.0f) own.y = math::max(s.box, text.y);
 	}
@@ -831,27 +833,45 @@ fn void Checkbox.paint(&self, Element* elem, Painter* painter) @dynamic
 	float top = (elem.size.y - s.box) * 0.5f;
 
 	Color fill = s.color;
-	if (self.checked) { fill = s.checked_color; }
-	else if (self.hovered) { fill = s.hover_color; }
+	if (self.checked)
+	{
+		fill = s.checked_color;
+	}
+	else if (self.hovered)
+	{
+		fill = s.hover_color;
+	}
 	painter.rect({ 0, top }, { s.box, s.box }, { .color = fill, .border_radius = s.border_radius });
 
 	if (self.checked)
 	{
 		// Two strokes rather than a glyph: a tick is the one mark a widget cannot
 		// assume the loaded font has.
-		painter.line({ s.box * 0.24f, top + s.box * 0.52f }, { s.box * 0.44f, top + s.box * 0.72f },
-			s.thickness, s.mark);
-		painter.line({ s.box * 0.44f, top + s.box * 0.72f }, { s.box * 0.78f, top + s.box * 0.26f },
-			s.thickness, s.mark);
+		painter.line(
+			{ s.box * 0.24f, top + s.box * 0.52f },
+			{ s.box * 0.44f, top + s.box * 0.72f },
+			s.thickness,
+			s.mark
+		);
+		painter.line(
+			{ s.box * 0.44f, top + s.box * 0.72f },
+			{ s.box * 0.78f, top + s.box * 0.26f },
+			s.thickness,
+			s.mark
+		);
 	}
 
 	if (self.label.len == 0) return;
 	Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
-	painter.text({ s.box + s.gap, (elem.size.y - text.y) * 0.5f }, self.label, {
-		.font = s.font,
-		.size = s.text_size,
-		.color = s.text_color,
-	});
+	painter.text(
+		{ s.box + s.gap, (elem.size.y - text.y) * 0.5f },
+		self.label,
+		{
+			.font = s.font,
+			.size = s.text_size,
+			.color = s.text_color,
+		}
+	);
 }
 
 fn void Checkbox.on_hover(&self, Element* elem, bool entered) @dynamic
@@ -878,8 +898,8 @@ fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT || !self.held) return false;
 			self.held = false;
 
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0
-				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
+				&& event.pos.y < elem.size.y;
 			if (!inside) return true;
 
 			self.checked = !self.checked;
@@ -896,7 +916,7 @@ fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  advance of the string, height = ascent - descent. Load a font first with
  `Ui.load_font`; see `cui::TextStyle` for the field semantics.
 
-     ui.@node((Label){ .text = "Hello", .size = 20, .color = { 1, 1, 1, 1 } })
+ ui.@node((Label){ .text = "Hello", .size = 20, .color = { 1, 1, 1, 1 } })
 
  A label is **transparent to the pointer**: it is decoration, and its rect is
  usually much larger than the ink in it. Overlay one on a viewport or put one
@@ -942,4 +962,71 @@ fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 fn void Label.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	painter.text({ 0, 0 }, self.text, { .font = self.font, .size = self.size, .color = self.color });
+}
+
+// ---------------------------------------------------------------------------
+
+<*
+ Answers the text a `LiveLabel` shows now, allocated with `mem`; the label
+ takes it over. An empty answer is never freed, so "" may be a literal.
+*>
+alias LiveTextFn = fn String(Element* elem);
+
+<*
+ A Label whose text is asked for again every frame, so a readout — a clock,
+ a status line — follows changing state without its parent rebuilding. Only a
+ changed text repaints, so a readout that is not changing stays idle.
+
+ `@node((LiveLabel) { .text_of = &clock_text, .size = { 92, 24 }, .color = DIM });`
+
+ `size` follows the size-field convention: a set component is that many
+ pixels, a zero component fills what the parent offers.
+*>
+struct LiveLabel (Widget)
+{
+	LiveTextFn text_of;
+	Vec2 size;
+	FontId font;
+	float text_size; // em size in px; 0 uses cui::DEFAULT_TEXT_SIZE
+	Color color;
+	String shown; // owned; what the Label child is showing
+}
+
+<*
+ Ask for the text again and swap it in when it changed.
+
+ @return `True when the text changed.`
+*>
+fn bool LiveLabel.refresh(&self, Element* elem)
+{
+	String next = self.text_of(elem);
+	if (next == self.shown)
+	{
+		if (next.len > 0) next.free(mem);
+		return false;
+	}
+	if (elem.children.len() > 0) elem.children[0].widget_as(Label).text = next;
+	if (self.shown.len > 0) self.shown.free(mem);
+	self.shown = next;
+	return true;
+}
+
+fn Element* LiveLabel.build(&self, Element* elem) @dynamic
+{
+	if (self.shown.len == 0) self.refresh(elem);
+	return @subtree(elem.ui)
+	{
+		@node((Label) { .text = self.shown, .font = self.font, .size = self.text_size, .color = self.color });
+	};
+}
+
+fn void LiveLabel.update(&self, Element* elem, float dt) @dynamic
+{
+	if (self.refresh(elem) && elem.children.len() > 0) elem.children[0].request_paint();
+}
+
+fn void LiveLabel.unmount(&self, Element* elem) @dynamic
+{
+	if (self.shown.len > 0) self.shown.free(mem);
+	self.shown = { };
 }

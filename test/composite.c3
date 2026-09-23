@@ -67,10 +67,7 @@ fn Element* StatCard.build(&self, Element* elem) @dynamic
 						},
 						(Rectangle) {
 							.size = { BAR_W - 28.0, 9.0 },
-							.style = {
-								.color = { 0.42, 0.45, 0.52, 1.0 },
-								.border_radius = { 4.0, 4.0, 4.0, 4.0 }
-							},
+							.style = { .color = { 0.42, 0.45, 0.52, 1.0 }, .border_radius = { 4.0, 4.0, 4.0, 4.0 } },
 						}
 					);
 					// Progress bar: a fill and a remainder rect side by side,
@@ -83,10 +80,7 @@ fn Element* StatCard.build(&self, Element* elem) @dynamic
 						},
 						(Rectangle) {
 							.size = { BAR_W - fill, 12.0 },
-							.style = {
-								.color = { 0.24, 0.26, 0.32, 1.0 },
-								.border_radius = { 0.0, 6.0, 6.0, 0.0 }
-							},
+							.style = { .color = { 0.24, 0.26, 0.32, 1.0 }, .border_radius = { 0.0, 6.0, 6.0, 0.0 } },
 						}
 					);
 				};

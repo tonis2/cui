@@ -80,9 +80,14 @@ fn void cells_wrap_into_rows_at_the_grid_size() @test
 	test::eq((int)grid.children.len(), 5);
 	foreach (child : grid.children)
 	{
-		test::@check(child.size.x == CELL.x && child.size.y == CELL.y,
+		test::@check(
+			child.size.x == CELL.x && child.size.y == CELL.y,
 			"a cell came back %.0fx%.0f rather than the grid's %.0fx%.0f",
-			child.size.x, child.size.y, CELL.x, CELL.y);
+			child.size.x,
+			child.size.y,
+			CELL.x,
+			CELL.y
+		);
 	}
 
 	test::@check(grid.children[0].offset.x == 0.0f && grid.children[0].offset.y == 0.0f);
@@ -91,13 +96,20 @@ fn void cells_wrap_into_rows_at_the_grid_size() @test
 
 	// The fourth starts the second row: back to the left edge, one row down.
 	test::@check(grid.children[3].offset.x == 0.0f, "the fourth cell did not wrap");
-	test::@check(grid.children[3].offset.y == CELL.y + GAP,
-		"the second row sits at %.0f rather than one cell and a gap down", grid.children[3].offset.y);
+	test::@check(
+		grid.children[3].offset.y == CELL.y + GAP,
+		"the second row sits at %.0f rather than one cell and a gap down",
+		grid.children[3].offset.y
+	);
 	test::@check(grid.children[4].offset.y == grid.children[3].offset.y, "the fifth cell is not beside the fourth");
 
 	// Two rows: two cells tall with one gap between them, and no gap under the last.
-	test::@check(grid.size.y == 2 * CELL.y + GAP,
-		"two rows came to %.0f rather than %.0f", grid.size.y, 2 * CELL.y + GAP);
+	test::@check(
+		grid.size.y == 2 * CELL.y + GAP,
+		"two rows came to %.0f rather than %.0f",
+		grid.size.y,
+		2 * CELL.y + GAP
+	);
 }
 
 <*
@@ -114,8 +126,12 @@ fn void a_narrower_grid_takes_more_rows() @test
 	Element* grid = grid_of(ui, 5, 190.0f);
 
 	test::@check(grid.children[2].offset.y == CELL.y + GAP, "the third cell did not wrap at two across");
-	test::@check(grid.size.y == 3 * CELL.y + 2 * GAP,
-		"three rows came to %.0f rather than %.0f", grid.size.y, 3 * CELL.y + 2 * GAP);
+	test::@check(
+		grid.size.y == 3 * CELL.y + 2 * GAP,
+		"three rows came to %.0f rather than %.0f",
+		grid.size.y,
+		3 * CELL.y + 2 * GAP
+	);
 }
 
 <*
@@ -151,6 +167,10 @@ fn void a_short_row_is_only_as_wide_as_its_cells() @test
 	test::@check(one.size.x == CELL.x, "one cell reported %.0f wide rather than %.0f", one.size.x, CELL.x);
 
 	Element* two = grid_of(ui, 2, 290.0f);
-	test::@check(two.size.x == 2 * CELL.x + GAP,
-		"two cells reported %.0f wide rather than %.0f", two.size.x, 2 * CELL.x + GAP);
+	test::@check(
+		two.size.x == 2 * CELL.x + GAP,
+		"two cells reported %.0f wide rather than %.0f",
+		two.size.x,
+		2 * CELL.x + GAP
+	);
 }

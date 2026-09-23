@@ -9,12 +9,12 @@ import std::math::matrix;
 *>
 constdef DrawingKind : inline uint
 {
-    RECT = 0,
-    ELLIPSE = 1,
-    LINE = 2,
-    ARC = 3,
-    SHADOW = 4,
-    GLYPH = 5,
+	RECT    = 0,
+	ELLIPSE = 1,
+	LINE    = 2,
+	ARC     = 3,
+	SHADOW  = 4,
+	GLYPH   = 5,
 }
 
 <*
@@ -37,28 +37,29 @@ const Texture NO_TEXTURE = (Texture)0;
  layout): keep 4-byte fields in groups of four so the Vec2/Vec4 members land on
  the same offsets on both sides.
 *>
-struct Drawing {
-    DrawingKind kind;
-    int texture;            // Texture handle as raw int; 0 = untextured
-    float border_width;     // px; LINE/ARC store their thickness here, SHADOW its blur
-    uint transform_id;      // index into Canvas.transforms
+struct Drawing
+{
+	DrawingKind kind;
+	int texture; // Texture handle as raw int; 0 = untextured
+	float border_width; // px; LINE/ARC store their thickness here, SHADOW its blur
+	uint transform_id; // index into Canvas.transforms
 
-    Vec2 size;              // quad bounds in pixels
-    Vec2 corner;
+	Vec2 size; // quad bounds in pixels
+	Vec2 corner;
 
-    Vec4 params;            // per-kind data (pixels / radians), filled by Painter:
-                            //   RECT/SHADOW  corner radii {TL, TR, BR, BL}
-                            //   ELLIPSE      radii in xy
-                            //   LINE         endpoints {a.x, a.y, b.x, b.y}, quad-centered
-                            //   ARC          {radius, start, sweep, -}
-                            //   GLYPH        SDF atlas UV rect {u0, v0, u1, v1}
-    Vec4 color;
-    Vec4 border_color;
+	Vec4 params; // per-kind data (pixels / radians), filled by Painter:
+	//   RECT/SHADOW  corner radii {TL, TR, BR, BL}
+	//   ELLIPSE      radii in xy
+	//   LINE         endpoints {a.x, a.y, b.x, b.y}, quad-centered
+	//   ARC          {radius, start, sweep, -}
+	//   GLYPH        SDF atlas UV rect {u0, v0, u1, v1}
+	Vec4 color;
+	Vec4 border_color;
 
-    uint clip_id;           // index into Canvas.clips, assigned by emit; 0 = unclipped
-    uint reserved0;         // pad to a full group of four (see the layout rule above)
-    uint reserved1;
-    uint reserved2;
+	uint clip_id; // index into Canvas.clips, assigned by emit; 0 = unclipped
+	uint reserved0; // pad to a full group of four (see the layout rule above)
+	uint reserved1;
+	uint reserved2;
 }
 
 <*
@@ -68,16 +69,17 @@ struct Drawing {
  screen-fixed. Read by the shader as two raw float4s per entry — no matrices, no
  structs (see the BDA note in shaders/shader.slang).
 *>
-struct ClipEntry {
-    Vec4 rect;              // {min.x, min.y, max.x, max.y}
-    Vec4 radii;             // per-corner px {TL, TR, BR, BL}
+struct ClipEntry
+{
+	Vec4 rect; // {min.x, min.y, max.x, max.y}
+	Vec4 radii; // per-corner px {TL, TR, BR, BL}
 }
 
 <*
  Slot 0 = "no clip". The shader early-outs on `clip_id == 0`; the huge rect is
  belt and braces.
 *>
-const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = {} };
+const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = { } };
 
 <*
  Everything the renderer consumes per frame: the retained display list, the
@@ -88,13 +90,14 @@ const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = {} 
  emit (clip rects depend on absolute origins); slot 0 is always `NO_CLIP_ENTRY`.
  The `*_dirty` flags tell the backend which of the three buffers to re-upload.
 *>
-struct Canvas {
-    List{Drawing} drawings;
-    List{Matrix4f} transforms;
-    List{ClipEntry} clips;
-    bool drawings_dirty;
-    bool transforms_dirty;
-    bool clips_dirty;
+struct Canvas
+{
+	List{Drawing} drawings;
+	List{Matrix4f} transforms;
+	List{ClipEntry} clips;
+	bool drawings_dirty;
+	bool transforms_dirty;
+	bool clips_dirty;
 }
 
 <*
@@ -103,17 +106,17 @@ struct Canvas {
 *>
 fn void Canvas.init(&self)
 {
-    // The heap by name — a zeroed List takes the temp allocator on its first
-    // push, and the display list has to survive whatever the host's frame does
-    // with the temp arena. See `new_ui`.
-    self.drawings.init(mem, 0);
-    self.transforms.init(mem, 0);
-    self.clips.init(mem, 0);
-    self.transforms.push(matrix::IDENTITY4);
-    self.clips.push(NO_CLIP_ENTRY);
-    self.drawings_dirty = true;
-    self.transforms_dirty = true;
-    self.clips_dirty = true;
+	// The heap by name — a zeroed List takes the temp allocator on its first
+	// push, and the display list has to survive whatever the host's frame does
+	// with the temp arena. See `new_ui`.
+	self.drawings.init(mem, 0);
+	self.transforms.init(mem, 0);
+	self.clips.init(mem, 0);
+	self.transforms.push(matrix::IDENTITY4);
+	self.clips.push(NO_CLIP_ENTRY);
+	self.drawings_dirty = true;
+	self.transforms_dirty = true;
+	self.clips_dirty = true;
 }
 
 <*
@@ -121,7 +124,7 @@ fn void Canvas.init(&self)
 *>
 fn void Canvas.free(&self)
 {
-    self.drawings.free();
-    self.transforms.free();
-    self.clips.free();
+	self.drawings.free();
+	self.transforms.free();
+	self.clips.free();
 }

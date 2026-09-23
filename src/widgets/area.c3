@@ -195,7 +195,7 @@ struct AreaLayout
  @param style : `A complete style, or {} for DEFAULT_AREA_STYLE.`
  @require views.len > 0 : `An area layout needs at least one view to show.`
 *>
-fn void AreaLayout.init(&self, AreaView[] views, AreaStyle style = {})
+fn void AreaLayout.init(&self, AreaView[] views, AreaStyle style = { })
 {
 	if (self.root) free_node(self.root);
 	self.views = views;
@@ -347,7 +347,7 @@ fn Vec2 AreaHost.layout(&self, Element* elem, Constraints constraints) @dynamic
 *>
 fn Element* AreaHost.build(&self, Element* elem) @dynamic
 {
-	Ui* ui = elem.ui;
+	Ui* ui        = elem.ui;
 	Element* pane = ui.@node((AreaPane) { .areas = self.areas, .node = self.areas.root, .host = elem });
 	if (!self.menu_node) return pane;
 
@@ -379,14 +379,18 @@ fn Element* AreaHost.build(&self, Element* elem) @dynamic
 	Element* column = ui.@node((Column) { });
 	foreach (entry : entries)
 	{
-		column.append(ui.@node((AreaMenuRow) {
-			.label = entry.label,
-			.action = entry.action,
-			.disabled = entry.disabled,
-			.style = s,
-			.width = row_w,
-			.host = elem,
-		}).with_id(entry.label));
+		column.append(
+			ui.@node(
+				(AreaMenuRow) {
+					.label = entry.label,
+					.action = entry.action,
+					.disabled = entry.disabled,
+					.style = s,
+					.width = row_w,
+					.host = elem,
+				}
+			)
+			.with_id(entry.label));
 	}
 
 	// The catcher walks itself back to the window origin so a click anywhere —
@@ -395,17 +399,20 @@ fn Element* AreaHost.build(&self, Element* elem) @dynamic
 	Element* catcher = ui.@node((AreaMenuCatcher) { .host = elem });
 	catcher.set_offset({ -elem.absolute.x, -elem.absolute.y });
 
-	Element* panel = ui.@node((PopupPanel) {
-		.style = {
-			.color = s.strip_color,
-			.border_width = 1.0,
-			.border_color = s.strip_border,
-			.border_radius = { 6.0, 6.0, 6.0, 6.0 },
+	Element* panel = ui.@node(
+		(PopupPanel) {
+			.style = {
+				.color = s.strip_color,
+				.border_width = 1.0,
+				.border_color = s.strip_border,
+				.border_radius = { 6.0, 6.0, 6.0, 6.0 },
+			},
+			.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
+			.shadow = POPUP_SHADOW,
+			.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
 		},
-		.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
-		.shadow = POPUP_SHADOW,
-		.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
-	}, column);
+		column
+	);
 
 	// Under the pointer, but clamped onto the host's screen so a click near an
 	// edge does not hang the popup off it.
@@ -473,19 +480,21 @@ fn Element* AreaPane.build(&self, Element* elem) @dynamic
 		// that pops a dropdown near a pane edge, is that popups clip too;
 		// float those from something host-sized, the way the context menu is.
 		elem.clips = true;
-		Element* strip = ui.@node((AreaTabStrip) {
-			.areas = self.areas,
-			.node = self.node,
-			.pane = elem,
-		});
-		AreaView* view = &self.areas.views[self.node.active];
+		Element* strip = ui.@node(
+			(AreaTabStrip) {
+				.areas = self.areas,
+				.node = self.node,
+				.pane = elem,
+			}
+		);
+		AreaView* view   = &self.areas.views[self.node.active];
 		Element* content = view.content ? borrow_content(ui, view.content) : view.build(ui);
 		return ui.@node((Column) { }, strip, content);
 	}
 
-	AreaStyle s = self.areas.style.resolved();
-	Element* a = ui.@node((AreaPane) { .areas = self.areas, .node = self.node.first, .host = self.host });
-	Element* b = ui.@node((AreaPane) { .areas = self.areas, .node = self.node.second, .host = self.host });
+	AreaStyle s     = self.areas.style.resolved();
+	Element* a      = ui.@node((AreaPane) { .areas = self.areas, .node = self.node.first, .host = self.host });
+	Element* b      = ui.@node((AreaPane) { .areas = self.areas, .node = self.node.second, .host = self.host });
 	// The handle last: siblings hit-test in reverse order, so the divider wins
 	// the boundary pixels it shares with the panes.
 	Element* handle = ui.@node((AreaSplitter) { .node = self.node, .style = s, .host = self.host });
@@ -538,18 +547,18 @@ struct AreaSplit (Widget)
 fn Vec2 AreaSplit.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	AreaStyle s = self.style;
-	Vec2 own = constraints.max;
-	bool side = self.node.axis == SplitAxis.HORIZONTAL;
+	Vec2 own    = constraints.max;
+	bool side   = self.node.axis == SplitAxis.HORIZONTAL;
 
 	float extent = side ? own.x : own.y;
-	float total = math::max(extent - s.splitter_px, 0.0f);
-	float first = self.node.ratio * total;
+	float total  = math::max(extent - s.splitter_px, 0.0f);
+	float first  = self.node.ratio * total;
 	// Clamp to the minimum pane on both ends; a pane too small to hold two
 	// minimums (a degenerate host, mostly in tests) falls back to the raw ratio.
 	if (total >= 2 * s.min_pane) first = math::clamp(first, s.min_pane, total - s.min_pane);
 
-	Vec2 a = side ? (Vec2) { first, own.y } : (Vec2) { own.x, first };
-	Vec2 b = side ? (Vec2) { total - first, own.y } : (Vec2) { own.x, total - first };
+	Vec2 a      = side ? (Vec2) { first, own.y } : (Vec2) { own.x, first };
+	Vec2 b      = side ? (Vec2) { total - first, own.y } : (Vec2) { own.x, total - first };
 	Vec2 handle = side ? (Vec2) { s.splitter_px, own.y } : (Vec2) { own.x, s.splitter_px };
 
 	elem.layout_child(0, cui::tight(a));
@@ -677,7 +686,7 @@ fn int AreaTabStrip.zone_at(&self, Element* elem, Vec2 pos)
 	if (pos.x < 0 || pos.y < 0 || pos.y >= elem.size.y) return AREA_ZONE_NONE;
 
 	AreaStyle s = self.areas.style.resolved();
-	float x = 0;
+	float x     = 0;
 	foreach (i, view : self.areas.views)
 	{
 		float w = self.tab_width(elem.ui, s, (usz)i);
@@ -690,14 +699,14 @@ fn int AreaTabStrip.zone_at(&self, Element* elem, Vec2 pos)
 fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	AreaStyle s = self.areas.style.resolved();
-	float h = elem.size.y;
+	float h     = elem.size.y;
 	painter.rect({ 0, 0 }, elem.size, { .color = s.strip_color });
 	painter.rect({ 0, h - 1 }, { elem.size.x, 1 }, { .color = s.strip_border });
 
 	float x = 0;
 	foreach (i, view : self.areas.views)
 	{
-		float w = self.tab_width(elem.ui, s, (usz)i);
+		float w     = self.tab_width(elem.ui, s, (usz)i);
 		bool active = self.node.active == (usz)i;
 		if (active)
 		{
@@ -708,11 +717,15 @@ fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 			painter.rect({ x, 0 }, { w, h }, { .color = s.hover_color });
 		}
 		Vec2 text = elem.ui.text.measure(s.font, view.name, s.text_size);
-		painter.text({ x + s.pad_x, (h - text.y) * 0.5f }, view.name, {
-			.font = s.font,
-			.size = s.text_size,
-			.color = active ? s.text_color : s.dim_color,
-		});
+		painter.text(
+			{ x + s.pad_x, (h - text.y) * 0.5f },
+			view.name,
+			{
+				.font = s.font,
+				.size = s.text_size,
+				.color = active ? s.text_color : s.dim_color,
+			}
+		);
 		x += w;
 	}
 }
@@ -770,10 +783,10 @@ fn void AreaTabStrip.on_hover(&self, Element* elem, bool entered) @dynamic
 *>
 enum AreaMenuAction
 {
-	SPLIT_SIDE, // split into left | right
-	SPLIT_STACK, // split into top / bottom
+	SPLIT_SIDE,   // split into left | right
+	SPLIT_STACK,  // split into top / bottom
 	CLOSE,
-	MERGE_FIRST, // keep the first child (left/top)
+	MERGE_FIRST,  // keep the first child (left/top)
 	MERGE_SECOND, // keep the second child (right/bottom)
 }
 
@@ -813,17 +826,25 @@ fn void AreaMenuRow.paint(&self, Element* elem, Painter* painter) @dynamic
 	AreaStyle s = self.style;
 	if (self.hovered && !self.disabled)
 	{
-		painter.rect({ 2, 0 }, { elem.size.x - 4, elem.size.y }, {
-			.color = s.hover_color,
-			.border_radius = { 4.0, 4.0, 4.0, 4.0 },
-		});
+		painter.rect(
+			{ 2, 0 },
+			{ elem.size.x - 4, elem.size.y },
+			{
+				.color = s.hover_color,
+				.border_radius = { 4.0, 4.0, 4.0, 4.0 },
+			}
+		);
 	}
 	Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
-	painter.text({ s.pad_x, (elem.size.y - text.y) * 0.5f }, self.label, {
-		.font = s.font,
-		.size = s.text_size,
-		.color = self.disabled ? s.dim_color : s.text_color,
-	});
+	painter.text(
+		{ s.pad_x, (elem.size.y - text.y) * 0.5f },
+		self.label,
+		{
+			.font = s.font,
+			.size = s.text_size,
+			.color = self.disabled ? s.dim_color : s.text_color,
+		}
+	);
 }
 
 fn void AreaMenuRow.on_hover(&self, Element* elem, bool entered) @dynamic
@@ -844,8 +865,8 @@ fn bool AreaMenuRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0
-				&& event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
+				&& event.pos.y < elem.size.y;
 			if (inside && !self.disabled) self.act();
 			return true;
 		default:

@@ -53,7 +53,10 @@ fn void main(String[] args)
 			},
 		};
 		// Foreground card: the character png on top.
-		cards[i + 1] = { .size = box_size, .style = { .texture = character }, };
+		cards[i + 1] = {
+			.size = box_size,
+			.style = { .texture = character },
+		};
 
 		card_elements[i] = ui.mount(&cards[i], root);
 		card_elements[i].set_offset({ offset, box_size.y / 3 });

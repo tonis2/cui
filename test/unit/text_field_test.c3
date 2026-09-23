@@ -1,6 +1,6 @@
 // TextField: key auto-repeat, and the selection — made with the pointer, with
 // Shift, or with Ctrl+A, and then typed over or deleted.
-//
+// 
 // No font is loaded in a headless Ui, so `TextSystem.measure` answers zero for
 // every string. That is what makes the pointer cases deterministic here: a
 // click left of the padding lands on offset 0, and any click right of it walks
@@ -44,7 +44,7 @@ fn String reported() @local => (String)last_text[:last_len];
 // both focuses it and walks the caret past the last boundary.
 fn TextField* focused_field(Ui* ui, Element** out_elem, String text) @local
 {
-	Element* elem = ui.@node((TextField){ });
+	Element* elem = ui.@node((TextField) { });
 	ui.build(elem);
 	ui.flush();
 
@@ -170,8 +170,8 @@ fn void movement_without_the_button_does_not_select() @test
 	TextField* field = focused_field(ui, &elem, "abcdefghij");
 
 	cui_tests::frame(ui, { 2, 5 }, left: true);
-	cui_tests::frame(ui, { 2, 5 });     // release
-	cui_tests::frame(ui, { 300, 5 });   // move across with nothing held
+	cui_tests::frame(ui, { 2, 5 }); // release
+	cui_tests::frame(ui, { 300, 5 }); // move across with nothing held
 
 	test::@check(!field.has_selection(), "the caret stayed where the click put it");
 	test::eq((int)field.caret, 0);
@@ -403,6 +403,7 @@ fn void a_held_key_reports_each_repeat() @test
 
 	hold(ui, { Key.BACKSPACE }, 0.2f); // past REPEAT_DELAY
 	test::@check(changes > 1, "the repeats deleted without reporting");
-	test::@check(reported().len == field.length(),
-		"the last report was %d characters and the field holds %d", reported().len, field.length());
+	test::@check(reported()
+		.len == field.length(), "the last report was %d characters and the field holds %d", reported()
+			.len, field.length());
 }

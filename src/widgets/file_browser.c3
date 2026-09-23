@@ -1,7 +1,7 @@
 <*
  A directory listing you can walk and pick a file out of.
 
- 	`@tree((Scroll) { }) { @node((FileBrowser) { .mask = "*.glb", .on_choose = &opened }); };`
+ `@tree((Scroll) { }) { @node((FileBrowser) { .mask = "*.glb", .on_choose = &opened }); };`
 
  One row per entry, directories first and `..` above them. A click selects a row
  and a second click on the selected row activates it — enter the directory, or
@@ -47,7 +47,7 @@ struct FileBrowserStyle
 {
 	Color text;
 	Color directory; // folders read differently from files, which is the one
-	                 // distinction a listing must make at a glance
+	// distinction a listing must make at a glance
 	Color size; // the right-hand column
 	Color hover;
 	Color selected;
@@ -390,27 +390,34 @@ fn void FileBrowser.paint(&self, Element* elem, Painter* painter) @dynamic
 
 		if (selected || self.lit == row + 1)
 		{
-			painter.rect({ 0, y }, { elem.size.x, style.row_height }, {
-				.color = selected ? style.selected : style.hover,
-				.border_radius = style.radius,
-			});
+			painter.rect(
+				{ 0, y },
+				{ elem.size.x, style.row_height },
+				{
+					.color = selected ? style.selected : style.hover,
+					.border_radius = style.radius,
+				}
+			);
 		}
 
-		usz index = self.entry_index(row);
+		usz index      = self.entry_index(row);
 		bool is_parent = index >= self.count();
-		bool is_dir = is_parent || self.entries.get((sz)index).is_dir;
+		bool is_dir    = is_parent || self.entries.get((sz)index).is_dir;
 
 		Color ink = style.text;
-		if (selected) { ink = style.selected_text; }
-		else if (is_dir) { ink = style.directory; }
+		if (selected)
+		{
+			ink = style.selected_text;
+		}
+		else if (is_dir)
+		{
+			ink = style.directory;
+		}
 
 		// The trailing separator is the folder mark: a glyph would need a font
 		// that has one, and this reads the same in every font there is.
-		String label = is_parent
-			? "../"
-			: (is_dir
-				? string::tformat("%s/", self.entries.get((sz)index).name)
-				: self.entries.get((sz)index).name);
+		String label = is_parent ? "../" : (is_dir ? string::tformat("%s/", self.entries.get((sz)index)
+			.name) : self.entries.get((sz)index).name);
 
 		// Vertically centred by eye against the row rather than measured: every
 		// row is one line of one size, so the inset is a constant.
@@ -428,7 +435,8 @@ fn void FileBrowser.paint(&self, Element* elem, Painter* painter) @dynamic
 			painter.text(
 				{ elem.size.x - style.padding - width, text_y },
 				text,
-				{ .size = style.text_size, .color = selected ? style.selected_text : style.size });
+				{ .size = style.text_size, .color = selected ? style.selected_text : style.size }
+			);
 		}
 	}
 }
@@ -602,7 +610,7 @@ fn void sort_entries(FileEntry[] entries) @private
 	for (usz i = 1; i < entries.len; i++)
 	{
 		FileEntry moving = entries[i];
-		usz j = i;
+		usz j            = i;
 		while (j > 0 && after(entries[j - 1], moving))
 		{
 			entries[j] = entries[j - 1];
@@ -631,9 +639,9 @@ fn char[]? human_size(char[] buffer, long bytes) @private
 {
 	if (bytes < 1024) return io::bprintf(buffer, "%d B", bytes);
 
-	double scaled = (double)bytes;
+	double scaled   = (double)bytes;
 	String[3] units = { "KB", "MB", "GB" };
-	usz unit = 0;
+	usz unit        = 0;
 	while (unit < 2 && scaled >= 1024.0 * 1024.0)
 	{
 		scaled /= 1024.0;
@@ -641,7 +649,6 @@ fn char[]? human_size(char[] buffer, long bytes) @private
 	}
 	scaled /= 1024.0;
 
-	return scaled < 10.0
-		? io::bprintf(buffer, "%.1f %s", scaled, units[unit])
+	return scaled < 10.0 ? io::bprintf(buffer, "%.1f %s", scaled, units[unit])
 		: io::bprintf(buffer, "%.0f %s", scaled, units[unit]);
 }

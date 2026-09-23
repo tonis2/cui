@@ -10,13 +10,13 @@ import std::core::test;
 import std::math;
 
 const Vec2 DIALOG_WINDOW = { 400.0, 300.0 };
-const Vec2 BODY = { 180.0, 80.0 };
+const Vec2 BODY          = { 180.0, 80.0 };
 
 // The default style, with a body narrower than its 220px minimum: the width is
 // that minimum, the height is the bar plus the body between its insets.
 const float PANEL_W = 220.0;
 const float PANEL_H = 30.0 + 2.0 * 12.0 + BODY.y;
-const Vec2 CENTRED = { (DIALOG_WINDOW.x - PANEL_W) * 0.5, (DIALOG_WINDOW.y - PANEL_H) * 0.5 };
+const Vec2 CENTRED  = { (DIALOG_WINDOW.x - PANEL_W) * 0.5, (DIALOG_WINDOW.y - PANEL_H) * 0.5 };
 
 // Well outside the centred panel, in the window's top-left corner.
 const Vec2 OUTSIDE = { 10.0, 10.0 };
@@ -56,15 +56,17 @@ fn Ui* dialog_ui(bool modal = false, bool close_outside = false, bool popup = fa
 		@tree((Stack) { })
 		{
 			@node((EventProbe) { .pref = DIALOG_WINDOW, .rec = &behind });
-			@node((Dialog) {
-				.title = "Controls",
-				.body = &build_body,
-				.modal = modal,
-				.close_outside = close_outside,
-				.popup = popup,
-				.popup_insets = { 14, 12, 14, 12 },
-				.on_close = &note_close,
-			});
+			@node(
+				(Dialog) {
+					.title = "Controls",
+					.body = &build_body,
+					.modal = modal,
+					.close_outside = close_outside,
+					.popup = popup,
+					.popup_insets = { 14, 12, 14, 12 },
+					.on_close = &note_close,
+				}
+			);
 		};
 	};
 	ui.flush();
@@ -169,11 +171,11 @@ fn void title_drag_moves_the_panel() @test
 	open_dialog(ui);
 
 	Element* bar = ui.find(DialogTitleBar)!!;
-	Vec2 grip = bar.absolute + (Vec2) { 20.0, 15.0 }; // left of the close button
+	Vec2 grip    = bar.absolute + (Vec2) { 20.0, 15.0 }; // left of the close button
 	cui_tests::frame(ui, grip);
 	test::eq(ui.cursor, Cursor.OPEN_HAND);
 	cui_tests::frame(ui, grip, left: true);
-	test::eq(ui.cursor, Cursor.CLOSED_HAND);     // closed on the press that grabs
+	test::eq(ui.cursor, Cursor.CLOSED_HAND); // closed on the press that grabs
 	cui_tests::frame(ui, grip + (Vec2) { 30.0, 20.0 }, left: true);
 	ui.flush();
 
@@ -253,12 +255,14 @@ fn void popup_dialog_has_no_window_chrome_or_scrim_and_still_dismisses() @test
 	test::@error(ui.find_id(widgets::DIALOG_CLOSE_ID), cui::WIDGET_NOT_FOUND);
 	Element* panel = ui.find(PopupPanel)!!;
 	cui_tests::eq_vec2(panel.size, { BODY.x + 28.0, BODY.y + 24.0 });
-	cui_tests::eq_vec2(panel.absolute,
-		{ (DIALOG_WINDOW.x - panel.size.x) * 0.5f, (DIALOG_WINDOW.y - panel.size.y) * 0.5f });
+	cui_tests::eq_vec2(
+		panel.absolute,
+		{ (DIALOG_WINDOW.x - panel.size.x) * 0.5f, (DIALOG_WINDOW.y - panel.size.y) * 0.5f }
+	);
 
 	// PopupPanel consumes its surface. The transparent modal catcher covers the
 	// rest of the window only to dismiss; Dialog.paint draws no scrim in popup mode.
-	click(ui, panel.absolute + (Vec2){ 4, 4 });
+	click(ui, panel.absolute + (Vec2) { 4, 4 });
 	test::@check(elem.widget_as(Dialog).open);
 	click(ui, OUTSIDE);
 	test::@check(!elem.widget_as(Dialog).open);
@@ -269,7 +273,7 @@ fn void toggling_twice_leaves_it_open() @test
 {
 	Ui* ui = dialog_ui();
 	defer ui.free();
-	Element* elem = ui.find(Dialog)!!;
+	Element* elem  = ui.find(Dialog)!!;
 	Dialog* dialog = elem.widget_as(Dialog);
 
 	dialog.toggle(elem);
@@ -308,8 +312,7 @@ fn Ui* borrowed_ui(Element** out)
 	body_unmounts = 0;
 
 	Ui* ui = cui::new_ui(DIALOG_WINDOW);
-	Element* content = ui.@node((DialogBody) { .size = BODY },
-		ui.@node((UnmountProbe) { .count = &body_unmounts }));
+	Element* content = ui.@node((DialogBody) { .size = BODY }, ui.@node((UnmountProbe) { .count = &body_unmounts }));
 	*out = content;
 
 	@canvas(ui)
@@ -370,7 +373,7 @@ fn void reopening_attaches_the_same_element() @test
 	defer ui.free();
 	defer ui.unmount(content);
 
-	Element* elem = open_dialog(ui);
+	Element* elem  = open_dialog(ui);
 	Dialog* dialog = elem.widget_as(Dialog);
 	content.widget_as(DialogBody).remembered = 7;
 
@@ -442,7 +445,7 @@ fn void asking_again_with_its_own_message_is_safe() @test
 	Ui* ui = confirm_ui();
 	defer ui.free();
 
-	Element* elem = ui.find_id(CONFIRM_ID)!!;
+	Element* elem        = ui.find_id(CONFIRM_ID)!!;
 	ConfirmDialog* panel = elem.widget_as(ConfirmDialog);
 
 	panel.ask(elem, "Replace 17 dots?", &note_confirm, &note_decline);

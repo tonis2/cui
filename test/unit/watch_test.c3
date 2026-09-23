@@ -15,14 +15,16 @@ fn void invalidate_reruns_only_the_watchers() @test
 
 	int watcher_paints, bystander_paints;
 	float seen;
-	Element* watcher = ui.@node((WatchProbe){
-		.pref = {30, 20},
-		.paints = &watcher_paints,
-		.reads_in_paint = true,
-		.seen = &seen,
-	});
-	Element* bystander = ui.@node((WatchProbe){ .pref = {30, 20}, .paints = &bystander_paints });
-	ui.build(ui.@node((Stack){}, ui.@node((Column){}, watcher, bystander)));
+	Element* watcher = ui.@node(
+		(WatchProbe) {
+			.pref = { 30, 20 },
+			.paints = &watcher_paints,
+			.reads_in_paint = true,
+			.seen = &seen,
+		}
+	);
+	Element* bystander = ui.@node((WatchProbe) { .pref = { 30, 20 }, .paints = &bystander_paints });
+	ui.build(ui.@node((Stack) { }, ui.@node((Column) { }, watcher, bystander)));
 
 	ui.flush();
 	test::eq(watcher_paints, 1);
@@ -46,8 +48,8 @@ fn void a_watch_is_recorded_once_however_often_the_hook_runs() @test
 	Steering steering = { .angle = 10.0 };
 	ui.provide(&steering);
 
-	Element* watcher = ui.@node((WatchProbe){ .pref = {30, 20}, .reads_in_paint = true });
-	ui.build(ui.@node((Stack){}, watcher));
+	Element* watcher = ui.@node((WatchProbe) { .pref = { 30, 20 }, .reads_in_paint = true });
+	ui.build(ui.@node((Stack) { }, watcher));
 
 	// The slots are a fixed-size array: a repaint that re-declared the same
 	// dependency instead of replacing it would overflow after four frames.
@@ -68,12 +70,14 @@ fn void a_hook_that_stops_reading_stops_being_invalidated() @test
 	ui.provide(&steering);
 
 	int paints;
-	Element* watcher = ui.@node((WatchProbe){
-		.pref = {30, 20},
-		.paints = &paints,
-		.reads_in_paint = true,
-	});
-	ui.build(ui.@node((Stack){}, watcher));
+	Element* watcher = ui.@node(
+		(WatchProbe) {
+			.pref = { 30, 20 },
+			.paints = &paints,
+			.reads_in_paint = true,
+		}
+	);
+	ui.build(ui.@node((Stack) { }, watcher));
 	ui.flush();
 	test::eq(paints, 1);
 
@@ -97,12 +101,14 @@ fn void a_layout_watch_relayouts() @test
 	ui.provide(&steering);
 
 	int layouts;
-	Element* watcher = ui.@node((WatchProbe){
-		.pref = {30, 20},
-		.layouts = &layouts,
-		.reads_in_layout = true,
-	});
-	ui.build(ui.@node((Stack){}, watcher));
+	Element* watcher = ui.@node(
+		(WatchProbe) {
+			.pref = { 30, 20 },
+			.layouts = &layouts,
+			.reads_in_layout = true,
+		}
+	);
+	ui.build(ui.@node((Stack) { }, watcher));
 	ui.flush();
 	test::eq(layouts, 1);
 
@@ -123,12 +129,14 @@ fn void an_unwatched_type_invalidates_nothing() @test
 	ui.provide(&steering);
 
 	int paints;
-	Element* watcher = ui.@node((WatchProbe){
-		.pref = {30, 20},
-		.paints = &paints,
-		.reads_in_paint = true,
-	});
-	ui.build(ui.@node((Stack){}, watcher));
+	Element* watcher = ui.@node(
+		(WatchProbe) {
+			.pref = { 30, 20 },
+			.paints = &paints,
+			.reads_in_paint = true,
+		}
+	);
+	ui.build(ui.@node((Stack) { }, watcher));
 	ui.flush();
 	test::eq(paints, 1);
 
@@ -150,8 +158,8 @@ fn void watching_outside_a_hook_is_only_inheriting() @test
 	Steering steering = { .angle = 10.0 };
 	ui.provide(&steering);
 
-	Element* rect = ui.@node((Rectangle){ .size = {30, 20} });
-	ui.build(ui.@node((Stack){}, rect));
+	Element* rect = ui.@node((Rectangle) { .size = { 30, 20 } });
+	ui.build(ui.@node((Stack) { }, rect));
 	ui.flush();
 
 	// Nothing is running, so there is no cached result to go stale and nothing

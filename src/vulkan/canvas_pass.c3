@@ -32,6 +32,7 @@ import std::math;
 import cui;
 import cui::camera;
 import vk;
+import std::collections::list;
 
 <*
  A cui interface as a single render pass contribution.
@@ -78,6 +79,10 @@ struct CanvasPass
 	// have to be owned separately or nothing can destroy them. Parallel to
 	// `textures`.
 	vk::ImageList texture_images;
+	// Each texture's pixel size, parallel to `textures`; {0, 0} where it was
+	// never recorded (a file load, the glyph atlas). What lets `update_pixels`
+	// tell a re-upload into the same image from one that needs a new image.
+	List{uint[<2>]} texture_sizes;
 	vk::Image atlas_image; // the Ui's glyph atlas, once created (see sync_text);
 	// owned by texture_images, this is a bare handle
 	// for update_atlas_image
@@ -167,6 +172,7 @@ fn CanvasPass? new_canvas_pass(
 	// inside a `@pool()` is memory the frame gives back. See `cui::new_ui`.
 	pass.textures.init(mem, 0);
 	pass.texture_images.init(mem, 0);
+	pass.texture_sizes.init(mem, 0);
 
 	// 1x1 white placeholder in texture slot 1 so the sampler-array binding is
 	// never empty; user images get their handles from load_image/load_pixels.
@@ -174,6 +180,7 @@ fn CanvasPass? new_canvas_pass(
 	vk::Image white_image;
 	pass.textures.load_rgba(white_pixel[..], 1, 1, allocator, queue, &white_image)!;
 	pass.texture_images.push(white_image);
+	pass.texture_sizes.push({ 1, 1 });
 
 	// Slang's cbuffer matrix layout reads column-major bytes, which is exactly
 	// how Matrix4f stores them, so the matrices go up as-is — no transpose
@@ -437,6 +444,7 @@ fn cui::Texture? CanvasPass.load_image(&self, String path)
 	vk::Image image;
 	self.textures.loadPath(path, self.allocator, self.queue, &image)!;
 	self.texture_images.push(image);
+	self.texture_sizes.push({ 0, 0 });
 	return (cui::Texture)self.textures.len();
 }
 
@@ -447,15 +455,57 @@ fn cui::Texture? CanvasPass.load_image(&self, String path)
  @param rgba : `Tightly packed RGBA8 pixels, width * height * 4 bytes.`
  @param width : `Image width in pixels.`
  @param height : `Image height in pixels.`
+ @param linear : `Sample with bilinear filtering — a picture drawn at a size other than its own. Nearest otherwise.`
  @require rgba.len >= (usz)width * height * 4 : `The pixel buffer is smaller than width * height * 4 bytes.`
  @return `The texture handle.`
 *>
-fn cui::Texture? CanvasPass.load_pixels(&self, char[] rgba, uint width, uint height)
+fn cui::Texture? CanvasPass.load_pixels(&self, char[] rgba, uint width, uint height, bool linear = false)
 {
 	vk::Image image;
-	self.textures.load_rgba(rgba, width, height, self.allocator, self.queue, &image)!;
+	self.textures.load_rgba(rgba, width, height, self.allocator, self.queue, &image, linear)!;
 	self.texture_images.push(image);
+	self.texture_sizes.push({ width, height });
 	return (cui::Texture)self.textures.len();
+}
+
+<*
+ Replaces the pixels behind a texture handle, keeping the handle.
+
+ The same size is a copy into the image that is already there: no new image, no
+ pipeline rebuild, and cheap enough for a preview that changes every frame. The
+ copy's barrier waits on the fragment reads of frames already submitted, so a
+ frame in flight never samples half an update.
+
+ A different size needs a new image. The pass waits for the device to go idle
+ first — nothing may still be sampling the old one — and the handle then names
+ the new image; the texture count does not change, so neither does the pipeline.
+
+ @param texture : `A handle from load_pixels or load_image.`
+ @param linear : `The filtering to use if a new image has to be made.`
+ @require (int)texture >= 1 && (sz)(int)texture <= self.textures.len() : `Not a texture of this pass.`
+ @require rgba.len >= (usz)width * height * 4 : `The pixel buffer is smaller than width * height * 4 bytes.`
+*>
+fn void? CanvasPass.update_pixels(&self, cui::Texture texture, char[] rgba, uint width, uint height, bool linear = false)
+{
+	sz at = (sz)(int)texture - 1;
+	if (self.texture_sizes[at] == (uint[<2>]){ width, height })
+	{
+		update_atlas_image(self.texture_images[at], rgba, width, height, false, self.allocator, self.queue, texel_size: 4)!;
+		return;
+	}
+
+	self.device.waitIdle();
+	DescriptorImages fresh;
+	fresh.init(mem, 1);
+	defer fresh.free();
+	vk::Image image;
+	fresh.load_rgba(rgba, width, height, self.allocator, self.queue, &image, linear)!;
+
+	self.textures[at].free(self.device);
+	self.texture_images[at].free(self.device);
+	self.textures[at] = fresh[0];
+	self.texture_images[at] = image;
+	self.texture_sizes[at] = { width, height };
 }
 
 <*
@@ -481,6 +531,7 @@ fn void CanvasPass.free(&self)
 
 	self.textures.free();
 	self.texture_images.free();
+	self.texture_sizes.free();
 
 	// RenderState.free also frees the descriptor layout it holds.
 	if (self.pipeline_texture_count > 0) self.pipeline.free(self.device);
@@ -516,6 +567,7 @@ fn void? CanvasPass.sync_text(&self, Ui* ui, bool creating)
 				&self.atlas_image
 			)!;
 			self.texture_images.push(self.atlas_image);
+			self.texture_sizes.push({ 0, 0 });
 			text.texture = (cui::Texture)self.textures.len();
 			text.dirty = false;
 		}

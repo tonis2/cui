@@ -20,14 +20,25 @@
  press, and the platforms disagree about whether a held key produces anything
  after it, so the field cannot wait to be told.
 
- **What it is not**: no clipboard, no wrapping, no scrolling past its own width.
- It is a path and a name field. Each of those is additive later without changing
- what is here.
+ **Ctrl+C, Ctrl+X and Ctrl+V** go through `Ui.clipboard_write` and
+ `clipboard_read`, so they reach the system clipboard when the embedder provides
+ a `Clipboard`. A paste is one line: its newlines and tabs become spaces.
+
+ **`multiline`** makes it a box of paragraphs: the text wraps at word boundaries
+ to the field's width, Return starts a new line (Ctrl+Return submits), Up and
+ Down move between lines, a paste keeps its newlines, and a field shorter than
+ its text scrolls - with the wheel, and to wherever the caret goes. `height`
+ sets the box; zero is three lines.
+
+ **What it is not**: a single-line field does not scroll past its own width. It
+ is a path and a name field.
 *>
 module cui::widgets;
 
 import cui;
+import std::math;
 import std::math::vector;
+import std::collections::list;
 
 
 <*
@@ -144,6 +155,10 @@ struct TextField (Widget)
 	usz anchor;
 
 	float width; // px; 0 fills the space offered
+	bool multiline; // paragraphs: wraps, Return is a newline - see the top of the file
+	float height; // px, multiline only; 0 is three lines
+	float scroll; // how far the text is scrolled: up when multiline, left when not, px
+	usz revealed; // the caret `scroll` was last moved to show, + 1 (0 = never)
 	bool focused; // mirrors ui.focused, so paint and update need not ask the tree
 	bool dragging; // a left press landed here and has not been let go
 
@@ -186,6 +201,10 @@ fn void TextField.unmount(&self, Element* elem) @dynamic
 fn void TextField.set_text(&self, Element* elem, String text)
 {
 	self.ensure();
+	// The same text again is no change, and leaves the caret where the person
+	// typing put it: a caller that renders the field from its own copy of the
+	// value hands every keystroke straight back.
+	if (self.text.str_view() == text) return;
 	self.text.clear();
 	self.text.append_string(text);
 	self.caret = self.length();
@@ -262,6 +281,13 @@ fn Vec2 TextField.layout(&self, Element* elem, Constraints constraints) @dynamic
 	// every keystroke. "Mg" carries both an ascender and a descender.
 	float line   = elem.ui.text.measure(0, "Mg", style.text_size).y;
 	float height = line + style.padding.y * 2.0f;
+	// Its own text is clipped to the box, which is what lets it scroll.
+	elem.clips = true;
+	elem.clip_radii = style.border_radius;
+	if (self.multiline)
+	{
+		height = self.height > 0.0f ? self.height : line_step(line) * 3.0f + style.padding.y * 2.0f;
+	}
 
 	return constraints.constrain({ self.width > 0.0f ? self.width : constraints.max.x, height });
 }
@@ -281,9 +307,30 @@ fn void TextField.paint(&self, Element* elem, Painter* painter) @dynamic
 		}
 	);
 
+	if (self.multiline)
+	{
+		self.paint_lines(elem, painter, style);
+		return;
+	}
+
 	String shown       = self.text.str_view();
-	Vec2 at            = { style.padding.x, style.padding.y };
 	float inner_height = elem.size.y - style.padding.y * 2.0f;
+	float inner_width  = elem.size.x - style.padding.x * 2.0f;
+
+	// Scrolled sideways to keep the caret in the box while it is being edited,
+	// and back to the start once it is not.
+	if (!self.focused)
+	{
+		self.scroll = 0;
+	}
+	else if (self.revealed != self.caret + 1)
+	{
+		self.revealed = self.caret + 1;
+		float x = self.offset_of(elem, self.caret);
+		if (x - self.scroll > inner_width) self.scroll = x - inner_width;
+		if (x < self.scroll) self.scroll = x;
+	}
+	Vec2 at = { style.padding.x - self.scroll, style.padding.y };
 
 	// Under the text, and only while focused — for the same reason as the caret:
 	// a highlight left on a field that is no longer taking keys says the next
@@ -453,14 +500,38 @@ fn bool TextField.on_key(&self, Element* elem, KeyEvent event) @dynamic
 	// in the same frame and reads the held-key set, which no longer has it.
 	if (!event.down) return true;
 
-	if (event.key == Key.A && ctrl_held(elem.ui))
+	if (ctrl_held(elem.ui))
 	{
-		self.select_all(elem);
-		return true;
+		switch (event.key)
+		{
+			case Key.A:
+				self.select_all(elem);
+				return true;
+			case Key.C:
+				if (self.has_selection()) elem.ui.clipboard_write(self.selected());
+				return true;
+			case Key.X:
+				if (!self.has_selection()) return true;
+				elem.ui.clipboard_write(self.selected());
+				self.delete_selection();
+				elem.request_paint();
+				if (self.on_change) self.on_change(elem.ui, self.text.str_view());
+				return true;
+			case Key.V:
+				self.paste(elem);
+				return true;
+			default:
+				break;
+		}
 	}
 
 	if (event.key == Key.RETURN || event.key == Key.KP_RETURN)
 	{
+		if (self.multiline && !ctrl_held(elem.ui))
+		{
+			self.insert(elem, "\n");
+			return true;
+		}
 		if (self.on_submit) self.on_submit(elem.ui, self.text.str_view());
 		return true;
 	}
@@ -473,6 +544,49 @@ fn bool TextField.on_key(&self, Element* elem, KeyEvent event) @dynamic
 	self.repeat_key = repeats(event.key) ? event.key : Key.EMPTY;
 	self.repeat_delay = REPEAT_DELAY;
 	return true;
+}
+
+<*
+ The clipboard's text in place of the selection, on one line: a newline or a tab
+ becomes a space and any other control byte is dropped.
+*>
+fn void TextField.paste(&self, Element* elem)
+{
+	@pool()
+	{
+		String pasted = elem.ui.clipboard_read(tmem);
+		DString line = dstring::temp();
+		foreach (char c : pasted)
+		{
+			if (c == '\n' && self.multiline)
+			{
+				line.append_char('\n');
+			}
+			else if (c == '\n' || c == '\t')
+			{
+				line.append_char(' ');
+			}
+			else if (c >= 0x20 && c != 0x7f)
+			{
+				line.append_char(c);
+			}
+		}
+		if (line.len() == 0) return;
+		self.insert(elem, line.str_view());
+	};
+}
+
+<*
+ `text` in place of the selection, the caret after it, and the change reported.
+*>
+fn void TextField.insert(&self, Element* elem, String text)
+{
+	self.delete_selection();
+	self.text.insert_chars_at((sz)self.caret, text);
+	self.caret += text.len;
+	self.anchor = self.caret;
+	elem.request_paint();
+	if (self.on_change) self.on_change(elem.ui, self.text.str_view());
 }
 
 <*
@@ -503,10 +617,22 @@ fn bool TextField.apply(&self, Element* elem, Key key)
 			{
 				self.on_change(elem.ui, self.text.str_view());
 			}
-		case Key.LEFT_ARROW:
-		case Key.RIGHT_ARROW:
+		case Key.UP_ARROW:
+		case Key.DOWN_ARROW:
+			if (!self.multiline) return false;
+			self.move_line(elem, key == Key.UP_ARROW ? -1 : 1, shift_held(elem.ui));
 		case Key.HOME:
 		case Key.END:
+			if (self.multiline)
+			{
+				self.move_line(elem, 0, shift_held(elem.ui), key == Key.HOME ? -1 : 1);
+			}
+			else
+			{
+				self.move_caret(key, shift_held(elem.ui));
+			}
+		case Key.LEFT_ARROW:
+		case Key.RIGHT_ARROW:
 			self.move_caret(key, shift_held(elem.ui));
 		default:
 			return false;
@@ -568,7 +694,8 @@ fn void TextField.move_caret(&self, Key key, bool extend)
 // still hold the frame loop awake for as long as the key was down.
 fn bool repeats(Key key) @local
 {
-	return key == Key.BACKSPACE || key == Key.DELETE || key == Key.LEFT_ARROW || key == Key.RIGHT_ARROW;
+	return key == Key.BACKSPACE || key == Key.DELETE || key == Key.LEFT_ARROW || key == Key.RIGHT_ARROW
+		|| key == Key.UP_ARROW || key == Key.DOWN_ARROW;
 }
 
 // The modifiers, read from the frame's held-key set: cui delivers Shift and
@@ -603,7 +730,7 @@ fn bool TextField.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
 			elem.request_focus();
-			self.caret = self.caret_for(elem, event.pos.x);
+			self.caret = self.caret_at(elem, event.pos);
 			if (!shift_held(elem.ui)) self.anchor = self.caret;
 			self.dragging = true;
 			elem.request_paint();
@@ -613,7 +740,7 @@ fn bool TextField.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			// nobody's event, and consuming it would stop anything above from
 			// tracking the pointer.
 			if (!self.dragging) return false;
-			usz at = self.caret_for(elem, event.pos.x);
+			usz at = self.caret_at(elem, event.pos);
 			if (at != self.caret)
 			{
 				self.caret = at;
@@ -623,6 +750,15 @@ fn bool TextField.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case RELEASE:
 			if (event.button != MouseButton.LEFT || !self.dragging) return false;
 			self.dragging = false;
+			return true;
+		case SCROLL:
+			// Taken only while there is somewhere to go, so a box at either end
+			// hands the wheel on to whatever scrolls around it.
+			if (!self.multiline) return false;
+			float before = self.scroll;
+			self.scroll = self.clamp_scroll(elem, self.scroll - event.scroll * 3.0f * self.line_height(elem));
+			if (self.scroll == before) return false;
+			elem.request_paint();
 			return true;
 		default:
 			return false;
@@ -646,7 +782,7 @@ fn usz TextField.caret_for(&self, Element* elem, float x)
 {
 	TextFieldStyle style = self.style.resolved();
 	String shown         = self.text.str_view();
-	float wanted         = x - style.padding.x;
+	float wanted         = x - style.padding.x + self.scroll;
 	if (wanted <= 0.0f) return 0;
 
 	float previous = 0.0f;
@@ -709,4 +845,244 @@ fn usz previous_index(String text, usz index) @local
 		if (boundary(text, i)) return i;
 	}
 	return 0;
+}
+// ---------------------------------------------------------------------------
+// Multiline
+
+// One wrapped line: bytes `start` .. `end` of the text, without the newline
+// that may end it.
+struct TextLine @local
+{
+	usz start;
+	usz end;
+}
+
+// The distance between baselines, for text of this height.
+fn float line_step(float line) @local => math::ceil(line * 1.25f);
+
+fn float TextField.line_height(&self, Element* elem)
+{
+	return line_step(elem.ui.text.measure(0, "Mg", self.style.resolved().text_size).y);
+}
+
+<*
+ The text broken into lines that fit the box: at newlines, and between words
+ where a line would overflow. A word wider than the box is broken wherever it
+ has to be. Allocated with `alloc`.
+*>
+fn List{TextLine} TextField.lines(&self, Element* elem, Allocator alloc)
+{
+	TextFieldStyle style = self.style.resolved();
+	float width = elem.size.x - style.padding.x * 2.0f;
+	String text = self.text.str_view();
+	List{TextLine} lines;
+	lines.init(alloc);
+
+	usz para = 0;
+	while (true)
+	{
+		usz para_end = para;
+		while (para_end < text.len && text[para_end] != '\n') para_end++;
+
+		usz line = para;
+		usz at = para;
+		while (at < para_end)
+		{
+			usz word = at;
+			while (word < para_end && text[word] != ' ') word++;
+			while (word < para_end && text[word] == ' ') word++;
+			usz visible = word;
+			while (visible > line && text[visible - 1] == ' ') visible--;
+			float wide = elem.ui.text.measure(0, text[line:visible - line], style.text_size).x;
+			if (wide <= width)
+			{
+				at = word;
+				continue;
+			}
+			if (at > line)
+			{
+				// The word goes to a line of its own.
+				lines.push({ line, at });
+				line = at;
+				continue;
+			}
+			// A word longer than the box: as much of it as fits, at least one
+			// character.
+			usz fit = line;
+			for (usz i = line + 1; i <= word; i++)
+			{
+				if (!boundary(text, i)) continue;
+				if (fit > line && elem.ui.text.measure(0, text[line:i - line], style.text_size).x > width) break;
+				fit = i;
+			}
+			lines.push({ line, fit });
+			line = fit;
+			at = fit;
+		}
+		lines.push({ line, para_end });
+		if (para_end >= text.len) break;
+		para = para_end + 1;
+	}
+	return lines;
+}
+
+// Which line holds byte `index`: the last one starting at or before it.
+fn usz line_of(List{TextLine}* lines, usz index) @local
+{
+	usz found = 0;
+	foreach (i, line : *lines)
+	{
+		if (line.start > index) break;
+		found = (usz)i;
+	}
+	return found;
+}
+
+fn float TextField.clamp_scroll(&self, Element* elem, float scroll)
+{
+	float most = 0.0f;
+	@pool()
+	{
+		List{TextLine} lines = self.lines(elem, tmem);
+		TextFieldStyle style = self.style.resolved();
+		float inner = elem.size.y - style.padding.y * 2.0f;
+		most = math::max(0.0f, (float)lines.len() * self.line_height(elem) - inner);
+	};
+	return math::clamp(scroll, 0.0f, most);
+}
+
+fn void TextField.paint_lines(&self, Element* elem, Painter* painter, TextFieldStyle style)
+{
+	@pool()
+	{
+		String text = self.text.str_view();
+		List{TextLine} lines = self.lines(elem, tmem);
+		float step = self.line_height(elem);
+		float inner = elem.size.y - style.padding.y * 2.0f;
+		usz caret_line = line_of(&lines, self.caret);
+
+		// Scrolled to the caret whenever it has moved, and left where the wheel
+		// put it otherwise.
+		if (self.revealed != self.caret + 1)
+		{
+			self.revealed = self.caret + 1;
+			float top = (float)caret_line * step;
+			if (top < self.scroll) self.scroll = top;
+			if (top + step > self.scroll + inner) self.scroll = top + step - inner;
+		}
+		self.scroll = math::clamp(self.scroll, 0.0f, math::max(0.0f, (float)lines.len() * step - inner));
+
+		float y0 = style.padding.y - self.scroll;
+		if (text.len == 0 && self.placeholder.len > 0)
+		{
+			painter.text({ style.padding.x, y0 }, self.placeholder, { .size = style.text_size, .color = style.placeholder });
+		}
+
+		usz from = self.selection_start();
+		usz to = self.selection_end();
+		foreach (i, line : lines)
+		{
+			float y = y0 + (float)i * step;
+			if (y + step < 0.0f || y > elem.size.y) continue;
+			String shown = text[line.start:line.end - line.start];
+			if (self.focused && from < to && from <= line.end && to > line.start)
+			{
+				usz a = math::max(from, line.start);
+				usz b = math::min(to, line.end);
+				float x0 = elem.ui.text.measure(0, text[line.start:a - line.start], style.text_size).x;
+				float x1 = elem.ui.text.measure(0, text[line.start:b - line.start], style.text_size).x;
+				// A selected newline shows as a little room past the line's end.
+				if (to > line.end && i + 1 < lines.len()) x1 += style.text_size * 0.3f;
+				painter.rect({ style.padding.x + x0, y }, { x1 - x0, step }, { .color = style.selection });
+			}
+			if (shown.len > 0) painter.text({ style.padding.x, y }, shown, { .size = style.text_size, .color = style.text });
+		}
+
+		if (!self.focused) return;
+		TextLine line = lines[(sz)caret_line];
+		float x = elem.ui.text.measure(0, text[line.start:self.caret - line.start], style.text_size).x;
+		painter.rect(
+			{ style.padding.x + x, y0 + (float)caret_line * step },
+			{ style.caret_width, step },
+			{ .color = style.caret }
+		);
+	};
+}
+
+<*
+ The caret position closest to an element-local point: a line by its y, then a
+ place in it by its x.
+*>
+fn usz TextField.caret_at(&self, Element* elem, Vec2 pos)
+{
+	if (!self.multiline) return self.caret_for(elem, pos.x);
+	usz found;
+	@pool()
+	{
+		TextFieldStyle style = self.style.resolved();
+		List{TextLine} lines = self.lines(elem, tmem);
+		float step = self.line_height(elem);
+		int row = (int)math::floor((pos.y - style.padding.y + self.scroll) / step);
+		if (row < 0) row = 0;
+		if (row >= (int)lines.len()) row = (int)lines.len() - 1;
+		found = self.index_in_line(elem, lines[(sz)row], pos.x - style.padding.x);
+	};
+	return found;
+}
+
+// The byte in `line` nearest `x` pixels from its start.
+fn usz TextField.index_in_line(&self, Element* elem, TextLine line, float x) @local
+{
+	TextFieldStyle style = self.style.resolved();
+	String text = self.text.str_view();
+	if (x <= 0.0f) return line.start;
+	float previous = 0.0f;
+	usz before = line.start;
+	for (usz i = line.start + 1; i <= line.end; i++)
+	{
+		if (!boundary(text, i)) continue;
+		float width = elem.ui.text.measure(0, text[line.start:i - line.start], style.text_size).x;
+		if (width >= x) return (x - previous) < (width - x) ? before : i;
+		previous = width;
+		before = i;
+	}
+	return line.end;
+}
+
+<*
+ Move the caret `rows` lines up (negative) or down, keeping its x; or with
+ `edge`, to the start (-1) or end (1) of its own line.
+*>
+fn void TextField.move_line(&self, Element* elem, int rows, bool extend, int edge = 0)
+{
+	@pool()
+	{
+		TextFieldStyle style = self.style.resolved();
+		String text = self.text.str_view();
+		List{TextLine} lines = self.lines(elem, tmem);
+		usz row = line_of(&lines, self.caret);
+		TextLine here = lines[(sz)row];
+		if (edge != 0)
+		{
+			self.caret = edge < 0 ? here.start : here.end;
+		}
+		else
+		{
+			float x = elem.ui.text.measure(0, text[here.start:self.caret - here.start], style.text_size).x;
+			if (rows < 0 && row == 0)
+			{
+				self.caret = 0;
+			}
+			else if (rows > 0 && row + 1 >= (usz)lines.len())
+			{
+				self.caret = text.len;
+			}
+			else
+			{
+				usz to = rows < 0 ? row - 1 : row + 1;
+				self.caret = self.index_in_line(elem, lines[(sz)to], x);
+			}
+		}
+	};
+	if (!extend) self.anchor = self.caret;
 }

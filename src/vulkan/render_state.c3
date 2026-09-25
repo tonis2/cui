@@ -51,7 +51,8 @@ fn void? DescriptorImages.load_rgba(
 	uint height,
 	vk::MemoryAllocator* allocator,
 	vk::DeviceQueue queue,
-	vk::Image* out_image = null
+	vk::Image* out_image = null,
+	bool linear = false
 )
 {
 	vk::Device device = allocator.device;
@@ -135,7 +136,10 @@ fn void? DescriptorImages.load_rgba(
 		vk::cmdPipelineBarrier2(command_buffer, &&vk::dependencyInfo().setImageMemoryBarriers({ finalize_barrier }));
 	}!;
 
-	texture.sampler = vk::samplerCreateInfo().setMagFilter(FILTER_NEAREST).setMinFilter(FILTER_NEAREST)
+	// Nearest by default, which is right for pixel art and icons drawn at their
+	// own size; `linear` is for a picture shown at whatever size fits.
+	Filter filter = linear ? FILTER_LINEAR : FILTER_NEAREST;
+	texture.sampler = vk::samplerCreateInfo().setMagFilter(filter).setMinFilter(filter)
 		.setAddressModeU(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
 		.setAddressModeV(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
 		.setAddressModeW(SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
@@ -241,7 +245,8 @@ fn void? update_atlas_image(
 	uint height,
 	bool first,
 	vk::MemoryAllocator* allocator,
-	vk::DeviceQueue queue
+	vk::DeviceQueue queue,
+	uint texel_size = 1
 )
 {
 	vk::Device device = allocator.device;
@@ -251,7 +256,7 @@ fn void? update_atlas_image(
 		usage: BUFFER_USAGE_TRANSFER_SRC_BIT,
 		properties: MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT,
 		data: pixels.ptr,
-		data_size: (sz)width * height,
+		data_size: (sz)width * height * texel_size,
 	)!;
 	defer stage.free();
 

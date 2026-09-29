@@ -29,6 +29,28 @@ import std::math;
 *>
 alias OnRow = fn void(Ui* ui, usz row);
 
+<*
+ What a row's right-click reports: which row, and where the press landed in
+ window coordinates — the point a context menu opens at.
+*>
+alias OnRowAt = fn void(Ui* ui, usz row, Vec2 at);
+
+<*
+ What a click on one of a row's toggle columns reports: which row, and which
+ column, counted from the right edge.
+*>
+alias OnRowToggle = fn void(Ui* ui, usz row, usz column);
+
+<*
+ Draws one of the caller's icons centred on `center`, `size` px across. Icons are
+ the caller's own numbers: cui has no icon set, so what an icon looks like is
+ whatever the caller paints for it. `dim` is set for a toggle that is off.
+*>
+alias TreePaintIcon = fn void(Painter* painter, Vec2 center, float size, ushort icon, bool dim);
+
+// How many toggle columns a row can carry at its right edge — an eye and one more.
+const usz TREE_TOGGLES = 2;
+
 struct TreeStyle
 {
 	Color text;
@@ -42,6 +64,13 @@ struct TreeStyle
 	float padding; // left and right inset inside a row
 	float indent; // per level of depth
 	Vec4 radius;
+	// The rest is optional: a zero leaves each one out, so a style written before
+	// they existed draws the same tree it always did.
+	Color highlighted; // the fill behind a row lit as part of a larger selection
+	Color guide; // the thin lines down each level's children
+	Color alternate; // the shade behind every other row
+	float icon_size; // the square slot before a label that has an icon
+	float toggle_width; // one right-edge toggle column
 }
 
 const TreeStyle DEFAULT_TREE_STYLE = {
@@ -82,6 +111,20 @@ struct TreeRow
 	usz depth;
 	bool expandable;
 	bool expanded;
+	// Zero for none. Drawn by `Tree.paint_icon` in a slot before the label.
+	ushort icon;
+	// Lit as part of a selection of several; `Tree.selected` stays the active one.
+	bool highlighted;
+	// Right-edge switches, column 0 outermost — an eye, say. Unshown columns leave
+	// their space empty, so the columns of different rows still line up.
+	TreeToggle[TREE_TOGGLES] toggles;
+}
+
+struct TreeToggle
+{
+	ushort icon;
+	bool on;
+	bool shown;
 }
 
 <*
@@ -97,6 +140,13 @@ struct Tree (Widget)
 	usz selected;
 	OnRow on_select;
 	OnRow on_toggle;
+	// A right-press on a row. Unset, the press is not the tree's and falls through
+	// to whatever is behind it — a pane's own menu, say.
+	OnRowAt on_context;
+	// A click on a shown toggle column. Unset, the click selects the row instead.
+	OnRowToggle on_row_toggle;
+	// Paints row and toggle icons. Unset, no icon slot is made.
+	TreePaintIcon paint_icon;
 	TreeStyle style;
 
 	// The row under the pointer as its index + 1, so the zero default means "none"
@@ -139,9 +189,20 @@ fn int Tree.row_at(&self, Element* elem, Vec2 pos)
 // Where a row's text starts, given how deep it sits. The disclosure mark lives in
 // the indent step immediately left of it, which is why an expandable row does not
 // need a wider inset than a plain one at the same depth.
+//
+// A top-level row that opens has nowhere left of its label for its mark, so a
+// tree with one sets every row one step in: the mark stays inside the tree and
+// clickable rather than hanging off its left edge.
 fn float Tree.text_x(&self, TreeStyle style, usz depth)
 {
-	return style.padding + (float)depth * style.indent;
+	return style.padding + (float)(depth + self.lead()) * style.indent;
+}
+
+// One when a depth-0 row is expandable, else nothing.
+fn usz Tree.lead(&self)
+{
+	foreach (row : self.rows) if (row.depth == 0 && row.expandable) return 1;
+	return 0;
 }
 
 <*
@@ -158,47 +219,123 @@ fn bool Tree.on_mark(&self, TreeStyle style, usz row, Vec2 pos)
 	return pos.x >= left && pos.x < left + style.indent;
 }
 
+<*
+ How many toggle columns the tree sets aside at its right edge: as many as the
+ widest row shows, so every row's columns — and its trailing note — line up.
+*>
+fn usz Tree.toggle_columns(&self)
+{
+	usz columns = 0;
+	foreach (row : self.rows)
+	{
+		for (usz c = columns; c < TREE_TOGGLES; c++) if (row.toggles[c].shown) columns = c + 1;
+	}
+	return columns;
+}
+
+<*
+ The toggle column a point is on, or -1 for none. Only a shown toggle is a
+ target; the space of an unshown one is part of the row.
+*>
+fn int Tree.toggle_at(&self, Element* elem, TreeStyle style, usz row, Vec2 pos)
+{
+	if (row >= self.rows.len || style.toggle_width <= 0.0f) return -1;
+	float right = elem.size.x - style.padding;
+	if (pos.x >= right) return -1;
+	int column = (int)((right - pos.x) / style.toggle_width);
+	if (column >= (int)TREE_TOGGLES || !self.rows[row].toggles[column].shown) return -1;
+	return column;
+}
+
+// The label's x once the icon slot, if the row has one, is stepped over.
+fn float Tree.label_x(&self, TreeStyle style, TreeRow row)
+{
+	float x = self.text_x(style, row.depth);
+	if (row.icon != 0 && self.paint_icon && style.icon_size > 0.0f) x += style.icon_size + 5.0f;
+	return x;
+}
+
+// A disclosure chevron: two strokes pointing right when closed, down when open.
+fn void paint_chevron(Painter* painter, Vec2 center, float size, bool open, Color color) @private
+{
+	float s = size * 0.5f;
+	if (open)
+	{
+		painter.line({ center.x - s, center.y - s * 0.5f }, { center.x, center.y + s * 0.5f }, 1.5f, color);
+		painter.line({ center.x, center.y + s * 0.5f }, { center.x + s, center.y - s * 0.5f }, 1.5f, color);
+	}
+	else
+	{
+		painter.line({ center.x - s * 0.5f, center.y - s }, { center.x + s * 0.5f, center.y }, 1.5f, color);
+		painter.line({ center.x + s * 0.5f, center.y }, { center.x - s * 0.5f, center.y + s }, 1.5f, color);
+	}
+}
+
 fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	TreeStyle style = self.style.resolved();
+	usz columns     = self.toggle_columns();
+	float right     = elem.size.x - style.padding - (float)columns * style.toggle_width;
 
 	foreach (usz i, row : self.rows)
 	{
 		float y      = (float)i * style.row_height;
 		bool chosen  = i == self.selected;
-		bool hovered = self.lit == (int)i + 1 && !chosen;
+		bool lit     = row.highlighted && !chosen && style.highlighted.w > 0.0f;
+		bool hovered = self.lit == (int)i + 1 && !chosen && !lit;
 
-		if (chosen || hovered)
+		if (i % 2 == 1 && style.alternate.w > 0.0f)
+		{
+			painter.rect({ 0, y }, { elem.size.x, style.row_height }, { .color = style.alternate });
+		}
+		if (chosen || lit || hovered)
 		{
 			painter.rect(
 				{ 0, y },
 				{ elem.size.x, style.row_height },
 				{
-					.color = chosen ? style.selected : style.hover,
+					.color = chosen ? style.selected : lit ? style.highlighted : style.hover,
 					.border_radius = style.radius,
 				}
 			);
 		}
 
+		float mid    = y + style.row_height * 0.5f;
 		float text_y = y + (style.row_height - style.text_size) * 0.5f - 1.0f;
 		float x      = self.text_x(style, row.depth);
+
+		// One line down the column of every level this row sits under, where that
+		// level's chevrons are, so a long run of children still reads as one group.
+		if (style.guide.w > 0.0f)
+		{
+			for (usz level = 0; level < row.depth; level++)
+			{
+				float gx = self.text_x(style, level) - style.indent * 0.5f;
+				if (gx <= 0.0f) continue;
+				painter.line({ gx, y }, { gx, y + style.row_height }, 1.0f, style.guide);
+			}
+		}
 
 		if (row.expandable)
 		{
 			// Left of the label in the indent its children will sit at, so the marks
 			// of one level line up down the column whatever their labels are.
-			painter.text(
-				{ x - style.indent, text_y },
-				row.expanded ? "v" : ">",
-				{
-					.size = style.text_size,
-					.color = chosen ? style.selected_text : style.mark,
-				}
+			paint_chevron(
+				painter,
+				{ x - style.indent * 0.5f, mid },
+				math::min(style.indent, style.row_height) * 0.45f,
+				row.expanded,
+				chosen ? style.selected_text : style.mark
 			);
 		}
 
+		if (row.icon != 0 && self.paint_icon && style.icon_size > 0.0f)
+		{
+			self.paint_icon(painter, { x + style.icon_size * 0.5f, mid }, style.icon_size, row.icon, false);
+		}
+
 		painter.text(
-			{ x, text_y },
+			{ self.label_x(style, row), text_y },
 			row.label,
 			{
 				.size = style.text_size,
@@ -206,10 +343,18 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 			}
 		);
 
+		for (usz c = 0; c < columns && self.paint_icon; c++)
+		{
+			TreeToggle toggle = row.toggles[c];
+			if (!toggle.shown) continue;
+			float cx = elem.size.x - style.padding - ((float)c + 0.5f) * style.toggle_width;
+			self.paint_icon(painter, { cx, mid }, style.icon_size, toggle.icon, !toggle.on);
+		}
+
 		if (row.trailing.len == 0) continue;
 		float trailing_w = elem.ui.text.measure(0, row.trailing, style.text_size).x;
 		painter.text(
-			{ elem.size.x - style.padding - trailing_w, text_y },
+			{ right - trailing_w, text_y },
 			row.trailing,
 			{
 				.size = style.text_size,
@@ -238,6 +383,16 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return false;
 
 		case PRESS:
+			if (event.button == MouseButton.RIGHT)
+			{
+				if (!self.on_context) return false;
+				int row = self.row_at(elem, event.pos);
+				// Past the last row there is nothing to ask about: left for the panel
+				// behind, so an empty tail still opens that panel's menu.
+				if (row < 0) return false;
+				self.on_context(elem.ui, (usz)row, elem.absolute + event.pos);
+				return true;
+			}
 			if (event.button != MouseButton.LEFT) return false;
 
 			int row = self.row_at(elem, event.pos);
@@ -248,6 +403,15 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (self.on_mark(style, (usz)row, event.pos))
 			{
 				if (self.on_toggle) self.on_toggle(elem.ui, (usz)row);
+				return true;
+			}
+
+			// A switch on the row changes that one thing and leaves the selection
+			// where it was — hiding the mesh is not choosing it.
+			int column = self.on_row_toggle ? self.toggle_at(elem, style, (usz)row, event.pos) : -1;
+			if (column >= 0)
+			{
+				self.on_row_toggle(elem.ui, (usz)row, (usz)column);
 				return true;
 			}
 

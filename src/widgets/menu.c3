@@ -232,11 +232,24 @@ fn void PopupMenuItem.paint(&self, Element* elem, Painter* painter) @dynamic
 		painter.line({ 11.0, h * 0.68f }, { 17.0, h * 0.32f }, 1.6f, ink);
 	}
 	Vec2 measured = elem.ui.text.measure(s.font, self.item.label, s.text_size);
+	float text_y = (elem.size.y - measured.y) * 0.5f;
 	painter.text(
-		{ CHECK_GUTTER, (elem.size.y - measured.y) * 0.5f },
+		{ CHECK_GUTTER, text_y },
 		self.item.label,
 		{ .font = s.font, .size = s.text_size, .color = ink }
 	);
+
+	// The same dim right-hand reminder a menu bar row carries, so a context menu
+	// can teach the key that does the same thing.
+	if (self.item.shortcut.len > 0)
+	{
+		Vec2 hint = elem.ui.text.measure(s.font, self.item.shortcut, s.text_size);
+		painter.text(
+			{ elem.size.x - s.pad_x - hint.x, text_y },
+			self.item.shortcut,
+			{ .font = s.font, .size = s.text_size, .color = s.dim_color }
+		);
+	}
 }
 
 fn void PopupMenuItem.on_hover(&self, Element* elem, bool entered) @dynamic

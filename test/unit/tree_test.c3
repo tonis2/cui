@@ -15,6 +15,8 @@ const float PAD    = widgets::DEFAULT_TREE_STYLE.padding;
 // What the callbacks report, since a bare OnRow carries no context back.
 int selected_row @local = -1;
 int toggled_row @local  = -1;
+int context_row @local  = -1;
+Vec2 context_at @local;
 
 fn void note_select(Ui* ui, usz row) @local
 {
@@ -23,6 +25,11 @@ fn void note_select(Ui* ui, usz row) @local
 fn void note_toggle(Ui* ui, usz row) @local
 {
 	toggled_row = (int)row;
+}
+fn void note_context(Ui* ui, usz row, Vec2 at) @local
+{
+	context_row = (int)row;
+	context_at = at;
 }
 
 // "All" over one collapsible kind and two plans under it — the sidebar shape.
@@ -37,6 +44,7 @@ fn Element* tree_of(Ui* ui) @local
 {
 	selected_row = -1;
 	toggled_row = -1;
+	context_row = -1;
 
 	Element* tree = ui.@node(
 		(Tree) {
@@ -44,6 +52,7 @@ fn Element* tree_of(Ui* ui) @local
 			.selected = rows.len, // past the end: nothing selected
 			.on_select = &note_select,
 			.on_toggle = &note_toggle,
+			.on_context = &note_context,
 		}
 	);
 	ui.build(ui.@node((Stack) { }, tree));
@@ -222,4 +231,142 @@ fn void the_hover_clears_when_the_pointer_leaves() @test
 	// Off the bottom of the tree, which is off the element entirely.
 	cui_tests::frame(ui, { 200, cui_tests::WINDOW.y - 1 });
 	test::eq(widget.lit, 0);
+}
+<*
+ A right-press reports the row and where it landed, and leaves the selection to
+ the caller — a context menu may act on a group the press did not pick.
+*>
+fn void a_right_press_asks_for_the_row_context() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* tree = tree_of(ui);
+	Tree* widget  = tree.widget_as(Tree);
+
+	cui_tests::frame(ui, on_label(3), right: true);
+	test::eq(context_row, 3);
+	test::@check(context_at == on_label(3), "the context point is not where the press landed");
+	test::eq(selected_row, -1);
+	test::@check(widget.selected == rows.len, "a right-press moved the selection");
+
+	// Past the last row is not a row: the press is left for the panel behind.
+	cui_tests::frame(ui, on_label(3));
+	context_row = -1;
+	cui_tests::frame(ui, { 200, (float)rows.len * ROW_H + 4.0f }, right: true);
+	test::eq(context_row, -1);
+}
+
+int toggle_row @local    = -1;
+int toggle_column @local = -1;
+
+fn void note_row_toggle(Ui* ui, usz row, usz column) @local
+{
+	toggle_row = (int)row;
+	toggle_column = (int)column;
+}
+
+fn void paint_nothing(Painter* painter, Vec2 center, float size, ushort icon, bool dim) @local
+{
+}
+
+const TreeStyle TOGGLE_STYLE @local = {
+	.row_height = 24.0,
+	.text_size = 13.0,
+	.padding = 8.0,
+	.indent = 16.0,
+	.icon_size = 14.0,
+	.toggle_width = 22.0,
+};
+
+// A mesh row with an eye, and a joint row under it with none.
+TreeRow[2] switch_rows @local = {
+	{ .label = "Mesh", .icon = 1, .toggles = { { .icon = 9, .on = true, .shown = true }, {} } },
+	{ .label = "hips", .depth = 1, .icon = 2 },
+};
+
+fn Element* switch_tree_of(Ui* ui) @local
+{
+	selected_row = -1;
+	toggle_row = -1;
+	toggle_column = -1;
+
+	Element* tree = ui.@node(
+		(Tree) {
+			.rows = switch_rows[..],
+			.selected = switch_rows.len,
+			.on_select = &note_select,
+			.on_row_toggle = &note_row_toggle,
+			.paint_icon = &paint_nothing,
+			.style = TOGGLE_STYLE,
+		}
+	);
+	ui.build(ui.@node((Stack) { }, tree));
+	ui.flush();
+	return tree;
+}
+
+<*
+ A click on a row's switch reports the switch and leaves the selection alone:
+ hiding the mesh is not choosing it.
+*>
+fn void a_toggle_click_reports_its_column_and_does_not_select() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* tree = switch_tree_of(ui);
+	Tree* widget  = tree.widget_as(Tree);
+
+	float eye_x = tree.size.x - TOGGLE_STYLE.padding - TOGGLE_STYLE.toggle_width * 0.5f;
+	cui_tests::frame(ui, { eye_x, 12 }, left: true);
+	test::eq(toggle_row, 0);
+	test::eq(toggle_column, 0);
+	test::eq(selected_row, -1);
+	test::@check(widget.selected == switch_rows.len, "a switch click moved the selection");
+
+	// The same column on a row that shows no switch there is just the row.
+	cui_tests::frame(ui, { eye_x, 12 });
+	cui_tests::frame(ui, { eye_x, 36 }, left: true);
+	test::eq(selected_row, 1);
+	test::eq(toggle_row, 0); // unchanged
+}
+
+<*
+ A row with an icon starts its label past the icon's slot — but only when there
+ is something to paint the icon with, so a tree without icons keeps its layout.
+*>
+fn void an_icon_slot_moves_the_label_over() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* tree = switch_tree_of(ui);
+	Tree* widget  = tree.widget_as(Tree);
+	float bare    = widget.text_x(TOGGLE_STYLE, 1);
+
+	test::@check(widget.label_x(TOGGLE_STYLE, switch_rows[1]) > bare + TOGGLE_STYLE.icon_size,
+		"the label sits on top of its icon");
+	widget.paint_icon = null;
+	test::@check(widget.label_x(TOGGLE_STYLE, switch_rows[1]) == bare, "a tree with no icon painter moved its labels");
+}
+
+<*
+ A row lit as part of a larger selection is only painted so: `selected` still
+ names the one active row, and a click still moves that alone.
+*>
+fn void a_highlighted_row_is_not_the_selection() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	switch_rows[1].highlighted = true;
+	defer switch_rows[1].highlighted = false;
+	Element* tree = switch_tree_of(ui);
+	Tree* widget  = tree.widget_as(Tree);
+	test::@check(widget.selected == switch_rows.len, "a highlighted row became the selection");
+
+	cui_tests::frame(ui, { 60, 12 }, left: true);
+	test::eq(selected_row, 0);
+	test::eq((int)widget.selected, 0);
 }

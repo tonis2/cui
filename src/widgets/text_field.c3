@@ -1031,7 +1031,7 @@ fn usz TextField.caret_at(&self, Element* elem, Vec2 pos)
 }
 
 // The byte in `line` nearest `x` pixels from its start.
-fn usz TextField.index_in_line(&self, Element* elem, TextLine line, float x) @local
+fn usz TextField.index_in_line(&self, Element* elem, TextLine line, float x)
 {
 	TextFieldStyle style = self.style.resolved();
 	String text = self.text.str_view();

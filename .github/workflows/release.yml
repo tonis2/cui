@@ -66,7 +66,7 @@ jobs:
         run: |
           set -e
           # project.json is excluded on purpose: it is how cui builds *itself*
-          # (its test targets, against the lib/ submodules). A consumer builds
+          # (its test targets, against the zipped lib/*.c3l). A consumer builds
           # through manifest.json, and a stray project.json in the tree is
           # confusing at best.
           zip -qr cui.c3l manifest.json LICENSE README.md src -x '*.git*'
@@ -213,12 +213,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Build the docs from the tagged commit. c3w, image and font live in
-          # lib/*.c3l as submodules and docgen has to compile them; vk is not a
-          # submodule and is downloaded in the next step. Full history so the
+          # Build the docs from the tagged commit. c3w, image and font are
+          # committed as zips in lib/*.c3l and docgen compiles them; vk is not
+          # in lib/ and is downloaded in the next step. Full history so the
           # docs commit can land on main.
           ref: ${{ steps.tag.outputs.name }}
-          submodules: recursive
           fetch-depth: 0
 
       - name: Fetch cui.c3l

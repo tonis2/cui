@@ -134,11 +134,18 @@ draws a `Canvas` without `src/vulkan`.
 
 ## Working on cui itself
 
-Clone with `--recurse-submodules` — window, image and font live in `lib/` as
-submodules **for building cui itself**. They are not part of the library: a
-release ships `manifest.json` and `src/` only, and `project.json` (which points
-at `lib/`) is left out of it. `vk` is not a submodule, so download it exactly
-like a consumer does:
+window, image and font live in `lib/` as zipped snapshots (`lib/*.c3l`)
+**for building cui itself**, so a plain clone builds the examples. They are not
+part of the library: a release ships `manifest.json` and `src/` only, and
+`project.json` (which points at `lib/`) is left out of it. An app that uses cui
+brings its own copies of them, which is the version that counts. To move a
+snapshot to a newer version, zip it from a checkout of that library:
+
+```sh
+git -C path/to/Window.c3 archive --format=zip -o $PWD/lib/window.c3l HEAD
+```
+
+`vk` is not in `lib/`, so download it exactly like a consumer does:
 
 ```sh
 curl -fsSL -o lib/vulkan.c3l \

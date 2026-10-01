@@ -3,7 +3,11 @@
 
  `@tree((Scroll) { }) { @node((FileBrowser) { .mask = "*.glb", .on_choose = &opened }); };`
 
- One row per entry, directories first and `..` above them. A click selects a row
+ One row per entry, directories first and an "Up one folder" row above them.
+ Each row has a drawn icon (folder, page, or the up arrow) when the style's
+ `icon_size` is set, a file's extension dimmed after its name, and its size
+ right-aligned; a name too long for the row ends in "…" short of the size.
+ Rows are striped, and an empty folder says so in the space below. A click selects a row
  and a second click on the selected row activates it — enter the directory, or
  choose the file — which is the same two-step the animation library's clip cells
  use, and it means a browser can be driven with single clicks by anything that
@@ -12,7 +16,7 @@
  **It sizes itself to its content** and expects a `Scroll` above it, the shape
  every list in cui takes: there is no windowing here, no virtualisation and no
  scrollbar of its own. A directory of ten thousand files measures ten thousand
- rows, which is affordable because a row is a rect and two strings. Given a box
+ rows, which is affordable because a row is a few rects and lines and two strings. Given a box
  smaller than the listing — a panel that capped it, or a caller who forgot the
  Scroll — it paints the rows that fit and stops, rather than down over whatever
  the panel is floating on.
@@ -47,14 +51,17 @@ struct FileBrowserStyle
 {
 	Color text;
 	Color directory; // folders read differently from files, which is the one
-	// distinction a listing must make at a glance
-	Color size; // the right-hand column
+	// distinction a listing must make at a glance; also the folder icon's fill
+	Color size; // the right-hand column, a file's extension and the empty-folder note
+	Color icon; // a file's page outline
 	Color hover;
 	Color selected;
 	Color selected_text;
+	Color stripe; // every other row's fill, so a long row is easy to follow; zero alpha for none
 	float row_height;
 	float text_size;
 	float padding; // left and right inset inside a row
+	float icon_size; // the square slot before the name; zero for no icons
 	Vec4 radius;
 }
 
@@ -62,13 +69,16 @@ const FileBrowserStyle DEFAULT_FILE_BROWSER_STYLE = {
 	.text = { 0.92, 0.93, 0.95, 1.0 },
 	.directory = { 0.55, 0.75, 0.95, 1.0 },
 	.size = { 0.45, 0.48, 0.56, 1.0 },
+	.icon = { 0.62, 0.65, 0.72, 1.0 },
 	.hover = { 0.28, 0.31, 0.40, 1.0 },
 	.selected = { 0.95, 0.60, 0.20, 1.0 },
 	.selected_text = { 0.05, 0.06, 0.09, 1.0 },
-	.row_height = 22.0,
+	.stripe = { 1.0, 1.0, 1.0, 0.025 },
+	.row_height = 26.0,
 	.text_size = 13.0,
 	.padding = 8.0,
-	.radius = { 4, 4, 4, 4 },
+	.icon_size = 14.0,
+	.radius = { 5, 5, 5, 5 },
 };
 
 fn FileBrowserStyle FileBrowserStyle.resolved(self)
@@ -364,18 +374,18 @@ fn void FileBrowser.activate(&self, Element* elem, int row)
 fn Vec2 FileBrowser.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	FileBrowserStyle style = self.style.resolved();
-	return constraints.constrain({ constraints.max.x, (float)self.rows() * style.row_height });
+	// An empty folder keeps room under its rows for the note that says so.
+	float note = self.count() == 0 ? EMPTY_NOTE_ROWS * style.row_height : 0.0f;
+	return constraints.constrain({ constraints.max.x, (float)self.rows() * style.row_height + note });
 }
+
+// How many rows' height the empty-folder note takes.
+const float EMPTY_NOTE_ROWS @private = 3.0;
 
 fn void FileBrowser.paint(&self, Element* elem, Painter* painter) @dynamic
 {
 	FileBrowserStyle style = self.style.resolved();
-
-	if (self.rows() == 0)
-	{
-		painter.text({ style.padding, 0 }, "nothing here", { .size = style.text_size, .color = style.size });
-		return;
-	}
+	float width = elem.size.x;
 
 	char[32] buffer;
 	for (int row = 0; row < (int)self.rows(); row++)
@@ -387,58 +397,177 @@ fn void FileBrowser.paint(&self, Element* elem, Painter* painter) @dynamic
 		// Under a Scroll the box IS the content, so nothing is lost here.
 		if (elem.size.y > 0 && y >= elem.size.y) break;
 		bool selected = self.chosen == row + 1;
+		bool lit      = self.lit == row + 1;
 
-		if (selected || self.lit == row + 1)
+		RectStyle fill = { .border_radius = style.radius };
+		if (selected)
 		{
-			painter.rect(
-				{ 0, y },
-				{ elem.size.x, style.row_height },
-				{
-					.color = selected ? style.selected : style.hover,
-					.border_radius = style.radius,
-				}
-			);
+			fill.color = style.selected;
 		}
+		else if (lit)
+		{
+			fill.color = style.hover;
+		}
+		else if (row % 2 == 1)
+		{
+			fill.color = style.stripe;
+		}
+		if (fill.color.a > 0) painter.rect({ 0, y }, { width, style.row_height }, fill);
 
 		usz index      = self.entry_index(row);
 		bool is_parent = index >= self.count();
 		bool is_dir    = is_parent || self.entries.get((sz)index).is_dir;
+		String name    = is_parent ? ".." : self.entries.get((sz)index).name;
 
-		Color ink = style.text;
-		if (selected)
-		{
-			ink = style.selected_text;
-		}
-		else if (is_dir)
-		{
-			ink = style.directory;
-		}
-
-		// The trailing separator is the folder mark: a glyph would need a font
-		// that has one, and this reads the same in every font there is.
-		String label = is_parent ? "../" : (is_dir ? string::tformat("%s/", self.entries.get((sz)index)
-			.name) : self.entries.get((sz)index).name);
+		Color ink = selected ? style.selected_text : style.text;
+		Color dim = selected ? style.selected_text : style.size;
 
 		// Vertically centred by eye against the row rather than measured: every
 		// row is one line of one size, so the inset is a constant.
-		float text_y = y + (style.row_height - style.text_size) * 0.5f - 1.0f;
-		painter.text({ style.padding, text_y }, label, { .size = style.text_size, .color = ink });
+		float mid    = y + style.row_height * 0.5f;
+		float text_y = mid - style.text_size * 0.5f - 1.0f;
+		float x      = style.padding;
 
-		if (is_dir) continue;
+		if (style.icon_size > 0.0f)
+		{
+			Vec2 center = { x + style.icon_size * 0.5f, mid };
+			if (is_parent)
+			{
+				paint_up_icon(painter, center, style.icon_size, selected ? style.selected_text : style.directory);
+			}
+			else if (is_dir)
+			{
+				paint_folder_icon(painter, center, style.icon_size, selected ? style.selected_text : style.directory);
+			}
+			else
+			{
+				paint_file_icon(painter, center, style.icon_size, selected ? style.selected_text : style.icon);
+			}
+			x += style.icon_size + 7.0f;
+		}
+		else if (is_dir && !is_parent)
+		{
+			// Without icons the trailing separator is the folder mark: it reads
+			// the same in every font there is.
+			name = string::tformat("%s/", name);
+		}
+
+		// The size column, measured first so a long name can stop short of it.
+		String size_text = "";
+		float size_w     = 0.0f;
+		if (!is_dir)
+		{
+			if (try char[] written = human_size(buffer[..], self.entries.get((sz)index).size))
+			{
+				size_text = (String)written;
+				size_w    = elem.ui.text.measure(0, size_text, style.text_size).x;
+			}
+		}
+		float room = width - style.padding - x - (size_w > 0.0f ? size_w + 12.0f : 0.0f);
+
+		if (is_parent)
+		{
+			painter.text_box({ x, text_y }, "Up one folder", { .size = style.text_size, .color = dim }, room, TextOverflow.ELLIPSIS);
+		}
+		else if (is_dir)
+		{
+			painter.text_box({ x, text_y }, name, { .size = style.text_size, .color = selected ? ink : style.directory }, room, TextOverflow.ELLIPSIS);
+		}
+		else
+		{
+			// The stem in full ink and the extension dimmed: in a folder of one
+			// format the names are what differ, and the extension is a repeat.
+			usz dot = extension_at(name);
+			String stem = name[:dot];
+			String ext  = name[dot..];
+			float stem_w = elem.ui.text.measure(0, stem, style.text_size).x;
+			float ext_w  = elem.ui.text.measure(0, ext, style.text_size).x;
+			if (stem_w + ext_w <= room)
+			{
+				painter.text({ x, text_y }, stem, { .size = style.text_size, .color = ink });
+				painter.text({ x + stem_w, text_y }, ext, { .size = style.text_size, .color = dim });
+			}
+			else
+			{
+				painter.text_box({ x, text_y }, name, { .size = style.text_size, .color = ink }, room, TextOverflow.ELLIPSIS);
+			}
+		}
 
 		// Right-aligned, which is what makes a column of sizes comparable at a
 		// glance rather than a ragged list of numbers.
-		if (try char[] written = human_size(buffer[..], self.entries.get((sz)index).size))
+		if (size_w > 0.0f)
 		{
-			String text = (String)written;
-			float width = elem.ui.text.measure(0, text, style.text_size).x;
-			painter.text(
-				{ elem.size.x - style.padding - width, text_y },
-				text,
-				{ .size = style.text_size, .color = selected ? style.selected_text : style.size }
-			);
+			painter.text({ width - style.padding - size_w, text_y }, size_text, { .size = style.text_size, .color = dim });
 		}
 	}
+
+	if (self.count() == 0)
+	{
+		// Said in the space the files would have taken, so an empty folder reads
+		// as empty rather than as a list that failed to load.
+		String note = self.mask.len > 0 ? "No matching files in this folder" : "This folder is empty";
+		float note_w = elem.ui.text.measure(0, note, style.text_size).x;
+		float top    = (float)self.rows() * style.row_height + style.row_height;
+		painter.text({ (width - note_w) * 0.5f, top }, note, { .size = style.text_size, .color = style.size });
+	}
+}
+
+// Where a name's extension starts — its last '.', or the end for none. A leading
+// dot is part of the name, not an extension.
+fn usz extension_at(String name) @private
+{
+	for (usz i = name.len; i > 1; i--)
+	{
+		if (name[i - 1] == '.') return i - 1;
+	}
+	return name.len;
+}
+
+// A folder: a tab on the back's top-left and the front panel below it, `size`
+// across and centred on `center`.
+fn void paint_folder_icon(Painter* painter, Vec2 center, float size, Color color) @private
+{
+	float w = size;
+	float h = size * 0.78f;
+	Vec2 corner = center - (Vec2) { w * 0.5f, h * 0.5f };
+	Color back = color;
+	back.a *= 0.65f;
+	painter.rect(corner, { w * 0.45f, h * 0.3f }, { .color = back, .border_radius = { 1.5f, 1.5f, 0, 0 } });
+	painter.rect(corner + (Vec2) { 0, h * 0.18f }, { w, h * 0.82f }, { .color = color, .border_radius = { 1.5f, 2.0f, 2.0f, 2.0f } });
+}
+
+// A page with its top-right corner folded over, outlined in `color`.
+fn void paint_file_icon(Painter* painter, Vec2 center, float size, Color color) @private
+{
+	float w    = size * 0.72f;
+	float h    = size;
+	float fold = w * 0.38f;
+	float t    = 1.3f;
+	Vec2 lo = center - (Vec2) { w * 0.5f, h * 0.5f };
+	Vec2 hi = center + (Vec2) { w * 0.5f, h * 0.5f };
+	painter.line({ lo.x, lo.y }, { hi.x - fold, lo.y }, t, color);
+	painter.line({ hi.x - fold, lo.y }, { hi.x, lo.y + fold }, t, color);
+	painter.line({ hi.x, lo.y + fold }, { hi.x, hi.y }, t, color);
+	painter.line({ hi.x, hi.y }, { lo.x, hi.y }, t, color);
+	painter.line({ lo.x, hi.y }, { lo.x, lo.y }, t, color);
+	painter.line({ hi.x - fold, lo.y }, { hi.x - fold, lo.y + fold }, t, color);
+	painter.line({ hi.x - fold, lo.y + fold }, { hi.x, lo.y + fold }, t, color);
+	// Two text lines, so the page reads as a document rather than a box.
+	float inset = w * 0.22f;
+	painter.line({ lo.x + inset, center.y + h * 0.08f }, { hi.x - inset, center.y + h * 0.08f }, t * 0.8f, color);
+	painter.line({ lo.x + inset, center.y + h * 0.28f }, { hi.x - inset, center.y + h * 0.28f }, t * 0.8f, color);
+}
+
+// An arrow bending up and back: the parent row's "out of here".
+fn void paint_up_icon(Painter* painter, Vec2 center, float size, Color color) @private
+{
+	float s = size * 0.5f;
+	float t = 1.6f;
+	Vec2 tip = { center.x - s * 0.35f, center.y - s * 0.85f };
+	painter.line(tip, { tip.x - s * 0.5f, tip.y + s * 0.5f }, t, color);
+	painter.line(tip, { tip.x + s * 0.5f, tip.y + s * 0.5f }, t, color);
+	painter.line(tip, { tip.x, center.y + s * 0.6f }, t, color);
+	painter.line({ tip.x, center.y + s * 0.6f }, { center.x + s * 0.9f, center.y + s * 0.6f }, t, color);
 }
 
 <*

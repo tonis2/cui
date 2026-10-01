@@ -35,6 +35,7 @@
 *>
 module cui::widgets;
 import std::math;
+import std::core::string;
 
 import cui;
 
@@ -668,14 +669,75 @@ fn Vec2 AreaTabStrip.layout(&self, Element* elem, Constraints constraints) @dyna
 	return constraints.constrain({ constraints.max.x, s.tab_height });
 }
 
+// The least padding a tab keeps when the strip is short of room.
+const float AREA_TAB_MIN_PAD = 4.0f;
+
 <*
- A tab's width: its measured label plus padding. The padding alone is the
- floor, so a fontless Ui (headless tests) still gets a clickable strip.
+ How the tabs fit a strip `width` wide: the padding each side of a label, and
+ the widest a label may be drawn (`FLOAT_MAX` when every label fits whole).
+
+ Every tab at its measured label plus `pad_x` when there is room. A narrow pane
+ first gives up padding, down to AREA_TAB_MIN_PAD, and then shortens the longest
+ labels to one common cap — so a pane never hides a tab off its end, and the
+ short names ("Scene") stay whole while the long ones take the cut.
 *>
-fn float AreaTabStrip.tab_width(&self, Ui* ui, AreaStyle s, usz index)
+fn float AreaTabStrip.fit(&self, Ui* ui, AreaStyle s, float width, float* pad)
+{
+	float text_total = 0;
+	float widest = 0;
+	foreach (view : self.areas.views)
+	{
+		float t = ui.text.measure(s.font, view.name, s.text_size).x;
+		text_total += t;
+		widest = math::max(widest, t);
+	}
+	float n = (float)self.areas.views.len;
+	*pad = s.pad_x;
+	if (n == 0 || text_total + 2 * n * s.pad_x <= width) return (float)math::FLOAT_MAX;
+	*pad = math::max(AREA_TAB_MIN_PAD, math::min(s.pad_x, (width - text_total) / (2 * n)));
+	float room = width - 2 * n * *pad;
+	if (text_total <= room) return (float)math::FLOAT_MAX;
+	// The cap where the capped labels add up to the room left, by bisection.
+	float lo = 0;
+	float hi = widest;
+	for (int i = 0; i < 24; i++)
+	{
+		float cap = (lo + hi) * 0.5f;
+		float sum = 0;
+		foreach (view : self.areas.views) sum += math::min(ui.text.measure(s.font, view.name, s.text_size).x, cap);
+		if (sum > room) { hi = cap; } else { lo = cap; }
+	}
+	return lo;
+}
+
+<*
+ A tab's width: its measured label, capped by `fit`, plus padding. The padding
+ alone is the floor, so a fontless Ui (headless tests) still gets a clickable
+ strip.
+*>
+fn float AreaTabStrip.tab_width(&self, Ui* ui, AreaStyle s, usz index, float pad, float cap)
 {
 	float text = ui.text.measure(s.font, self.areas.views[index].name, s.text_size).x;
-	return math::max(text + 2 * s.pad_x, 2 * s.pad_x);
+	return math::min(text, cap) + 2 * pad;
+}
+
+<*
+ A label shortened with "…" to at most `cap` wide, or the label itself when it
+ fits. The shortened text is in the temp allocator.
+*>
+fn String AreaTabStrip.label(&self, Ui* ui, AreaStyle s, String name, float cap)
+{
+	if (ui.text.measure(s.font, name, s.text_size).x <= cap) return name;
+	usz keep = name.len;
+	while (keep > 0)
+	{
+		keep--;
+		// Back to a character boundary: a UTF-8 continuation byte is 10xxxxxx.
+		while (keep > 0 && (name[keep] & 0xC0) == 0x80) keep--;
+		String shortened = string::tformat("%s…", name[:keep].trim());
+		if (ui.text.measure(s.font, shortened, s.text_size).x <= cap) return shortened;
+	}
+	return "…";
 }
 
 <*
@@ -686,10 +748,12 @@ fn int AreaTabStrip.zone_at(&self, Element* elem, Vec2 pos)
 	if (pos.x < 0 || pos.y < 0 || pos.y >= elem.size.y) return AREA_ZONE_NONE;
 
 	AreaStyle s = self.areas.style.resolved();
+	float pad;
+	float cap = self.fit(elem.ui, s, elem.size.x, &pad);
 	float x     = 0;
 	foreach (i, view : self.areas.views)
 	{
-		float w = self.tab_width(elem.ui, s, (usz)i);
+		float w = self.tab_width(elem.ui, s, (usz)i, pad, cap);
 		if (pos.x < x + w) return (int)i + 1;
 		x += w;
 	}
@@ -703,10 +767,12 @@ fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 	painter.rect({ 0, 0 }, elem.size, { .color = s.strip_color });
 	painter.rect({ 0, h - 1 }, { elem.size.x, 1 }, { .color = s.strip_border });
 
+	float pad;
+	float cap = self.fit(elem.ui, s, elem.size.x, &pad);
 	float x = 0;
 	foreach (i, view : self.areas.views)
 	{
-		float w     = self.tab_width(elem.ui, s, (usz)i);
+		float w     = self.tab_width(elem.ui, s, (usz)i, pad, cap);
 		bool active = self.node.active == (usz)i;
 		if (active)
 		{
@@ -716,10 +782,11 @@ fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 		{
 			painter.rect({ x, 0 }, { w, h }, { .color = s.hover_color });
 		}
-		Vec2 text = elem.ui.text.measure(s.font, view.name, s.text_size);
+		String label = self.label(elem.ui, s, view.name, cap);
+		Vec2 text = elem.ui.text.measure(s.font, label, s.text_size);
 		painter.text(
-			{ x + s.pad_x, (h - text.y) * 0.5f },
-			view.name,
+			{ x + pad, (h - text.y) * 0.5f },
+			label,
 			{
 				.font = s.font,
 				.size = s.text_size,

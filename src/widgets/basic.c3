@@ -912,7 +912,7 @@ fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 }
 
 <*
- A single line of SDF text, sized by its font metrics: width = the kerned
+ A line of SDF text, sized by its font metrics: width = the kerned
  advance of the string, height = ascent - descent. Load a font first with
  `Ui.load_font`; see `cui::TextStyle` for the field semantics.
 
@@ -923,6 +923,12 @@ fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  inside a Button and the clicks, hover and cursor go to what is underneath, as
  they would in Flutter. Wrap it in a Button (or any widget with `on_mouse`) to
  make text clickable.
+
+ Text wider than the label is offered runs past its edge unless `overflow`
+ says otherwise: ELLIPSIS cuts it to one line ending in "…", WRAP breaks it onto
+ as many lines as it takes and the label grows down to hold them.
+
+ ui.@node((Label){ .text = long_text, .overflow = WRAP, .color = { 1, 1, 1, 1 } })
 *>
 struct Label (Widget)
 {
@@ -930,6 +936,7 @@ struct Label (Widget)
 	FontId font; // from Ui.load_font; 0 = the first loaded font
 	float size; // em size in px; 0 uses cui::DEFAULT_TEXT_SIZE
 	Color color; // text color — the zero default is fully transparent
+	TextOverflow overflow; // past the offered width: VISIBLE (default), ELLIPSIS or WRAP
 }
 
 // Text is decoration, and decoration must not eat the clicks meant for what it
@@ -942,7 +949,8 @@ fn void Label.mount(&self, Element* elem) @dynamic
 }
 
 <*
- Sizes the label to its measured text.
+ Sizes the label to its measured text, cut or wrapped to the offered width
+ when `overflow` asks for it.
 
  @param elem : `The element this widget is attached to.`
  @param constraints : `The size range offered by the parent.`
@@ -950,7 +958,8 @@ fn void Label.mount(&self, Element* elem) @dynamic
 *>
 fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return constraints.constrain(elem.ui.text.measure(self.font, self.text, self.size));
+	return constraints.constrain(
+		elem.ui.text.measure_box(self.font, self.text, self.size, constraints.max.x, self.overflow));
 }
 
 <*
@@ -961,7 +970,8 @@ fn Vec2 Label.layout(&self, Element* elem, Constraints constraints) @dynamic
 *>
 fn void Label.paint(&self, Element* elem, Painter* painter) @dynamic
 {
-	painter.text({ 0, 0 }, self.text, { .font = self.font, .size = self.size, .color = self.color });
+	painter.text_box({ 0, 0 }, self.text, { .font = self.font, .size = self.size, .color = self.color },
+		elem.size.x, self.overflow);
 }
 
 // ---------------------------------------------------------------------------
@@ -989,6 +999,7 @@ struct LiveLabel (Widget)
 	FontId font;
 	float text_size; // em size in px; 0 uses cui::DEFAULT_TEXT_SIZE
 	Color color;
+	TextOverflow overflow; // handed to the Label; see Label.overflow
 	String shown; // owned; what the Label child is showing
 }
 
@@ -1016,7 +1027,7 @@ fn Element* LiveLabel.build(&self, Element* elem) @dynamic
 	if (self.shown.len == 0) self.refresh(elem);
 	return @subtree(elem.ui)
 	{
-		@node((Label) { .text = self.shown, .font = self.font, .size = self.text_size, .color = self.color });
+		@node((Label) { .text = self.shown, .font = self.font, .size = self.text_size, .color = self.color, .overflow = self.overflow });
 	};
 }
 

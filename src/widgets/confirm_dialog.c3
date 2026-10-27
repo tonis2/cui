@@ -259,12 +259,27 @@ fn Element* confirm_body(Ui* ui, any ctx) @local
 	DialogStyle s        = self.style.resolved();
 	ConfirmButtonStyle b = self.buttons.resolved();
 
-	// One Label per line, because `Label` is a single run of text and a question
-	// long enough to need two is exactly the kind worth reading. The slices point
-	// into the widget's own buffer, which is why `ask` rebuilds the panel when it
-	// changes the message under an open one.
+	// The row is as wide as the question may run, which is what puts the buttons
+	// against the right edge: a Row without a width is only as wide as they are.
+	return ui.@node(
+		(Column) { .size = { CONFIRM_TEXT_W, 0 }, .gap = b.gap },
+		question_lines(ui, self.message.str_view(), s),
+		ui.@node((Row) { .size = { CONFIRM_TEXT_W, 0 }, .main_align = END },
+			ui.@node((ConfirmActions) { .host = host, .style = b, .font = s.font }))
+	);
+}
+
+<*
+ A question as a column of lines, wrapped at CONFIRM_TEXT_W.
+
+ One Label per line, because `Label` is a single run of text and a question long
+ enough to need two is exactly the kind worth reading. The labels point into
+ `message`, so a panel that changes its message under an open question rebuilds.
+*>
+fn Element* question_lines(Ui* ui, String message, DialogStyle s) @private
+{
 	Element* lines = ui.@node((Column) { .gap = CONFIRM_LINE_GAP });
-	String rest    = self.message.str_view();
+	String rest    = message;
 	while (rest.len > 0)
 	{
 		String line = wrap_line(ui, rest, s.font, s.text_size, CONFIRM_TEXT_W);
@@ -282,15 +297,7 @@ fn Element* confirm_body(Ui* ui, any ctx) @local
 		rest = rest[line.len..];
 		while (rest.len > 0 && rest[0] == ' ') rest = rest[1..];
 	}
-
-	// The outer column carries the width, which is what lets the row below it
-	// push the buttons to the right edge rather than to the end of its own
-	// content — the same shape every button row in a panel here has.
-	return ui.@node(
-		(Column) { .size = { CONFIRM_TEXT_W, 0 }, .gap = b.gap },
-		lines,
-		ui.@node((Row) { .main_align = END }, ui.@node((ConfirmActions) { .host = host, .style = b, .font = s.font }))
-	);
+	return lines;
 }
 
 <*
@@ -302,7 +309,7 @@ fn Element* confirm_body(Ui* ui, any ctx) @local
 
  @return `A prefix of the text, never empty unless the text itself is.`
 *>
-fn String wrap_line(Ui* ui, String text, FontId font, float size, float width) @local
+fn String wrap_line(Ui* ui, String text, FontId font, float size, float width) @private
 {
 	if (ui.text.measure(font, text, size).x <= width) return text;
 

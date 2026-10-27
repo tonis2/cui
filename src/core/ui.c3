@@ -225,82 +225,50 @@ fn Color Color.dim(self, float amount)
 }
 
 <*
- A widget is behavior attached to an Element. All methods are optional.
+ Behaviour attached to an Element. Every method is optional.
 
- Sizing in particular is two tiers, and most widgets never write sizing code
- at all. A struct carrying a `Vec2 size` field and no `layout` is sized by the
- field: per axis, a set component is that many pixels and a zero component
- fills what the parent offers — the same convention the built-in containers
- use, so `{ 0, 40 }` inside a 400px Column is a 400×40 bar. Rectangle is the
- worked example. The field is read live on every layout, so mutating it and
- calling `request_layout` resizes the element. The detection happens in the
- node macros, where the concrete type is still visible; a widget handed to
- `Ui.mount` arrives type-erased, so give those a real `layout`. Everything the
- field cannot say — a size measured from content, or children to place —
- is `layout`. A widget with neither fills whatever it is offered.
+ A widget with a `Vec2 size` field and no `layout` is sized by the field: per
+ axis, pixels, or 0 to fill what the parent offers (see Rectangle). Only the node
+ macros see the field, so a widget given to `Ui.mount` needs a `layout`. With
+ neither, a widget fills whatever it is offered.
 
- The pointer shape is not a method either: `Element.set_cursor` can be called
- from any hook, and the natural one is `on_hover`, which most interactive
- widgets already implement to light themselves up. Button is the worked example.
-
- - `build` — compose this widget out of existing widgets: return a subtree made
- with `elem.ui.@node` — the framework attaches it as the element's single
- child on the flush after the element enters the tree (a build widget takes
- no @node children of its own; the built subtree IS its content). With
- `layout` omitted, the element sizes itself to the built subtree. After
- mutating fields, call `elem.request_build()` (or use `ui.@modify`) to
- regenerate the subtree. Must be pure: read own fields, produce nodes — state
- that must survive a rebuild lives on the composite, not inside the built
- subtree. See test/composite.c3 and build.md.
- - `mount` — the element entered the tree; runs once, just before its first
- layout, with the parent chain already wired. The home for element properties
- that never change: `elem.ignores_pointer`, `elem.clips` / `clip_radii`, and
- `set_cursor` for a widget that speaks for its whole subtree. A property
- computed from constraints or from mutable fields belongs in `layout`
- instead, which re-runs; this does not. Not a safe place to acquire anything
- that `unmount` must release: an element released before it was ever laid out
- — a subtree built and replaced in the same frame — gets the `unmount` without
- ever having got the `mount`. Allocate in `build` or on first use.
- - `layout` — given constraints, return own size; lay out children through
- `elem.layout_child` / `elem.place_child`. A content-sized leaf is one line:
- `return constraints.constrain(wanted);` — see Label. Omitted: a build widget
- delegates to its built subtree; otherwise the size field or the fill default
- decides, and children get loose constraints and keep their offsets. Reach
- for `Constraints.loose` / `tight` / `deflate` / `fill` rather than writing
- the ranges out by hand. Re-runs on every resize, which is what makes it the
- place for the element properties `mount` cannot answer for: a `media_box`
- sized from the constraints, a clip radius read from a mutable style.
- - `paint` — emit primitives in element-local coordinates. Omitted: the element
- draws nothing itself (pure container).
- - `on_mouse` — press/release/move/scroll, hit-tested and bubbling: the deepest
- element under the pointer gets it first; return true to consume. Consuming a
- PRESS captures the mouse until that button releases.
- - `on_hover` — pointer entered (true) / left (false) this element.
- - `on_key` — key press/release edges, delivered to the focused element (left
- click focuses; see `Element.request_focus`), bubbling like `on_mouse`.
- - `update` — called every frame with the frame's dt — for animations and
- polling `ui.input`; mutate state then `request_paint()`.
- - `unmount` — free whatever the widget allocated; called whenever its element
- leaves the tree, including when it leaves only to be rebuilt (which mounts
- the new one again). Fires unconditionally, so it is the wider of the pair:
- see the caveat on `mount`. The widget struct itself stays caller-owned.
- Takes the element like every other hook, so a widget can still reach
- `inherit` on the way out and release symmetrically with what it acquired.
-
- The built-in implementations (Rectangle, Column, Row, Stack, Padding, Clip,
- Scroll, Button) live in module `cui::widgets`; apps write their own against
- this interface.
+ The built-in widgets are in `cui::widgets`.
 *>
 interface Widget
 {
+	// Entered the tree; runs once, before the first layout. For properties that
+	// never change: `ignores_pointer`, `clips`, `set_cursor`. Not always paired
+	// with `unmount`, so allocate in `build` or on first use instead.
 	fn void mount(Element* elem) @optional;
+
+	// Composes the widget from others: returns one subtree made with
+	// `elem.ui.@node`, which becomes its only child. Keep it pure; state that
+	// must outlive `elem.request_build()` belongs on the widget. Its own @node
+	// children are `elem.slots`, placed with `widgets::borrow_content`.
 	fn Element* build(Element* elem) @optional;
+
+	// Returns the size taken within `constraints`, after sizing children with
+	// `elem.layout_child` and placing them with `elem.place_child`. Re-runs on
+	// every resize. Without it, a built widget takes its subtree's size.
 	fn Vec2 layout(Element* elem, Constraints constraints) @optional;
+
+	// Draws in element-local coordinates.
 	fn void paint(Element* elem, Painter* painter) @optional;
+
+	// To the deepest element under the pointer, then up through its parents
+	// until one returns true. Consuming a press captures the mouse until release.
 	fn bool on_mouse(Element* elem, MouseEvent event) @optional;
+
+	// The pointer entered or left; the usual place for `set_cursor`.
 	fn void on_hover(Element* elem, bool entered) @optional;
+
+	// Key edges, to the focused element and up through its parents.
 	fn bool on_key(Element* elem, KeyEvent event) @optional;
+
+	// Every frame, for animation and polling `ui.input`.
 	fn void update(Element* elem, float dt) @optional;
+
+	// Left the tree, a rebuild included. Frees what the widget allocated.
 	fn void unmount(Element* elem) @optional;
 }
 
@@ -370,6 +338,16 @@ struct Element
 	// must outlive the element (a literal is ideal).
 	Element* parent;
 	List{Element*} children;
+
+	// A composite's own @node children, set aside at its first build and kept
+	// across every rebuild after it: `build()` places them with
+	// `widgets::borrow_content`, and they are released with the composite.
+	// Always empty on any other widget, whose @node children stay in `children`.
+	List{Element*} slots;
+
+	// `build()` has run once, so `children` holds the built subtree rather than
+	// the @node children the composite was declared with.
+	bool built;
 
 	// Layout cache: size is valid for last_constraints.
 	Constraints last_constraints;
@@ -473,9 +451,9 @@ struct Element
 	// ITSELF still releases it, which is how the owner eventually gives it back.
 	// 
 	// The case it exists for is a widget whose content is handed in rather than
-	// built — `Dialog.content`, `AreaView.content`, and `widgets::borrow_content`
-	// which sets this. Every other element in the tree is owned by the tree, and
-	// leaving this false is what says so.
+	// built — `Dialog.content`, `AreaView.content`, a composite's `slots`, and
+	// `widgets::borrow_content` which sets this. Every other element in the tree
+	// is owned by the tree, and leaving this false is what says so.
 	bool borrowed;
 
 	DirtyFlags dirty;
@@ -1510,6 +1488,16 @@ fn void Ui.release(&self, Element* element)
 		}
 		self.release(child);
 	}
+
+	// A composite's slots are its own, borrowed only so a rebuild leaves them
+	// standing. Any placed in the subtree were cut loose just above.
+	foreach (slot : element.slots)
+	{
+		slot.borrowed = false;
+		self.release(slot);
+	}
+	element.slots.free();
+
 	if (&element.widget.unmount) element.widget.unmount(element);
 	if (element.owns_widget) mem::free(((any)element.widget).ptr);
 	if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
@@ -1593,6 +1581,7 @@ fn Element* Ui.alloc_element(&self)
 		// child list only shows up on the third rebuild, when the free list
 		// first has anything in it.
 		element.children.init(mem, 0);
+		element.slots.init(mem, 0);
 		element.local_drawings.init(mem, 0);
 		return element;
 	}
@@ -1600,6 +1589,7 @@ fn Element* Ui.alloc_element(&self)
 	// The heap by name, for `new_ui`'s reason: an element built inside a host's
 	// `@pool()` must not hold its children in memory the pool takes back.
 	element.children.init(mem, 0);
+	element.slots.init(mem, 0);
 	element.local_drawings.init(mem, 0);
 	self.all_elements.push(element);
 	return element;
@@ -1943,6 +1933,9 @@ fn void Ui.flush(&self)
  fields — state that must survive a rebuild belongs on the composite (or above),
  not on widgets inside the built subtree. See build.md.
 
+ The first build is the exception: the children then are the ones the composite
+ was declared with, and they are set aside as its `slots` instead of released.
+
  @param element : `The subtree root to build.`
 *>
 fn void Ui.build_element(&self, Element* element)
@@ -1950,7 +1943,20 @@ fn void Ui.build_element(&self, Element* element)
 	if (element.dirty.build)
 	{
 		element.dirty.build = false;
-		foreach (child : element.children) self.release(child);
+		if (element.built)
+		{
+			foreach (child : element.children) self.release(child);
+		}
+		else
+		{
+			element.built = true;
+			foreach (child : element.children)
+			{
+				child.parent = null;
+				child.borrowed = true;
+				element.slots.push(child);
+			}
+		}
 		element.children.clear();
 		Element* subtree;
 		self.@watching(element, WatchKind.BUILD)

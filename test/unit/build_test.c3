@@ -208,3 +208,51 @@ fn void request_paint_routes_only_for_paintless_build() @test
 	test::@check(!fill.dirty.build);
 	test::@check(fill.dirty.paint);
 }
+struct Slotted (Widget)
+{
+	int unused;
+}
+
+fn Element* Slotted.build(&self, Element* elem) @dynamic
+{
+	Element* row = elem.ui.@node((Row) { });
+	foreach (slot : elem.slots) row.append(widgets::borrow_content(elem.ui, slot));
+	return row;
+}
+
+<*
+ A composite's own @node children are set aside at its first build for `build`
+ to place, and every rebuild places the same elements again. They go when the
+ composite goes.
+*>
+fn void a_composite_keeps_its_children_as_slots() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	int unmounts;
+	MountRecord rec;
+	Element* probe   = ui.@node((MountProbe) { .pref = { 20, 10 }, .rec = &rec });
+	Element* gone    = ui.@node((UnmountProbe) { .count = &unmounts });
+	Element* slotted = ui.@node((Slotted) { }, probe, gone);
+	ui.build(ui.@node((Stack) { }, slotted));
+	ui.flush();
+
+	test::eq(slotted.slots.len(), 2);
+	Element* row = slotted.children[0];
+	test::eq(row.children.len(), 2);
+	test::@check(row.children[0] == probe && row.children[1] == gone, "the slots are not where build put them");
+	test::eq(rec.mounts, 1);
+
+	slotted.request_build();
+	ui.flush();
+	row = slotted.children[0];
+	test::@check(row.children[0] == probe && probe.parent == row, "a rebuild did not place the same slot again");
+	test::eq(rec.mounts, 1); // the same element, still mounted
+	test::eq(unmounts, 0);
+
+	// Released with the composite, once.
+	ui.build(ui.@node((Stack) { }));
+	ui.flush();
+	test::eq(unmounts, 1);
+}

@@ -464,3 +464,155 @@ fn void asking_again_with_its_own_message_is_safe() @test
 	test::eq(confirms, 0);
 	test::eq(declines, 0);
 }
+// ---------------------------------------------------------------------------
+// ChoiceDialog: the answers are its children, and each closes the panel itself.
+
+const String CHOICE_ID = "choice";
+
+// Wide enough that the question's 380px column fits beside the margins.
+const Vec2 CHOICE_WINDOW = { 600.0, 400.0 };
+
+int picks;
+int dismissals;
+
+fn void pick_and_withdraw(Ui* ui)
+{
+	picks++;
+	Element* elem = ui.find_id(CHOICE_ID)!!;
+	elem.widget_as(ChoiceDialog).withdraw(elem);
+}
+
+fn void note_dismissal(Ui* ui)
+{
+	dismissals++;
+}
+
+fn Ui* choice_ui()
+{
+	picks = 0;
+	dismissals = 0;
+
+	Ui* ui = cui::new_ui(CHOICE_WINDOW);
+	@canvas(ui)
+	{
+		Element* choice = @tree((ChoiceDialog) { .title = "Loop", .on_dismiss = &note_dismissal })
+		{
+			@node((Button) { .size = { 60, 24 } }).with_id("first");
+			@node((Button) { .size = { 80, 24 }, .on_click = &pick_and_withdraw }).with_id("second");
+		};
+		choice.with_id(CHOICE_ID);
+	};
+	ui.flush();
+	return ui;
+}
+
+fn Vec2 centre(Element* elem) => elem.absolute + elem.size * 0.5f;
+
+<*
+ The buttons it was declared with sit under the question, left to right, against
+ the panel's right edge. A press runs only the button's own `on_click`; the one
+ that withdraws closes the panel, and that is not a dismissal.
+*>
+fn void a_choice_shows_its_children_as_answers() @test
+{
+	Ui* ui = choice_ui();
+	defer ui.free();
+	Element* elem        = ui.find_id(CHOICE_ID)!!;
+	ChoiceDialog* choice = elem.widget_as(ChoiceDialog);
+	test::@error(ui.find_id("first"), cui::WIDGET_NOT_FOUND);
+
+	choice.ask(elem, "Whole take or one cycle?");
+	ui.flush();
+	test::eq(choice.asking(elem), true);
+
+	Element* first  = ui.find_id("first")!!;
+	Element* second = ui.find_id("second")!!;
+	Element* frame  = ui.find(DialogFrame)!!;
+	Element* line   = ui.find(Label)!!;
+	test::eq(line.widget_as(Label).text, "Whole take or one cycle?");
+	test::eq(second.absolute.x - (first.absolute.x + first.size.x), widgets::CHOICE_GAP);
+	test::eq(second.absolute.x + second.size.x, frame.absolute.x + frame.size.x - 14.0f);
+	test::@check(first.absolute.y >= line.absolute.y + line.size.y + widgets::CHOICE_GAP, "the buttons are not under the question");
+
+	// A button with nothing to do leaves the question up.
+	click(ui, centre(first));
+	test::eq(choice.asking(elem), true);
+
+	click(ui, centre(second));
+	test::eq(picks, 1);
+	test::eq(choice.asking(elem), false);
+	test::eq(dismissals, 0);
+	test::@error(ui.find_id("second"), cui::WIDGET_NOT_FOUND);
+}
+
+fn void escape_dismisses_a_choice() @test
+{
+	Ui* ui = choice_ui();
+	defer ui.free();
+	Element* elem        = ui.find_id(CHOICE_ID)!!;
+	ChoiceDialog* choice = elem.widget_as(ChoiceDialog);
+
+	choice.ask(elem, "Sure?");
+	ui.flush();
+	Key[1] escape = { Key.ESCAPE };
+	cui_tests::frame(ui, OUTSIDE, keys: escape[..]);
+	ui.flush();
+	test::eq(choice.asking(elem), false);
+	test::eq(dismissals, 1);
+
+	// Withdrawing is not dismissing.
+	choice.ask(elem, "Sure?");
+	ui.flush();
+	choice.withdraw(elem);
+	ui.flush();
+	test::eq(choice.asking(elem), false);
+	test::eq(dismissals, 1);
+	test::eq(picks, 0);
+}
+
+<*
+ The buttons are the panel's own, so closing it puts them aside rather than
+ releasing them: a rebuild while open and the next question both show the same
+ elements, with whatever was written into them.
+*>
+fn void a_choice_keeps_its_buttons_across_closing() @test
+{
+	Ui* ui = choice_ui();
+	defer ui.free();
+	Element* elem        = ui.find_id(CHOICE_ID)!!;
+	ChoiceDialog* choice = elem.widget_as(ChoiceDialog);
+
+	choice.ask(elem, "First?");
+	ui.flush();
+	Element* second = ui.find_id("second")!!;
+	second.widget_as(Button).label = "kept";
+
+	choice.ask(elem, "Second?");
+	ui.flush();
+	test::@check(ui.find_id("second")!! == second, "re-asking while open built a new button");
+
+	click(ui, centre(second));
+	test::eq(choice.asking(elem), false);
+
+	choice.ask(elem, "Third?");
+	ui.flush();
+	test::@check(ui.find_id("second")!! == second, "the next question built a new button");
+	test::eq(second.widget_as(Button).label, "kept");
+}
+
+<*
+ The two answers sit against the panel's right edge, where every button row in a
+ panel ends, not at the left of the question's column.
+*>
+fn void the_answers_sit_at_the_right_edge() @test
+{
+	Ui* ui = confirm_ui();
+	defer ui.free();
+	Element* elem = ui.find_id(CONFIRM_ID)!!;
+	elem.widget_as(ConfirmDialog).ask(elem, "Replace 17 dots?", &note_confirm);
+	ui.flush();
+
+	Element* frame   = ui.find(DialogFrame)!!;
+	Element* answers = ui.find(Row)!!.children[0];
+	test::eq(answers.absolute.x + answers.size.x, frame.absolute.x + frame.size.x - 14.0f);
+}

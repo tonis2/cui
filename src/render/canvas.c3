@@ -5,7 +5,7 @@ import std::math::matrix;
 
 <*
  SDF primitive kinds, dispatched in the fragment shader. The values are the GPU
- contract: they must match the KIND_* constants in shaders/shader.slang.
+ contract: they must match the KIND_* constants in shaders/shader.shady.
 *>
 constdef DrawingKind : inline uint
 {
@@ -33,7 +33,7 @@ const Texture NO_TEXTURE = (Texture)0;
 <*
  One GPU-side primitive, produced by Painter and consumed by the renderer.
 
- Field order and sizes must match `struct Drawing` in shaders/shader.slang (scalar
+ Field order and sizes must match `struct Drawing` in shaders/shader.shady (scalar
  layout): keep 4-byte fields in groups of four so the Vec2/Vec4 members land on
  the same offsets on both sides.
 *>
@@ -77,7 +77,7 @@ struct Drawing
  translate-and-scale a viewport uses and a bounding box under rotation.
 
  Read by the shader as five raw float4s per entry — no matrices, no structs (see
- the BDA note in shaders/shader.slang).
+ the palette note in shaders/shader.shady).
 *>
 struct ClipEntry
 {

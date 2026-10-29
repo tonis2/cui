@@ -11,7 +11,7 @@ import std::math;
 // exports. See "Embedding in a Vulkan engine" in README.md.
 
 <*
- Compiled SPIR-V of src/shaders/shader.slang, embedded so consumers create their
+ Compiled SPIR-V of src/shaders/shader.shady, embedded so consumers create their
  VkShaderModule straight from the library with no file management. One module,
  two entry points (`SHADER_VERTEX_ENTRY` and `SHADER_FRAGMENT_ENTRY`).
 *>
@@ -30,7 +30,7 @@ const ZString SHADER_FRAGMENT_ENTRY = "fragmentMain";
 <*
  Uniform block at descriptor set 0, binding 0 (scalar layout, 136 bytes).
 
- The cbuffer of the shader reads matrices as column-major bytes, which is how
+ The shader's uniform block reads matrices as column-major bytes, which is how
  Matrix4f already stores them, so both matrices are uploaded as-is. Build them
  with `std::math::matrix` (as `cui::camera` does) and no transpose is needed
  anywhere; a matrix filled row-major collapses clip w to 0.

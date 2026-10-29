@@ -182,7 +182,7 @@ fn CanvasPass? new_canvas_pass(
 	pass.texture_images.push(white_image);
 	pass.texture_sizes.push({ 1, 1 });
 
-	// Slang's cbuffer matrix layout reads column-major bytes, which is exactly
+	// The shader's uniform block reads matrices as column-major bytes, which is exactly
 	// how Matrix4f stores them, so the matrices go up as-is — no transpose
 	// anywhere. A matrix filled row-major collapses clip w to 0.
 	ShaderUniforms uniform_data = {

@@ -137,7 +137,7 @@ src/render/    what a frame turns into — canvas.c3 (the drawing list), text.c3
 src/widgets/   the built-ins — basic.c3, menu.c3, dialog.c3, area.c3, viewport.c3,
                context_menu.c3, node_graph.c3
 src/vulkan/    the reference backend
-src/shaders/   the Slang source and the compiled SPIR-V
+src/shaders/   the shady source and the compiled SPIR-V
 ```
 
 Nothing below `src/core` and `src/render` is required to use cui: an app can
@@ -147,7 +147,8 @@ draws a `Canvas` without `src/vulkan`.
 ## Working on cui itself
 
 window, image and font live in `lib/` as zipped snapshots (`lib/*.c3l`)
-**for building cui itself**, so a plain clone builds the examples. They are not
+**for building cui itself**, so a plain clone builds the examples. So does
+shady, which only the shader build uses. They are not
 part of the library: a release ships `manifest.json` and `src/` only, and
 `project.json` (which points at `lib/`) is left out of it. An app that uses cui
 brings its own copies of them, which is the version that counts. To move a
@@ -155,6 +156,7 @@ snapshot to a newer version, zip it from a checkout of that library:
 
 ```sh
 git -C path/to/Window.c3 archive --format=zip -o $PWD/lib/window.c3l HEAD
+git -C path/to/shady.c3 archive --format=zip -o $PWD/lib/shady.c3l HEAD
 ```
 
 `vk` is not in `lib/`, so download it exactly like a consumer does:
@@ -175,6 +177,8 @@ c3c run text       # text rendering
 c3c test unittest  # headless unit tests — no GPU or window needed
 ```
 
-Shaders are written in [Slang](https://shader-slang.org/). A prebuilt
-`shader.spv` is checked in; rebuild it with `c3c build shaders` only after
-editing `src/shaders/shader.slang`.
+The shader is written in [shady](https://github.com/tonis2/shady.c3), a
+C3-shaped shader language compiled in-process, so no external toolchain is
+needed. A prebuilt `shader.spv` is checked in; after editing
+`src/shaders/shader.shady`, rebuild it with `c3c run shaders`
+(`tools/compile_shaders.c3`) and commit both files.

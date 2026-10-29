@@ -402,7 +402,7 @@ fn void? DescriptorImageInfo.createDepthTexture(
 }
 
 // One pipeline stage; several stages may share the same spirv blob when it is
-// a single Slang module with multiple entry points.
+// a single shader module with multiple entry points.
 struct ShaderStageConfig
 {
 	char[] spirv;

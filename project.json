@@ -37,6 +37,10 @@
       "type": "executable",
       "sources": [ "src/**", "test/text.c3" ]
     },
+    "nodes": {
+      "type": "executable",
+      "sources": [ "src/**", "test/node_graph.c3" ]
+    },
     "unittest": {
       "type": "executable",
       "sources": [ "src/**" ]

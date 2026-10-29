@@ -13,7 +13,17 @@ instanced draw call**.
 - **Clipping and scrolling** — resolved per fragment in the shader, so rounded
   clips antialias and nested clips intersect without breaking the single draw.
 - **Input** — hit testing with bubbling, pointer capture for drags, keyboard
-  focus, hover, and cursor shapes.
+  focus, hover, cursor shapes, modifier flags and click counts on every mouse
+  event.
+- **Transforms** — `set_transform` and `set_content_transform` move a subtree
+  with one matrix write, and everything sees through them: hit tests, event
+  positions, clips and antialiasing. A text field inside a zoomed canvas is
+  typed into where it is drawn.
+- **Canvas building blocks** — `Painter.bezier`/`polyline` (dashed or solid),
+  `DragTracker` (click versus drag, Esc), `Selection` with replace/add/toggle,
+  `View2D` pan-and-zoom arithmetic, the `Viewport2D` widget, a searchable
+  `ContextMenu` at the pointer, and `NodeGraph` — a node editor whose cards hold
+  ordinary widgets. `c3c run nodes` is the worked example.
 - **Media** — `elem.media()` tells any widget how big the screen it is on is,
   where that screen sits and at what pixel density, so it can size itself
   against the display and not just against its parent. A split pane publishes
@@ -113,17 +123,19 @@ while (renderer.frame(ui)!!)
 | Module | What it is |
 | --- | --- |
 | `cui` | The core: element tree, the `Widget` interface, the `Canvas` output, and the GPU binding contract. No Vulkan or windowing dependency. |
-| `cui::widgets` | Built-ins: `Rectangle`, `Column`, `Row`, `Stack`, `Padding`, `Clip`, `Scroll`, `Button`. Apps use these or implement `Widget` themselves. |
+| `cui::widgets` | Built-ins: `Rectangle`, `Column`, `Row`, `Stack`, `Padding`, `Clip`, `Scroll`, `Button`, the form widgets, menus and dialogs, and the canvas widgets `Viewport2D`, `ContextMenu` and `NodeGraph` (with `NodeCard` and `PortRow`). Apps use these or implement `Widget` themselves. |
 | `cui::camera` | Projection/view helpers producing the matrices the shader expects. Pure math. |
 | `cui::vulkan` | Two things. `CanvasPass` draws a `Canvas` into a command buffer you supply — no window, no swapchain, no frame loop — and is what an engine with its own Vulkan device uses. `Renderer` is a standalone host built on it (window, swapchain, input, frame loop) and is what the examples use. See [docs/embedding.md](docs/embedding.md). |
 
 The source is grouped the same way, one directory per layer:
 
 ```
-src/core/      the element tree and the frame — ui.c3, input.c3, media.c3
+src/core/      the element tree and the frame — ui.c3, input.c3, media.c3,
+               transform.c3, path.c3 (beziers), gesture.c3 (drags, selection, views)
 src/render/    what a frame turns into — canvas.c3 (the drawing list), text.c3
                (fonts and the glyph atlas), camera.c3, shader.c3 (GPU contract)
-src/widgets/   the built-ins — basic.c3, menu.c3, dialog.c3, area.c3
+src/widgets/   the built-ins — basic.c3, menu.c3, dialog.c3, area.c3, viewport.c3,
+               context_menu.c3, node_graph.c3
 src/vulkan/    the reference backend
 src/shaders/   the Slang source and the compiled SPIR-V
 ```

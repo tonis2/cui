@@ -38,6 +38,7 @@ module cui;
 import std::io;
 import std::collections::list;
 import std::math;
+import std::math::matrix;
 
 <*
  Sentinel: element has no palette slot and inherits its ancestor's.
@@ -376,8 +377,9 @@ struct Element
 	Vec2 size;
 	Vec2 offset; // relative to parent; set by the parent's layout
 	// (or by the user under an absolute container)
-	Vec2 absolute; // origin in UI coordinates, stored by the last
-	// emit pass; hit testing reads it
+	Vec2 absolute; // origin in UI coordinates, pre-transform (before any
+	// set_transform above or on it), stored by the last emit pass; hit testing
+	// reads it, and Element.to_local / to_screen see through the transforms
 	// Preferred pointer shape while hovered; DEFAULT defers to the ancestors.
 	// Written through `set_cursor` — see it for when it is read and what a
 	// widget is expected to do about it.
@@ -440,7 +442,16 @@ struct Element
 	sz first_drawing; // slice of Canvas.drawings written by last emit
 	sz drawing_count;
 
+	// The element's own transform, in its own pixels about its top-left (see
+	// transform.c3); meaningful only while `transform_slot` is allocated, which
+	// `set_transform` does on its first call.
 	uint transform_slot;
+	Matrix4f transform;
+	// The transform moves the children only: the element's own drawings, its
+	// rect for hit testing and its clip stay where layout put them. What a
+	// viewport wants — its background and border fixed, its content panned
+	// and zoomed inside them. Set by `set_content_transform`.
+	bool transform_content;
 
 	// Clipping: when set (widgets set it from layout(), like ignores_pointer), emit
 	// clips this element's own drawings and its whole subtree to the element's
@@ -509,8 +520,15 @@ struct Ui
 	Element* hovered;
 	Element* captured; // consumer of an in-flight press, if any
 	MouseButton capture_button;
+	// The click in progress per button, for `MouseEvent.clicks`: how many
+	// presses so far, and when and where the last one landed.
+	char[3] click_count;
+	float[3] click_time;
+	Vec2[3] click_at;
 	Element* focused; // receiver of key events
 	List{Key} held_keys;
+	// Held keys whose press a widget consumed — see `Ui.key_taken`.
+	List{Key} taken_keys;
 
 	// Elements are recycled through a free-list so Element* stays stable for
 	// the lifetime of the Ui; all_elements exists only for final cleanup.
@@ -569,6 +587,7 @@ fn Ui* new_ui(Vec2 size)
 	// sets the allocator and allocates nothing, so the empty case still costs
 	// nothing.
 	ui.held_keys.init(mem, 0);
+	ui.taken_keys.init(mem, 0);
 	ui.free_elements.init(mem, 0);
 	ui.all_elements.init(mem, 0);
 	ui.free_transform_slots.init(mem, 0);
@@ -650,6 +669,7 @@ fn void Ui.free(&self)
 	self.free_transform_slots.free();
 	self.build_stack.free();
 	self.held_keys.free();
+	self.taken_keys.free();
 	self.context.free(); // the list; the values in it are the embedder's
 	self.canvas.free();
 	self.text.free();
@@ -1397,6 +1417,46 @@ fn void Element.append(&self, Element* child)
 }
 
 <*
+ Moves a child to another place in the paint order, without rebuilding or
+ re-laying-out anything: the children after it paint over it, and win its hit
+ tests. Every child keeps its state — this is how a node editor raises the card
+ that was pressed, without discarding the editors inside it.
+
+ @param from : `The child's current index.`
+ @param to : `Its new index; children.len() - 1 is the front.`
+ @require from >= 0 && from < self.children.len() && to >= 0 && to < self.children.len() : `Both indices must name a child.`
+*>
+fn void Element.move_child(&self, sz from, sz to)
+{
+	if (from == to) return;
+	Element* child = self.children[from];
+	self.children.remove_at(from);
+	self.children.insert_at(to, child);
+	// The order is read by the emit and by the hit test only; neither the
+	// child's drawings nor anybody's size changed.
+	self.ui.paint_pending = true;
+	self.ui.frame_requested = true;
+}
+
+<*
+ Moves this element to the front of its siblings: it paints over them and wins
+ their hit tests. See `move_child`. A no-op for the root.
+*>
+fn void Element.bring_to_front(&self)
+{
+	Element* parent = self.parent;
+	if (parent == null) return;
+	foreach (i, child : parent.children)
+	{
+		if (child == self)
+		{
+			parent.move_child((sz)i, parent.children.len() - 1);
+			return;
+		}
+	}
+}
+
+<*
  Allocates the element for a widget and wires the given children under it. The
  primitive behind every node macro.
 
@@ -1805,29 +1865,6 @@ fn void Element.request_focus(&self)
 }
 
 <*
- Animation path: writes one matrix into the palette. The first call allocates a
- slot (forcing one re-emit so the subtree picks up the slot id); every call after
- that costs a 64-byte write plus a palette upload, regardless of how many
- drawings sit under this element.
-
- @param transform : `The matrix applied to this element's subtree, in UI pixels.`
-*>
-fn void Element.set_transform(&self, Matrix4f transform)
-{
-	Ui* ui = self.ui;
-	if (self.transform_slot == NO_TRANSFORM)
-	{
-		self.transform_slot = ui.alloc_transform_slot();
-		ui.paint_pending = true;
-	}
-	// Stored as-is: the shader reads the palette as raw float4s matching
-	// Matrix4f's column-major storage (see shaders/shader.slang PushData).
-	ui.canvas.transforms[self.transform_slot] = transform;
-	ui.canvas.transforms_dirty = true;
-	ui.frame_requested = true;
-}
-
-<*
  A palette slot off the free-list, or a fresh identity one.
 
  @return `The slot index, for Element.transform_slot.`
@@ -2059,28 +2096,48 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 {
 	Vec2 absolute = origin + element.offset;
 	element.absolute = absolute; // hit testing reads this
-	uint slot = element.transform_slot != NO_TRANSFORM ? element.transform_slot : inherited_slot;
+	uint slot = inherited_slot;
+	if (element.transform_slot != NO_TRANSFORM)
+	{
+		// Recomposed on every emit: the matrix is anchored at `absolute`, which
+		// a layout may just have moved, and the ancestors' may have changed.
+		slot = element.transform_slot;
+		self.canvas.transforms[slot] = self.canvas.transforms[inherited_slot] * element.placed_transform();
+		self.canvas.transforms_dirty = true;
+	}
+	// The slot this element's own drawings and clip live in: its own, unless its
+	// transform is for the children only.
+	uint own_slot = element.transform_content ? inherited_slot : slot;
 
-	// A clipping element pushes its rect (intersected with the inherited clip)
-	// and the whole subtree stamps the new slot. An empty intersection
-	// degenerates to a zero-area rect: fully clipped.
+	// A clipping element pushes its rect and the whole subtree stamps the new
+	// entry. Clips in the same transform slot intersect directly; a clip from
+	// another slot — the viewport around a zoomed canvas — can only be
+	// compared on screen, so it travels in `outer`. See ClipEntry.
 	uint clip = inherited_clip;
 	if (element.clips)
 	{
 		Vec4 rect = { absolute.x, absolute.y, absolute.x + element.size.x, absolute.y + element.size.y };
+		Vec4 outer = NO_CLIP_RECT;
 		if (inherited_clip != 0)
 		{
-			Vec4 parent = self.canvas.clips[inherited_clip].rect;
-			rect = {
-				math::max(rect.x, parent.x),
-				math::max(rect.y, parent.y),
-				math::min(rect.z, parent.z),
-				math::min(rect.w, parent.w),
-			};
-			if (rect.z < rect.x) rect.z = rect.x;
-			if (rect.w < rect.y) rect.w = rect.y;
+			ClipEntry parent = self.canvas.clips[inherited_clip];
+			if (parent.slot == own_slot)
+			{
+				rect = intersect_box(rect, parent.rect);
+				outer = parent.outer;
+			}
+			else
+			{
+				outer = intersect_box(parent.outer, parent.screen);
+			}
 		}
-		self.canvas.clips.push({ .rect = rect, .radii = element.clip_radii });
+		self.canvas.clips.push({
+			.rect = rect,
+			.radii = element.clip_radii,
+			.screen = transform_box(self.canvas.transforms[own_slot], rect),
+			.outer = outer,
+			.slot = own_slot,
+		});
 		clip = (uint)self.canvas.clips.len() - 1;
 	}
 
@@ -2102,7 +2159,7 @@ fn void Ui.emit(&self, Element* element, Vec2 origin, uint inherited_slot, uint 
 	foreach (drawing : element.local_drawings)
 	{
 		drawing.corner += absolute;
-		drawing.transform_id = slot;
+		drawing.transform_id = own_slot;
 		drawing.clip_id = clip;
 		self.canvas.drawings.push(drawing);
 	}

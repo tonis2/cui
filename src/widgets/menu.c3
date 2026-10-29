@@ -849,7 +849,11 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 	{
 		@tree((Stack) { .size = { w, item_h } })
 		{
-			@node((SelectCatcher) { .host = elem }).set_offset({ -elem.absolute.x, -elem.absolute.y });
+			// Seen through any zoom above the Select — one on a node editor's
+			// card still covers the whole window.
+			Vec4 window = elem.window_box();
+			@node((SelectCatcher) { .host = elem, .size = { window.z - window.x, window.w - window.y } })
+				.set_offset({ window.x, window.y });
 			@node((SelectHead) { .text = current, .style = s, .width = w });
 			@tree(
 				(PopupPanel) {
@@ -1074,11 +1078,12 @@ fn bool SelectOption.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 struct SelectCatcher (Widget)
 {
 	Element* host; // the Select element
+	Vec2 size; // the window, in the Select's own pixels
 }
 
 fn Vec2 SelectCatcher.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	return elem.ui.size;
+	return self.size;
 }
 
 fn bool SelectCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
@@ -1113,7 +1118,7 @@ struct SelectSearch (Widget)
 }
 
 // The search field, dressed to sit inside the dropdown panel.
-fn TextFieldStyle select_search_style(MenuStyle s) @local
+fn TextFieldStyle select_search_style(MenuStyle s)
 {
 	return {
 		.background = { 0.12, 0.13, 0.17, 1.0 },
@@ -1263,7 +1268,7 @@ fn char ascii_lower(char c) @local => c >= 'A' && c <= 'Z' ? c + 32 : c;
  Whether `needle` appears in `haystack`, case-insensitively. A plain scan: the
  lists a Select filters are short, so nothing cleverer earns its keep.
 *>
-fn bool contains_fold(String haystack, String needle) @local
+fn bool contains_fold(String haystack, String needle)
 {
 	if (needle.len == 0) return true;
 	if (needle.len > haystack.len) return false;

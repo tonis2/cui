@@ -50,12 +50,50 @@ struct MouseEvent
 {
 	MouseEventKind kind;
 	MouseButton button; // which button, for PRESS/RELEASE
+	// Which modifiers were held when it happened — the same frame's
+	// `Input.keys_down`, so a click and the Shift pressed with it agree.
+	Modifiers mods;
+	// For PRESS and RELEASE: 1 for a single click, 2 for the second press of a
+	// double click, and so on — presses of the same button within
+	// `DOUBLE_CLICK_TIME` and `DOUBLE_CLICK_SLOP` of the one before. The
+	// RELEASE carries the count of the press it ends. 0 for MOVE and SCROLL.
+	char clicks;
 	Vec2 pos; // element-local position
 	Vec2 absolute; // position in UI coordinates
 	float scroll; // wheel delta, for SCROLL (positive = up)
 	float scroll_x; // horizontal wheel delta, for SCROLL (positive = right)
 	bool scroll_precise; // that scroll came from a trackpad, not a detented wheel
 }
+
+<*
+ The modifier keys held during an event, either side of the keyboard.
+*>
+struct Modifiers
+{
+	bool shift;
+	bool ctrl;
+	bool alt;
+	bool super;
+}
+
+<*
+ Whether no modifier is held.
+
+ @return `True when none of the four is down.`
+*>
+fn bool Modifiers.none(self) => !self.shift && !self.ctrl && !self.alt && !self.super;
+
+<*
+ How long after a press the next press of the same button counts as part of
+ the same click, in seconds.
+*>
+const float DOUBLE_CLICK_TIME = 0.4;
+
+<*
+ How far the pointer may travel between the presses of a double click, in UI
+ pixels.
+*>
+const float DOUBLE_CLICK_SLOP = 4.0;
 
 <*
  One key edge delivered to `Widget.on_key` — press and release only; hold state
@@ -252,6 +290,21 @@ fn bool Input.key_down(&self, Key key)
 }
 
 <*
+ The modifiers held right now.
+
+ @return `Shift, Ctrl, Alt and Super, either side.`
+*>
+fn Modifiers Input.modifiers(&self)
+{
+	return {
+		.shift = self.key_down(LEFT_SHIFT) || self.key_down(RIGHT_SHIFT),
+		.ctrl = self.key_down(LEFT_CTRL) || self.key_down(RIGHT_CTRL),
+		.alt = self.key_down(LEFT_ALT) || self.key_down(RIGHT_ALT),
+		.super = self.key_down(LEFT_SUPER) || self.key_down(RIGHT_SUPER),
+	};
+}
+
+<*
  Everything the embedder knows about input this frame, in UI coordinates
  (top-left origin, pixels). Fill one per frame and hand it to
  `Ui.process_input`; the reference renderer does this from c3w events.
@@ -332,6 +385,8 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 	// drags keep working when the pointer leaves the element.
 	Element* target = self.captured ? self.captured : hit;
 
+	Modifiers mods = input.modifiers();
+
 	// Either axis is a scroll. A horizontal-only swipe on a trackpad moves
 	// nothing vertically, and gating on `scroll` alone would drop it entirely.
 	if ((input.scroll != 0 || input.scroll_x != 0) && target)
@@ -340,6 +395,7 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 			target,
 			{
 				.kind = SCROLL,
+				.mods = mods,
 				.absolute = input.mouse,
 				.scroll = input.scroll,
 				.scroll_x = input.scroll_x,
@@ -353,10 +409,19 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 		MouseButton button = MouseButton::from_ordinal(b);
 		if (input.pressed[b])
 		{
+			// A press close enough in time and place to the last one of the same
+			// button continues its click; anything else starts a new one.
+			bool again = self.click_count[b] > 0
+				&& input.time - self.click_time[b] <= DOUBLE_CLICK_TIME
+				&& (input.mouse - self.click_at[b]).length() <= DOUBLE_CLICK_SLOP;
+			self.click_count[b] = again && self.click_count[b] < 255 ? self.click_count[b] + 1 : 1;
+			self.click_time[b] = input.time;
+			self.click_at[b] = input.mouse;
+
 			if (button == MouseButton.LEFT) self.update_focus(hit);
 			Element* consumer = self.dispatch_mouse(
 				target,
-				{ .kind = PRESS, .button = button, .absolute = input.mouse }
+				{ .kind = PRESS, .button = button, .mods = mods, .clicks = self.click_count[b], .absolute = input.mouse }
 			);
 			if (consumer && !self.captured)
 			{
@@ -366,25 +431,32 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 		}
 		if (input.released[b])
 		{
-			self.dispatch_mouse(target, { .kind = RELEASE, .button = button, .absolute = input.mouse });
+			self.dispatch_mouse(target, { .kind = RELEASE, .button = button, .mods = mods, .clicks = self.click_count[b], .absolute = input.mouse });
 			if (self.captured && button == self.capture_button) self.captured = null;
 		}
 	}
 
 	if ((input.mouse_delta.x != 0 || input.mouse_delta.y != 0) && target)
 	{
-		self.dispatch_mouse(target, { .kind = MOVE, .absolute = input.mouse });
+		self.dispatch_mouse(target, { .kind = MOVE, .mods = mods, .absolute = input.mouse });
 	}
 
 	// Key edges: diff the held-key set against last frame, deliver to the
 	// focused element (bubbling up from it).
 	foreach (key : frame.keys_down)
 	{
-		if (!key_in(self.held_keys.array_view(), key)) self.dispatch_key({ .key = key, .down = true });
+		if (key_in(self.held_keys.array_view(), key)) continue;
+		if (self.dispatch_key({ .key = key, .down = true })) self.taken_keys.push(key);
 	}
 	foreach (key : self.held_keys)
 	{
 		if (!key_in(frame.keys_down, key)) self.dispatch_key({ .key = key, .down = false });
+	}
+	// A taken key stays taken until it is let go: the release, and every frame
+	// it is held in between, belong to whoever took the press.
+	for (sz i = self.taken_keys.len() - 1; i >= 0; i--)
+	{
+		if (!key_in(frame.keys_down, self.taken_keys[i])) self.taken_keys.remove_at(i);
 	}
 	self.held_keys.clear();
 	foreach (key : frame.keys_down) self.held_keys.push(key);
@@ -416,7 +488,8 @@ fn void Ui.process_input(&self, InputFrame frame, float dt)
 
 <*
  Bubbles the event from `element` toward the root; each widget gets the position
- translated into its own local space.
+ translated into its own local space, seen through any transform above it
+ (`Element.to_local`).
 
  @param element : `The deepest element the event is aimed at — usually the hit-test result.`
  @param event : `The event, with its absolute position set; the element-local pos is filled in per widget.`
@@ -428,7 +501,7 @@ fn Element* Ui.dispatch_mouse(&self, Element* element, MouseEvent event)
 	{
 		if (&e.widget.on_mouse)
 		{
-			event.pos = event.absolute - e.absolute;
+			event.pos = e.to_local(event.absolute);
 			if (e.widget.on_mouse(e, event)) return e;
 		}
 	}
@@ -440,27 +513,42 @@ fn Element* Ui.dispatch_mouse(&self, Element* element, MouseEvent event)
  widget consumes it. A no-op when nothing is focused.
 
  @param event : `The key edge to deliver.`
+ @return `True when a widget consumed it.`
 *>
-fn void Ui.dispatch_key(&self, KeyEvent event)
+fn bool Ui.dispatch_key(&self, KeyEvent event)
 {
 	for (Element* e = self.focused; e != null; e = e.parent)
 	{
 		if (&e.widget.on_key)
 		{
-			if (e.widget.on_key(e, event)) return;
+			if (e.widget.on_key(e, event)) return true;
 		}
 	}
+	return false;
 }
+
+<*
+ Whether a held key is the interface's: its press was consumed by a widget, so
+ an embedder that also routes keys elsewhere — game controls, app shortcuts —
+ should leave it alone until it is released. A key no widget took is free, even
+ while a widget has the focus: a node editor that does nothing with Ctrl+S
+ leaves Ctrl+S to the application around it.
+
+ @param key : `The key.`
+ @return `True while the key is held and a widget took its press.`
+*>
+fn bool Ui.key_taken(&self, Key key) => key_in(self.taken_keys.array_view(), key);
 
 <*
  The deepest element whose rect contains the point, searched in reverse paint
  order so the visually-topmost one wins — skipping any element that set
  `ignores_pointer` from its layout.
 
- Uses the absolute origins stored by the last emit. Two documented
- simplifications: transform-palette matrices (`set_transform`) are NOT applied to
- hit tests, and a clipping element gates by its rect only — a point in a
- clipped-away rounded corner still hits.
+ Uses the absolute origins stored by the last emit, and sees through
+ `set_transform`: the point is mapped back through each element's transform on
+ the way down, so a widget inside a zoomed canvas is hit where it is drawn (2D
+ affine only — see transform.c3). A clipping element gates by its rect only — a
+ point in a clipped-away rounded corner still hits.
 
  @param point : `The position in UI coordinates.`
  @return `The element under the point, or null.`
@@ -475,12 +563,23 @@ fn Element* Ui.hit_test(&self, Vec2 point)
  Hit-tests one subtree — the recursive half of `hit_test`.
 
  @param element : `The subtree root to test.`
- @param point : `The position in UI coordinates.`
+ @param point : `The position in the parent's layout space — UI coordinates at the root.`
  @return `The deepest element in this subtree under the point, or null.`
 *>
 fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 {
+	if (element.transform_slot != NO_TRANSFORM && !element.transform_content)
+	{
+		point = untransform_point(element.placed_transform(), point);
+	}
 	Vec2 local = point - element.absolute;
+	// The children of a content transform are tested in its transformed space;
+	// the element's own rect and clip stay in the space it was laid out in.
+	Vec2 inner = point;
+	if (element.transform_slot != NO_TRANSFORM && element.transform_content)
+	{
+		inner = untransform_point(element.placed_transform(), point);
+	}
 	if (element.clips)
 	{
 		// Outside the clip nothing is visible, so nothing is hittable — not
@@ -498,13 +597,13 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 	foreach_r (child : element.children)
 	{
 		if (!child.raise_path) continue;
-		Element* hit = self.hit_test_element(child, point);
+		Element* hit = self.hit_test_element(child, inner);
 		if (hit) return hit;
 	}
 	foreach_r (child : element.children)
 	{
 		if (child.raise_path) continue;
-		Element* hit = self.hit_test_element(child, point);
+		Element* hit = self.hit_test_element(child, inner);
 		if (hit) return hit;
 	}
 

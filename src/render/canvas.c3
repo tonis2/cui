@@ -63,23 +63,45 @@ struct Drawing
 }
 
 <*
- One clip region, in absolute PRE-transform UI pixels: the fragment shader
- compares the UI-space position a drawing was emitted at, so a clip travels with
- any palette transform applied on top (Flutter-consistent) instead of staying
- screen-fixed. Read by the shader as two raw float4s per entry — no matrices, no
- structs (see the BDA note in shaders/shader.slang).
+ One clip region. `rect` is in the absolute PRE-transform UI pixels of the
+ clipping element, so a drawing stamped with the same transform slot (`slot`) —
+ the clipping element's own drawings and every descendant that does not add a
+ transform of its own — is compared exactly, and the clip travels with the
+ transform (a rotated card clips its image to the rotated card).
+
+ A drawing under a DIFFERENT slot — content panned and zoomed inside a clipping
+ viewport — cannot be compared in that space, so it is compared on screen
+ instead: against `screen`, the box `rect` covers after its slot's transform,
+ and always against `outer`, the on-screen intersection of every enclosing clip
+ that lives in another slot. Both are axis-aligned boxes, exact for the
+ translate-and-scale a viewport uses and a bounding box under rotation.
+
+ Read by the shader as five raw float4s per entry — no matrices, no structs (see
+ the BDA note in shaders/shader.slang).
 *>
 struct ClipEntry
 {
-	Vec4 rect; // {min.x, min.y, max.x, max.y}
+	Vec4 rect; // {min.x, min.y, max.x, max.y}, pre-transform, in `slot`'s space
 	Vec4 radii; // per-corner px {TL, TR, BR, BL}
+	Vec4 screen; // `rect` after `slot`'s transform, on screen
+	Vec4 outer; // enclosing clips from other slots, on screen
+	uint slot; // the transform slot `rect` is expressed in
+	uint reserved0; // pad to a full float4 (see the layout rule on Drawing)
+	uint reserved1;
+	uint reserved2;
 }
+
+<*
+ The box that never clips anything: what `outer` holds when no enclosing clip
+ lives in another slot.
+*>
+const Vec4 NO_CLIP_RECT = { -1e9, -1e9, 1e9, 1e9 };
 
 <*
  Slot 0 = "no clip". The shader early-outs on `clip_id == 0`; the huge rect is
  belt and braces.
 *>
-const ClipEntry NO_CLIP_ENTRY = { .rect = { -1e9, -1e9, 1e9, 1e9 }, .radii = { } };
+const ClipEntry NO_CLIP_ENTRY = { .rect = NO_CLIP_RECT, .radii = { }, .screen = NO_CLIP_RECT, .outer = NO_CLIP_RECT };
 
 <*
  Everything the renderer consumes per frame: the retained display list, the

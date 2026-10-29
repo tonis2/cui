@@ -48,7 +48,7 @@ struct PushData
 {
     Drawing* drawings;
     float4* transforms;
-    float4* clips;          // 2 float4s per entry: {min.xy, max.xy}, then radii
+    float4* clips;          // 5 float4s per entry, see cui::ClipEntry
 };
 [vk_push_constant] const PushData push_constant;
 
@@ -76,6 +76,7 @@ static const float2 QUAD[6] = {
 struct VertexOutput
 {
     float2 tex_pos;
+    float2 screen_pos;      // UI pixels after the transform: what clips from other slots compare
     int draw_id;
     float4 sv_position : SV_Position;
 };
@@ -86,9 +87,9 @@ VertexOutput vertexMain(uint vid : SV_VertexID, uint iid : SV_InstanceID)
     Drawing item = push_constant.drawings[iid];
     float2 vertex = QUAD[vid];
 
-    float2 corner = item.corner / resolution;
-    float2 size = item.size / resolution;
-    float2 vertex_pos = vertex * size + corner;
+    // Transforms are in UI pixels (see cui transform.c3), so the palette
+    // matrix is applied before the position is normalized to the resolution.
+    float2 vertex_px = vertex * item.size + item.corner;
 
     uint base = item.transform_id * 4;
     float4x4 model = float4x4(
@@ -96,17 +97,43 @@ VertexOutput vertexMain(uint vid : SV_VertexID, uint iid : SV_InstanceID)
         push_constant.transforms[base + 1],
         push_constant.transforms[base + 2],
         push_constant.transforms[base + 3]);
-    float4 world = mul(float4(vertex_pos, 0.0, 1.0), model);
+    float4 world_px = mul(float4(vertex_px, 0.0, 1.0), model);
+    // z keeps the scale it had when the palette worked in normalized units, so
+    // a card rotated out of the plane foreshortens as it always did.
+    float4 world = float4(world_px.xy / resolution, world_px.z / resolution.x, world_px.w);
 
     VertexOutput output;
     output.tex_pos = vertex;
+    output.screen_pos = world_px.xy / world_px.w;
     output.draw_id = int(iid);
     output.sv_position = mul(projection, mul(view, world)) + float4(-1.0, -1.0, 0.0, 0.0);
     return output;
 }
 
 // All SDFs work in quad-centered pixel coordinates, so distances, widths and
-// radii are pixels and antialiasing is a fixed 1px band.
+// radii are pixels. The antialiasing band is one SCREEN pixel: `aa` below is
+// half a screen pixel measured in those coordinates, which is 0.5 untransformed
+// and shrinks or grows with a zoom, so edges stay crisp at any scale.
+
+// Half a screen pixel in the drawing's own pixels, from how fast its
+// coordinates change across the screen (the square root of the Jacobian's
+// determinant: exact for any scale and rotation).
+float half_pixel(float2 p)
+{
+    float2 dx = ddx(p);
+    float2 dy = ddy(p);
+    float area = abs(dx.x * dy.y - dx.y * dy.x);
+    return 0.5 * max(sqrt(area), 1e-4);
+}
+
+// Coverage of an axis-aligned screen box at a screen position, half a screen
+// pixel of AA either side of the edge.
+float box_factor(float4 box, float2 screen_pos)
+{
+    float2 d2 = max(box.xy - screen_pos, screen_pos - box.zw);
+    float d = max(d2.x, d2.y);
+    return 1.0 - smoothstep(-0.5, 0.5, d);
+}
 
 // Rounded box; radius = per-corner px {top-left, top-right, bottom-right,
 // bottom-left} (y points down), clamped to what the box can fit.
@@ -119,20 +146,37 @@ float sd_round_box(float2 p, float2 half_size, float4 radius)
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
-// Clip factor for a fragment: 1 = keep, 0 = clipped, with the same 1px AA
-// band as the shape edges. The position is reconstructed in PRE-transform UI
-// space (corner is absolute after emit), so clips move with palette
-// transforms rather than staying screen-fixed.
-float clip_factor(Drawing item, float2 tex_pos)
+// Clip factor for a fragment: 1 = keep, 0 = clipped, with the same one
+// screen-pixel AA band as the shape edges. A drawing in the clip's own
+// transform slot is compared in PRE-transform UI space (corner is absolute
+// after emit), exactly and with the rounded corners, so a clip moves with its
+// transform. A drawing under another transform — content zoomed inside a
+// clipping viewport — is compared on screen against the clip's screen box.
+// Either way the enclosing clips from other slots (`outer`) apply on screen.
+float clip_factor(Drawing item, float2 tex_pos, float2 screen_pos, float aa)
 {
     if (item.clip_id == 0) return 1.0;
-    float4 rect  = push_constant.clips[item.clip_id * 2 + 0];
-    float4 radii = push_constant.clips[item.clip_id * 2 + 1];
-    float2 frag_ui   = item.corner + tex_pos * item.size;
-    float2 center    = (rect.xy + rect.zw) * 0.5;
-    float2 half_size = max((rect.zw - rect.xy) * 0.5, float2(0.0));
-    float d = sd_round_box(frag_ui - center, half_size, radii);
-    return 1.0 - smoothstep(-0.5, 0.5, d);
+    uint at = item.clip_id * 5;
+    float4 rect   = push_constant.clips[at + 0];
+    float4 radii  = push_constant.clips[at + 1];
+    float4 screen = push_constant.clips[at + 2];
+    float4 outer  = push_constant.clips[at + 3];
+    uint slot     = asuint(push_constant.clips[at + 4].x);
+
+    float keep;
+    if (slot == item.transform_id)
+    {
+        float2 frag_ui   = item.corner + tex_pos * item.size;
+        float2 center    = (rect.xy + rect.zw) * 0.5;
+        float2 half_size = max((rect.zw - rect.xy) * 0.5, float2(0.0));
+        float d = sd_round_box(frag_ui - center, half_size, radii);
+        keep = 1.0 - smoothstep(-aa, aa, d);
+    }
+    else
+    {
+        keep = box_factor(screen, screen_pos);
+    }
+    return keep * box_factor(outer, screen_pos);
 }
 
 // Gradient-normalized ellipse approximation (exact for circles).
@@ -173,6 +217,8 @@ float4 fragmentMain(VertexOutput input) : SV_Target
 
     float2 p = (input.tex_pos - 0.5) * item.size;   // quad-centered pixels
     float2 half_size = item.size * 0.5;
+    // Measured before the switch: derivatives need every fragment of the quad.
+    float aa = half_pixel(p);
 
     float dist;
     float border = 0.0;         // border band width; 0 = no border shading
@@ -199,7 +245,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         float blur = max(item.border_width, 0.5);
         float4 shadow = item.color;
         shadow.a *= 1.0 - smoothstep(-blur, blur, sd_round_box(p, half_size - blur, item.params));
-        shadow.a *= clip_factor(item, input.tex_pos);
+        shadow.a *= clip_factor(item, input.tex_pos, input.screen_pos, aa);
         return shadow;
     }
     case KIND_GLYPH:
@@ -207,14 +253,14 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         // params = SDF atlas UV rect; the sampled value maps distance with
         // 0.5 at the glyph edge, higher inside. fwidth-derived band width
         // keeps the edge ~1 screen px under any quad size or transform
-        // (the fixed 1px band below assumes untransformed pixel space).
+        // (the same thing `half_pixel` measures for the other shapes).
         if (item.tex_id <= 0) return float4(0.0);
         float2 uv = item.params.xy + input.tex_pos * (item.params.zw - item.params.xy);
         float sd = textures[item.tex_id - 1].Sample(uv).r;
         float band = max(fwidth(sd), 1e-4);
         float4 text = item.color;
         text.a *= smoothstep(0.5 - band, 0.5 + band, sd);
-        text.a *= clip_factor(item, input.tex_pos);
+        text.a *= clip_factor(item, input.tex_pos, input.screen_pos, aa);
         return text;
     }
     default: // KIND_RECT
@@ -224,13 +270,13 @@ float4 fragmentMain(VertexOutput input) : SV_Target
         break;
     }
 
-    // Border drawn inside the shape edge; both edges get the 1px AA band.
+    // Border drawn inside the shape edge; both edges get the AA band.
     float4 color = fill;
     if (border > 0.0)
     {
-        color = lerp(fill, item.border_color, smoothstep(-border - 0.5, -border + 0.5, dist));
+        color = lerp(fill, item.border_color, smoothstep(-border - aa, -border + aa, dist));
     }
-    color.a *= 1.0 - smoothstep(-0.5, 0.5, dist);
-    color.a *= clip_factor(item, input.tex_pos);
+    color.a *= 1.0 - smoothstep(-aa, aa, dist);
+    color.a *= clip_factor(item, input.tex_pos, input.screen_pos, aa);
     return color;
 }

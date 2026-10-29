@@ -13,7 +13,7 @@ import std::core::test;
 fn void gpu_struct_contract() @test
 {
 	test::eq(Drawing::size, 96);
-	test::eq(ClipEntry::size, 32);
+	test::eq(ClipEntry::size, 80);
 }
 
 macro void eq_vec4(Vec4 got, Vec4 want)

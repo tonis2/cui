@@ -15,12 +15,12 @@ macro void eq_vec2(Vec2 got, Vec2 want)
 }
 
 // Feed one input frame the way an embedder would.
-fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = { }, bool right = false)
+fn void frame(Ui* ui, Vec2 mouse, bool left = false, float scroll = 0, Key[] keys = { }, bool right = false, bool middle = false)
 {
 	ui.process_input(
 		{
 			.mouse = mouse,
-			.buttons = { left, right, false },
+			.buttons = { left, right, middle },
 			.scroll = scroll,
 			.keys_down = keys,
 		},
@@ -67,6 +67,8 @@ struct EventRecord
 	int key_ups;
 	int updates;
 	Vec2 last_pos;
+	char last_clicks;
+	Modifiers last_mods;
 	float last_scroll;
 	Key last_key;
 
@@ -109,6 +111,8 @@ fn bool EventProbe.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			self.rec.last_scroll = event.scroll;
 	}
 	self.rec.last_pos = event.pos;
+	if (event.kind == PRESS || event.kind == RELEASE) self.rec.last_clicks = event.clicks;
+	self.rec.last_mods = event.mods;
 	return self.rec.consume_mouse;
 }
 

@@ -361,3 +361,28 @@ fn void update_ticks_every_frame() @test
 	cui_tests::frame(ui, { 200, 80 });
 	test::eq(rec.updates, 3); // ticks regardless of hover/hit
 }
+// A key a focused widget consumes is taken until it is let go; one it declines
+// stays free for the embedder.
+fn void consumed_keys_are_taken_until_released() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	EventRecord rec;
+	rec.consume_key = true;
+	ui.build(ui.@node((EventProbe) { .pref = { 100, 50 }, .rec = &rec }));
+	ui.flush();
+	cui_tests::frame(ui, { 10, 10 }, left: true); // focus it
+	cui_tests::frame(ui, { 10, 10 });
+
+	cui_tests::frame(ui, { 10, 10 }, keys: { Key.A });
+	test::eq(ui.key_taken(Key.A), true);
+	cui_tests::frame(ui, { 10, 10 }, keys: { Key.A });
+	test::eq(ui.key_taken(Key.A), true);
+	cui_tests::frame(ui, { 10, 10 });
+	test::eq(ui.key_taken(Key.A), false);
+
+	rec.consume_key = false;
+	cui_tests::frame(ui, { 10, 10 }, keys: { Key.S });
+	test::eq(ui.key_taken(Key.S), false);
+}

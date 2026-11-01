@@ -12,7 +12,7 @@ import cui_tests;
 import std::math;
 import std::core::test;
 
-// What `on_change` reported — a bare OnSelect carries no context, so it lands
+// What `on_change` reported — a bare OnIndex carries no context, so it lands
 // here.
 usz chosen_index @local;
 int chosen_count @local;
@@ -31,7 +31,7 @@ fn Element* open_select(
 	bool searchable = false,
 	usz selected = 0,
 	float width = 160,
-	OnSelect on_change = null
+	OnIndex on_change = null
 ) @local
 {
 	Element* elem = ui.@node(
@@ -131,7 +131,7 @@ fn void a_plain_list_has_no_search_and_shows_all() @test
 
 	test::eq(option_count(ui), 3);
 	int searches = 0;
-	ui.@each(SelectSearch ; e)
+	ui.@each(MenuSearch ; e)
 	{
 		searches++;
 	};

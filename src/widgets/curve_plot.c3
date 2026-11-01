@@ -118,9 +118,8 @@ fn CurvePlotStyle CurvePlotStyle.resolved(self)
 
 alias OnCurvePoint = fn void(Ui* ui, usz index, bool toggle);
 alias OnCurveDrag = fn void(Ui* ui, usz index, Vec2 to, bool done);
-alias OnCurveScrub = fn void(Ui* ui, float x);
 // A box released over `indices` (point indices, tmem), to apply as `mode`.
-alias OnCurveBox = fn void(Ui* ui, usz[] indices, CurveBox mode);
+alias OnCurveBox = fn void(Ui* ui, usz[] indices, SelectMode mode);
 // A scale of the selection about `pivot` along `axis`, the point `index` pressed; `done` on release.
 alias OnCurveScale = fn void(Ui* ui, usz index, CurveLock axis, float factor, float pivot, bool done);
 alias OnCurveView = fn void(Ui* ui, float zoom, float start);
@@ -134,14 +133,6 @@ enum CurveLock : char
 	NONE,
 	X,
 	Y,
-}
-
-// How a box selection combines with the points already selected.
-enum CurveBox : char
-{
-	REPLACE,
-	ADD, // Shift
-	TOGGLE, // Ctrl
 }
 
 struct CurvePlot (Widget)
@@ -169,7 +160,7 @@ struct CurvePlot (Widget)
 	OnCurveDrag on_handle_drag;
 	OnCurveBox on_box;
 	OnCurveScale on_scale;
-	OnCurveScrub on_scrub; // a press or drag off every point
+	OnSlide on_scrub; // a press or drag off every point
 	OnCurveView on_view;
 	OnCurveContext on_context;
 	OnClick on_delete;
@@ -552,8 +543,9 @@ fn void CurvePlot.paint(&self, Element* elem, Painter* painter) @dynamic
 	}
 	if (self.boxing && self.dragged)
 	{
-		Vec2 low  = { math::min(self.press.x, self.box_to.x), math::min(self.press.y, self.box_to.y) };
-		Vec2 high = { math::max(self.press.x, self.box_to.x), math::max(self.press.y, self.box_to.y) };
+		Vec4 box = cui::box_between(self.press, self.box_to);
+		Vec2 low = box.xy;
+		Vec2 high = box.zw;
 		Color fill = s.selected;
 		fill.a = 0.15f;
 		painter.rect(low, high - low, { .color = fill, .border_color = s.selected, .border_width = 1.0f });
@@ -573,7 +565,6 @@ fn void CurvePlot.on_hover(&self, Element* elem, bool entered) @dynamic
 	elem.request_paint();
 }
 
-fn bool modifier_down(Ui* ui, Key left, Key right) @local => ui.input.key_down(left) || ui.input.key_down(right);
 
 // Where a held point would land for the pointer at `pos`, locked to one axis.
 fn Vec2 CurvePlot.point_target(&self, Element* elem, Vec2 pos)
@@ -660,14 +651,14 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case SCROLL:
 			if (self.held != 0 || self.held_handle != 0 || self.scrubbing || self.panning) return false;
 			float delta = event.scroll_x != 0 ? event.scroll_x : event.scroll;
-			if (modifier_down(elem.ui, Key.LEFT_SHIFT, Key.RIGHT_SHIFT))
+			if (elem.ui.input.modifiers().shift)
 			{
 				float zoom = self.y_zoom > 0 ? self.y_zoom : 1.0f;
 				self.y_zoom = math::clamp(zoom * (delta > 0 ? 1.25f : 0.8f), 0.05f, 1000.0f);
 				elem.request_paint();
 				return true;
 			}
-			if (modifier_down(elem.ui, Key.LEFT_CTRL, Key.RIGHT_CTRL))
+			if (elem.ui.input.modifiers().ctrl)
 			{
 				Vec4 r         = self.plot_rect(elem);
 				float fraction = math::clamp((event.pos.x - r.x) / r.z, 0.0f, 1.0f);
@@ -724,11 +715,11 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 				elem.request_paint();
 				// Alt on a selected point scales the selection, whose selection stays as it is.
 				self.scaling = self.on_scale && self.points[(usz)(hit - 1)].selected
-					&& modifier_down(elem.ui, Key.LEFT_ALT, Key.RIGHT_ALT);
+					&& elem.ui.input.modifiers().alt;
 				if (self.scaling) return true;
 				if (self.on_point)
 				{
-					self.on_point(elem.ui, (usz)(hit - 1), modifier_down(elem.ui, Key.LEFT_SHIFT, Key.RIGHT_SHIFT));
+					self.on_point(elem.ui, (usz)(hit - 1), elem.ui.input.modifiers().shift);
 				}
 				return true;
 			}
@@ -768,7 +759,7 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			}
 			if (self.held_handle != 0)
 			{
-				if (!self.dragged && (event.pos - self.press).length() < 3.0f) return true;
+				if (!self.dragged && (event.pos - self.press).length() < cui::DRAG_SLOP) return true;
 				self.dragged = true;
 				self.drag_to = self.data_of(elem, event.pos);
 				elem.request_paint();
@@ -777,7 +768,7 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			}
 			if (self.boxing)
 			{
-				if (!self.dragged && (event.pos - self.press).length() < 3.0f) return true;
+				if (!self.dragged && (event.pos - self.press).length() < cui::DRAG_SLOP) return true;
 				self.dragged = true;
 				self.box_to = event.pos;
 				elem.request_paint();
@@ -788,7 +779,7 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 				Vec2 moved = event.pos - self.press;
 				if (!self.dragged)
 				{
-					if (moved.length() < 3.0f) return true;
+					if (moved.length() < cui::DRAG_SLOP) return true;
 					self.dragged = true;
 					self.lock = math::abs(moved.x) >= math::abs(moved.y) ? X : Y;
 					if (self.scaling) self.begin_scale();
@@ -890,7 +881,7 @@ fn bool CurvePlot.on_key(&self, Element* elem, KeyEvent event) @dynamic
 		return true;
 	}
 	if (self.held != 0 || self.held_handle != 0 || self.scrubbing || self.boxing) return false;
-	bool ctrl = modifier_down(elem.ui, Key.LEFT_CTRL, Key.RIGHT_CTRL);
+	bool ctrl = elem.ui.input.modifiers().ctrl;
 	if (ctrl)
 	{
 		if (event.key == Key.C && self.on_copy) { self.on_copy(elem.ui); return true; }
@@ -919,8 +910,9 @@ fn bool CurvePlot.on_key(&self, Element* elem, KeyEvent event) @dynamic
 // Report the points inside the box ending at `pos`, as the modifiers say to apply them.
 fn void CurvePlot.finish_box(&self, Element* elem, Vec2 pos)
 {
-	Vec2 low  = { math::min(self.press.x, pos.x), math::min(self.press.y, pos.y) };
-	Vec2 high = { math::max(self.press.x, pos.x), math::max(self.press.y, pos.y) };
+	Vec4 box = cui::box_between(self.press, pos);
+	Vec2 low = box.xy;
+	Vec2 high = box.zw;
 	usz[] inside = alloc::new_array(tmem, usz, self.points.len);
 	usz count;
 	foreach (usz i, p : self.points)
@@ -929,10 +921,7 @@ fn void CurvePlot.finish_box(&self, Element* elem, Vec2 pos)
 		Vec2 at = self.pixel_of(elem, p.at);
 		if (at.x >= low.x && at.x <= high.x && at.y >= low.y && at.y <= high.y) inside[count++] = i;
 	}
-	bool ctrl  = modifier_down(elem.ui, Key.LEFT_CTRL, Key.RIGHT_CTRL);
-	bool shift = modifier_down(elem.ui, Key.LEFT_SHIFT, Key.RIGHT_SHIFT);
-	CurveBox mode = ctrl ? TOGGLE : (shift ? ADD : REPLACE);
-	self.on_box(elem.ui, inside[:count], mode);
+	self.on_box(elem.ui, inside[:count], cui::select_mode(elem.ui.input.modifiers()));
 }
 
 // The cursor to the x under a pixel, reported unless it is already there.

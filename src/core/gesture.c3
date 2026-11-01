@@ -5,7 +5,7 @@
  pannable, zoomable view of a plane.
 
  Plain values with no element of their own, so a widget embeds them as fields
- and drives them from `on_mouse`/`on_key`. `Viewport2D` and `NodeGraph` are
+ and drives them from `on_mouse`/`on_key`. `NodeGraph` is
  built on them; an app's own canvas can be too.
 *>
 module cui;
@@ -262,7 +262,7 @@ fn bool boxes_overlap(Vec4 a, Vec4 b) => a.x < b.z && b.x < a.z && a.y < b.w && 
 <*
  A pannable, zoomable view of a plane: which point of the plane sits at the
  view's top-left (`pan`, in plane units) and how many screen pixels one plane
- unit spans (`zoom`). The arithmetic behind `Viewport2D` and `NodeGraph`.
+ unit spans (`zoom`). The arithmetic behind `NodeGraph`.
 
  "Screen" here is the viewport's own pixels, relative to its top-left.
 *>

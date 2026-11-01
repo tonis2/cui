@@ -25,14 +25,6 @@ fn void note_toggle(Ui* ui, bool on) @local
 	toggles++;
 }
 
-fn void click(Ui* ui, Vec2 at) @local
-{
-	cui_tests::frame(ui, at);
-	cui_tests::frame(ui, at, left: true);
-	cui_tests::frame(ui, at);
-	ui.flush();
-}
-
 <*
  Children keep their own widths and fold onto a new line only when the next one
  would run past the edge; a line's height is its tallest child.
@@ -81,7 +73,7 @@ fn void segmented_picks_the_clicked_segment() @test
 	test::eq(strip.size.x, 6 * pad);
 	test::eq(strip.size.y, widgets::DEFAULT_SEGMENTED_STYLE.height);
 
-	click(ui, { 2 * pad + pad, 10 });
+	ui.click({ 2 * pad + pad, 10 });
 	test::eq(picks, 1);
 	test::eq(picked, (usz)1);
 	test::eq(strip.widget_as(Segmented).selected, (sz)1);
@@ -108,12 +100,12 @@ fn void toggle_button_flips_and_reports() @test
 	ui.build(ui.@node((Stack) { }, toggle));
 	ui.flush();
 
-	click(ui, { 30, 14 });
+	ui.click({ 30, 14 });
 	test::eq(toggles, 1);
 	test::@check(toggled_to && toggle.widget_as(ToggleButton).on, "the first click did not turn it on");
-	click(ui, { 30, 14 });
+	ui.click({ 30, 14 });
 	test::eq(toggles, 2);
 	test::@check(!toggled_to && !toggle.widget_as(ToggleButton).on, "the second click did not turn it off");
-	click(ui, { 200, 60 });
+	ui.click({ 200, 60 });
 	test::eq(toggles, 2);
 }

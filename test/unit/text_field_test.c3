@@ -25,7 +25,7 @@ fn void typed(Ui* ui, String text) @local
 	ui.process_input({ .mouse = { 300, 5 }, .text = text }, 0.016f);
 }
 
-// What `on_change` reported, and how often — a bare OnChange carries no context
+// What `on_change` reported, and how often — a bare OnText carries no context
 // back, so the callback writes here.
 int changes @local;
 char[64] last_text @local;

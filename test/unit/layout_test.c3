@@ -10,8 +10,6 @@ fn void constrain_clamps() @test
 	Constraints c = { .min = { 10, 10 }, .max = { 100, 50 } };
 	cui_tests::eq_vec2(c.constrain({ 500, 5 }), { 100, 10 });
 	cui_tests::eq_vec2(c.constrain({ 50, 30 }), { 50, 30 });
-	// The free-function spelling kept for consumers, arguments the other way.
-	cui_tests::eq_vec2(cui::clamp_size({ 500, 5 }, c), { 100, 10 });
 }
 
 fn void tight_and_loose_build_the_two_common_offers() @test

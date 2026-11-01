@@ -22,12 +22,8 @@
 module cui::widgets;
 
 import cui;
+import cui::icons;
 import std::math;
-
-<*
- What a row's click reports: which row, by position in the array given.
-*>
-alias OnRow = fn void(Ui* ui, usz row);
 
 <*
  What a row's right-click reports: which row, and where the press landed in
@@ -138,8 +134,8 @@ struct Tree (Widget)
 {
 	TreeRow[] rows;
 	usz selected;
-	OnRow on_select;
-	OnRow on_toggle;
+	OnIndex on_select;
+	OnIndex on_toggle;
 	// A right-press on a row. Unset, the press is not the tree's and falls through
 	// to whatever is behind it — a pane's own menu, say.
 	OnRowAt on_context;
@@ -177,13 +173,28 @@ fn Vec2 Tree.layout(&self, Element* elem, Constraints constraints) @dynamic
  Shared by paint's hover highlight and `on_mouse`, so the two cannot disagree
  about where a row starts.
 *>
-fn int Tree.row_at(&self, Element* elem, Vec2 pos)
-{
-	TreeStyle style = self.style.resolved();
-	if (pos.x < 0 || pos.x >= elem.size.x || pos.y < 0) return -1;
+fn int Tree.row_at(&self, Element* elem, Vec2 pos) => fixed_row_at(elem, pos, self.style.resolved().row_height, self.rows.len);
 
-	int row = (int)(pos.y / style.row_height);
-	return row >= 0 && row < (int)self.rows.len ? row : -1;
+<*
+ The row a point is in, for rows of one height, or -1. Tree and FileBrowser.
+*>
+fn int fixed_row_at(Element* elem, Vec2 pos, float row_height, usz rows)
+{
+	if (pos.x < 0 || pos.x >= elem.size.x || pos.y < 0) return -1;
+	int row = (int)(pos.y / row_height);
+	return row < (int)rows ? row : -1;
+}
+
+<*
+ Lights `row` (-1: none) in a field that keeps it as index + 1, so zero is
+ none; repaints on a change.
+*>
+fn void light_row(Element* elem, int* lit, int row)
+{
+	int want = row < 0 ? 0 : row + 1;
+	if (want == *lit) return;
+	*lit = want;
+	elem.request_paint();
 }
 
 // Where a row's text starts, given how deep it sits. The disclosure mark lives in
@@ -255,20 +266,10 @@ fn float Tree.label_x(&self, TreeStyle style, TreeRow row)
 	return x;
 }
 
-// A disclosure chevron: two strokes pointing right when closed, down when open.
-fn void paint_chevron(Painter* painter, Vec2 center, float size, bool open, Color color) @private
+// A disclosure chevron, `size` wide when open: right when closed, down when open.
+fn void paint_chevron(Painter* painter, Vec2 center, float size, bool open, Color color)
 {
-	float s = size * 0.5f;
-	if (open)
-	{
-		painter.line({ center.x - s, center.y - s * 0.5f }, { center.x, center.y + s * 0.5f }, 1.5f, color);
-		painter.line({ center.x, center.y + s * 0.5f }, { center.x + s, center.y - s * 0.5f }, 1.5f, color);
-	}
-	else
-	{
-		painter.line({ center.x - s * 0.5f, center.y - s }, { center.x + s * 0.5f, center.y }, 1.5f, color);
-		painter.line({ center.x + s * 0.5f, center.y }, { center.x - s * 0.5f, center.y + s }, 1.5f, color);
-	}
+	painter.icon(center, size * 2, open ? icons::CHEVRON_DOWN : icons::CHEVRON_RIGHT, color);
 }
 
 fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
@@ -371,13 +372,7 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	switch (event.kind)
 	{
 		case MOVE:
-			int row = self.row_at(elem, event.pos);
-			int lit = row < 0 ? 0 : row + 1;
-			if (lit != self.lit)
-			{
-				self.lit = lit;
-				elem.request_paint();
-			}
+			light_row(elem, &self.lit, self.row_at(elem, event.pos));
 			// Hover is not a consumed event: a drag through a sidebar still scrolls
 			// the Scroll around it.
 			return false;
@@ -432,9 +427,7 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 // the pointer left through.
 fn void Tree.on_hover(&self, Element* elem, bool entered) @dynamic
 {
-	if (entered || self.lit == 0) return;
-	self.lit = 0;
-	elem.request_paint();
+	if (!entered) light_row(elem, &self.lit, -1);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +454,7 @@ alias TreeRowsFn = fn TreeRow[](Element* elem, usz* selected);
 struct EmptyStateTree (Widget)
 {
 	TreeRowsFn rows_of;
-	OnRow on_select;
+	OnIndex on_select;
 	TreeStyle style;
 	String empty; // borrowed; painted in place of the rows
 	Color empty_color;

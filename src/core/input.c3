@@ -584,10 +584,7 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 	{
 		// Outside the clip nothing is visible, so nothing is hittable — not
 		// even children whose own rects contain the point.
-		if (local.x < 0 || local.y < 0 || local.x >= element.size.x || local.y >= element.size.y)
-		{
-			return null;
-		}
+		if (!element.contains_local(local)) return null;
 	}
 	// Raised children first, because the search runs in reverse PAINT order and
 	// a raise is a change to the paint order — an open dropdown has to take the
@@ -611,11 +608,7 @@ fn Element* Ui.hit_test_element(&self, Element* element, Vec2 point)
 	// transparent, and its interactive descendants still get their events.
 	if (element.ignores_pointer) return null;
 
-	if (local.x >= 0 && local.y >= 0 && local.x < element.size.x && local.y < element.size.y)
-	{
-		return element;
-	}
-	return null;
+	return element.contains_local(local) ? element : null;
 }
 
 <*

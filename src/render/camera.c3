@@ -12,22 +12,10 @@
 *>
 module cui::camera;
 import std::math;
-import std::io;
 
 <*
- The matrices a camera hands the shader, ready for upload.
-*>
-struct UniformData
-{
-	Matrix4f projection;
-	Matrix4f view;
-	Vec3 eye;
-}
-
-<*
- An orbit camera: an eye looking at a target, with pitch/yaw and a zoom along the
- view axis. UI rendering uses it through `ui_view`, which makes canvas pixels map
- one-to-one to screen pixels.
+ An eye looking at a target. UI rendering uses it through `ui_view`, which
+ makes canvas pixels map one-to-one to screen pixels.
 *>
 struct Camera
 {
@@ -35,9 +23,6 @@ struct Camera
 	Vec3 eye;
 	Matrix4f perspective;
 	Matrix4f view;
-	float pitch;
-	float yaw;
-	float zoom_value;
 }
 
 <*
@@ -65,47 +50,7 @@ fn Camera new(
 		eye,
 		matrix::perspective{float}(math::deg_to_rad(view), aspect, min_zoom, max_zoom),
 		matrix::look_at{float}(eye, target, { 0.0, 1.0, 0.0 }),
-		0,
-		0,
-		-eye.z
 	};
-}
-
-<*
- Orbits the eye around the target. Pitch is clamped to ±89° so the view never
- flips through the pole.
-
- @param x_offset : `Yaw change, in degrees.`
- @param y_offset : `Pitch change, in degrees.`
-*>
-fn void Camera.rotate(Camera* self, float x_offset, float y_offset)
-{
-	self.yaw += x_offset;
-	self.pitch += y_offset;
-
-	if (self.pitch > 89.0) self.pitch = 89.0;
-	if (self.pitch < -89.0) self.pitch = -89.0;
-
-	float yaw   = math::deg_to_rad(self.yaw);
-	float pitch = math::deg_to_rad(self.pitch);
-
-	self.eye = { math::cos(yaw) * math::cos(pitch), math::sin(pitch), math::sin(yaw) * math::cos(pitch) };
-
-	self.view = matrix::look_at{float}(self.eye, self.target, { 0.0, 1.0, 0.0 });
-	self.view.m23 = self.zoom_value;
-}
-
-<*
- Moves the eye along the view axis. Ignored when it would push the camera through
- the target.
-
- @param value : `The zoom delta; negative moves closer.`
-*>
-fn void Camera.zoom(Camera* self, float value)
-{
-	if (self.zoom_value + value > 0) return;
-	self.zoom_value += value;
-	self.view.m23 += value;
 }
 
 <*
@@ -136,18 +81,4 @@ fn Matrix4f Camera.ui_view(&self)
 	v.m21 *= sy;
 	v.m31 *= sy;
 	return v;
-}
-
-<*
- The camera matrices, ready for `ShaderUniforms`.
-
- @return `Projection, view and eye position.`
-*>
-fn UniformData Camera.matrix(Camera self)
-{
-	return {
-		self.perspective,
-		self.view,
-		self.eye,
-	};
 }

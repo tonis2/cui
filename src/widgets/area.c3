@@ -397,21 +397,11 @@ fn Element* AreaHost.build(&self, Element* elem) @dynamic
 	// The catcher walks itself back to the window origin so a click anywhere —
 	// the menu bar included — dismisses; elem.absolute is the previous emit's
 	// value, which is current because opening a menu does not move the host.
-	Element* catcher = ui.@node((AreaMenuCatcher) { .host = elem });
+	Element* catcher = ui.@node((OutsideCatcher) { .host = elem, .on_outside = &area_menu_closed, .size = ui.size });
 	catcher.set_offset({ -elem.absolute.x, -elem.absolute.y });
 
 	Element* panel = ui.@node(
-		(PopupPanel) {
-			.style = {
-				.color = s.strip_color,
-				.border_width = 1.0,
-				.border_color = s.strip_border,
-				.border_radius = { 6.0, 6.0, 6.0, 6.0 },
-			},
-			.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
-			.shadow = POPUP_SHADOW,
-			.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
-		},
+		popup_panel(s.strip_color, s.strip_border, { 6.0, 6.0, 6.0, 6.0 }),
 		column
 	);
 
@@ -722,25 +712,6 @@ fn float AreaTabStrip.tab_width(&self, Ui* ui, AreaStyle s, usz index, float pad
 }
 
 <*
- A label shortened with "…" to at most `cap` wide, or the label itself when it
- fits. The shortened text is in the temp allocator.
-*>
-fn String AreaTabStrip.label(&self, Ui* ui, AreaStyle s, String name, float cap)
-{
-	if (ui.text.measure(s.font, name, s.text_size).x <= cap) return name;
-	usz keep = name.len;
-	while (keep > 0)
-	{
-		keep--;
-		// Back to a character boundary: a UTF-8 continuation byte is 10xxxxxx.
-		while (keep > 0 && (name[keep] & 0xC0) == 0x80) keep--;
-		String shortened = string::tformat("%s…", name[:keep].trim());
-		if (ui.text.measure(s.font, shortened, s.text_size).x <= cap) return shortened;
-	}
-	return "…";
-}
-
-<*
  The tab under a point, in element-local pixels, as index + 1.
 *>
 fn int AreaTabStrip.zone_at(&self, Element* elem, Vec2 pos)
@@ -782,19 +753,26 @@ fn void AreaTabStrip.paint(&self, Element* elem, Painter* painter) @dynamic
 		{
 			painter.rect({ x, 0 }, { w, h }, { .color = s.hover_color });
 		}
-		String label = self.label(elem.ui, s, view.name, cap);
-		Vec2 text = elem.ui.text.measure(s.font, label, s.text_size);
-		painter.text(
-			{ x + pad, (h - text.y) * 0.5f },
-			label,
-			{
-				.font = s.font,
-				.size = s.text_size,
-				.color = active ? s.text_color : s.dim_color,
-			}
-		);
+		Vec2 text = elem.ui.text.measure(s.font, view.name, s.text_size);
+		TextStyle style = { .font = s.font, .size = s.text_size, .color = active ? s.text_color : s.dim_color };
+		painter.text_box({ x + pad, (h - text.y) * 0.5f }, view.name, style, cap, ELLIPSIS);
 		x += w;
 	}
+}
+
+fn void AreaTabStrip.describe(&self, Element* elem, Description* out) @dynamic
+{
+	AreaStyle s = self.areas.style.resolved();
+	float pad;
+	float cap = self.fit(elem.ui, s, elem.size.x, &pad);
+	float x = 0;
+	foreach (i, view : self.areas.views)
+	{
+		float w = self.tab_width(elem.ui, s, (usz)i, pad, cap);
+		out.part(view.name, { x, 0 }, { w, elem.size.y });
+		x += w;
+	}
+	if (self.node.active < self.areas.views.len) out.value = self.areas.views[self.node.active].name;
 }
 
 fn bool AreaTabStrip.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
@@ -932,8 +910,7 @@ fn bool AreaMenuRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (inside && !self.disabled) self.act();
 			return true;
 		default:
@@ -962,29 +939,8 @@ fn void AreaMenuRow.act(&self)
 	self.host.request_build();
 }
 
-<*
- The click-anywhere-else-closes surface under the popup — SelectCatcher for the
- area menu. Window-sized whatever it is offered; the host's build offsets it
- back to the window origin.
-*>
-struct AreaMenuCatcher (Widget)
+fn void area_menu_closed(Element* host) @local
 {
-	Element* host; // the AreaHost element
-}
-
-fn Vec2 AreaMenuCatcher.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	return elem.ui.size;
-}
-
-fn bool AreaMenuCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
-{
-	if (event.kind != MouseEventKind.PRESS && event.kind != MouseEventKind.RELEASE) return false;
-	if (event.kind == MouseEventKind.PRESS)
-	{
-		AreaHost* host = self.host.widget_as(AreaHost);
-		host.menu_node = null;
-		self.host.request_build();
-	}
-	return true;
+	host.widget_as(AreaHost).menu_node = null;
+	host.request_build();
 }

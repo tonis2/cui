@@ -28,6 +28,7 @@ module cui::widgets;
 import std::math;
 
 import cui;
+import cui::icons;
 
 <*
  One look for a dialog. Pass a complete style or none at all: a zero
@@ -543,12 +544,9 @@ fn void DialogCloseButton.paint(&self, Element* elem, Painter* painter) @dynamic
 		painter.rect({ 0, 0 }, elem.size, { .color = s.hover_color, .border_radius = { r, r, r, r } });
 	}
 
-	// The glyph is inset from the button's own edge, so the hover disc reads as a
-	// target around the × rather than a box behind it.
-	float pad = elem.size.x * 0.3f;
-	Color ink = self.hovered ? s.text_color : s.dim_color;
-	painter.line({ pad, pad }, { elem.size.x - pad, elem.size.y - pad }, 1.4f, ink);
-	painter.line({ elem.size.x - pad, pad }, { pad, elem.size.y - pad }, 1.4f, ink);
+	// Drawn smaller than the button, so the hover disc reads as a target around
+	// the × rather than a box behind it.
+	painter.icon(elem.size * 0.5f, elem.size.x * 0.8f, icons::CLOSE, self.hovered ? s.text_color : s.dim_color);
 }
 
 // No layout either: the title bar lays this out at DIALOG_CLOSE_SIZE under
@@ -568,8 +566,7 @@ fn bool DialogCloseButton.on_mouse(&self, Element* elem, MouseEvent event) @dyna
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 
 			// Closing releases this element's whole subtree — deferred to the build
 			// pass by `request_build`, which is what makes it safe from in here.

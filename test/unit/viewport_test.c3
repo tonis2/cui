@@ -1,5 +1,5 @@
-// The gesture helpers (DragTracker, Selection, View2D), the Viewport2D widget
-// built on them, and the ContextMenu.
+// The gesture helpers (DragTracker, Selection, View2D), content transforms
+// (PlaneProbe), and the ContextMenu.
 module cui_tests::viewports;
 import cui;
 import cui::widgets;
@@ -73,8 +73,8 @@ fn void zooming_keeps_the_anchor_still() @test
 	cui_tests::eq_vec2(view.to_screen({ 50, 25 }), { 200, 150 }); // centred
 }
 
-// A child on the plane is hit through the viewport's content transform, while
-// the viewport's own clip stays fixed on screen.
+// A child on the plane is hit through the content transform, while the clip
+// stays fixed on screen.
 fn void a_viewport_child_is_hit_where_it_is_drawn() @test
 {
 	Ui* ui = cui::new_ui({ 400, 300 });
@@ -84,7 +84,7 @@ fn void a_viewport_child_is_hit_where_it_is_drawn() @test
 	rec.consume_mouse = true;
 	Element* probe = ui.@node((EventProbe) { .pref = { 40, 20 }, .rec = &rec });
 	Element* mark = ui.@node((Rectangle) { .size = { 5, 5 } });
-	Element* viewport = ui.@node((Viewport2D) { .view = { .pan = { -10, 0 }, .zoom = 2 }, .size = { 300, 200 } }, mark, probe);
+	Element* viewport = ui.@node((PlaneProbe) { .view = { .pan = { -10, 0 }, .zoom = 2 }, .size = { 300, 200 } }, mark, probe);
 	probe.set_offset({ 20, 10 });
 	ui.build(ui.@node((Stack) { }, viewport));
 	ui.flush();
@@ -100,27 +100,6 @@ fn void a_viewport_child_is_hit_where_it_is_drawn() @test
 	test::eq(clip.slot, (uint)0);
 	test::eq(clip.screen.z, 300.0f);
 	test::eq(ui.canvas.drawings[mark.first_drawing].transform_id, viewport.transform_slot);
-}
-
-fn void a_middle_drag_pans_and_the_wheel_zooms() @test
-{
-	Ui* ui = cui::new_ui({ 400, 300 });
-	defer ui.free();
-
-	Element* viewport = ui.@node((Viewport2D) { .size = { 400, 300 } });
-	ui.build(viewport);
-	ui.flush();
-	Viewport2D* vp = viewport.widget_as(Viewport2D);
-
-	cui_tests::frame(ui, { 100, 100 }, middle: true);
-	cui_tests::frame(ui, { 130, 110 }, middle: true);
-	cui_tests::frame(ui, { 130, 110 });
-	cui_tests::eq_vec2(vp.view.pan, { -30, -10 });
-
-	Vec2 under = vp.view.to_plane({ 200, 150 });
-	cui_tests::frame(ui, { 200, 150 }, scroll: 1);
-	test::eq(vp.view.zoom > 1, true);
-	cui_tests::eq_vec2(vp.view.to_plane({ 200, 150 }), under);
 }
 
 // -- ContextMenu ------------------------------------------------------------
@@ -230,7 +209,7 @@ fn void a_zoomed_out_select_closes_from_anywhere() @test
 	defer ui.free();
 
 	Element* select = ui.@node((Select) { .options = zoom_options });
-	Element* viewport = ui.@node((Viewport2D) { .view = { .zoom = 0.5 }, .size = { 400, 300 } }, select);
+	Element* viewport = ui.@node((PlaneProbe) { .view = { .zoom = 0.5 }, .size = { 400, 300 } }, select);
 	select.set_offset({ 10, 10 });
 	ui.build(ui.@node((Stack) { }, viewport));
 	ui.flush();

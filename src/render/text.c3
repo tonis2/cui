@@ -65,6 +65,7 @@ struct TextSystem
 {
 	List{font::Font} fonts;
 	HashMap{ulong, GlyphSlot} glyphs; // key: FontId << 32 | glyph index
+	HashMap{String, IconSlot} icons; // key: the SVG text
 	char[] atlas; // ATLAS_SIZE x ATLAS_SIZE, R8
 	uint atlas_width;
 	uint atlas_height;
@@ -89,6 +90,7 @@ fn void TextSystem.init(&self)
 	// allocator on its first push, and a loaded font outlives every temp scope.
 	self.fonts.init(mem, 0);
 	self.glyphs.init(mem);
+	self.icons.init(mem);
 }
 
 fn void TextSystem.free(&self)
@@ -96,6 +98,7 @@ fn void TextSystem.free(&self)
 	foreach (&f : self.fonts) f.free();
 	self.fonts.free();
 	self.glyphs.free();
+	self.icons.free();
 	if (self.atlas.len > 0) alloc::free(mem, self.atlas);
 	self.atlas = { };
 }
@@ -184,8 +187,20 @@ fn GlyphSlot TextSystem.bake(&self, FontId font_id, uint glyph_index)
 	GlyphSlot slot = { .advance = bitmap.advance };
 	if (bitmap.is_empty()) return slot;
 
-	uint width  = bitmap.width;
-	uint height = bitmap.height;
+	if (!self.pack(bitmap.pixels, bitmap.width, bitmap.height, &slot)) return slot;
+	slot.bearing_x = bitmap.bearing_x;
+	slot.bearing_y = bitmap.bearing_y;
+	return slot;
+}
+
+<*
+ Copies an R8 bitmap into the atlas on the shelf packer, setting `slot.uv` and
+ its size. Glyphs and icons share it.
+
+ @return "False when the atlas is full (warned once)"
+*>
+fn bool TextSystem.pack(&self, char[] pixels, uint width, uint height, GlyphSlot* slot)
+{
 	if (self.shelf_x + width + ATLAS_GAP > self.atlas_width)
 	{
 		self.shelf_y += self.shelf_height + ATLAS_GAP;
@@ -196,36 +211,29 @@ fn GlyphSlot TextSystem.bake(&self, FontId font_id, uint glyph_index)
 	{
 		if (!self.atlas_full_warned)
 		{
-			io::printfn(
-				"cui: glyph atlas is full (%dx%d); further new glyphs will not render",
-				self.atlas_width,
-				self.atlas_height
-			);
+			io::printfn("cui: glyph atlas is full (%dx%d); further new glyphs will not render", self.atlas_width, self.atlas_height);
 			self.atlas_full_warned = true;
 		}
-		return slot;
+		return false;
 	}
 
 	uint x = self.shelf_x;
 	uint y = self.shelf_y;
 	self.shelf_x += width + ATLAS_GAP;
 	if (height > self.shelf_height) self.shelf_height = height;
-
 	for (uint row = 0; row < height; row++)
 	{
-		mem::copy(&self.atlas[(sz)(y + row) * self.atlas_width + x], &bitmap.pixels[(sz)row * width], width);
+		mem::copy(&self.atlas[(sz)(y + row) * self.atlas_width + x], &pixels[(sz)row * width], width);
 	}
 	self.dirty = true;
 
 	float w = self.atlas_width;
 	float h = self.atlas_height;
 	slot.uv = { (float)x / w, (float)y / h, (float)(x + width) / w, (float)(y + height) / h };
-	slot.bearing_x = bitmap.bearing_x;
-	slot.bearing_y = bitmap.bearing_y;
 	slot.width = width;
 	slot.height = height;
 	slot.has_bitmap = true;
-	return slot;
+	return true;
 }
 
 <*

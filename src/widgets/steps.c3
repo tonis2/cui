@@ -14,6 +14,7 @@
 module cui::widgets;
 
 import cui;
+import cui::icons;
 import std::math;
 
 enum StepState : char
@@ -82,15 +83,12 @@ fn StepsStyle StepsStyle.resolved(self)
 
 struct Steps (Widget)
 {
+	inline CellPress press;
 	Step[] steps; // borrowed; must outlive the element
 	sz current; // the step outlined as next; -1 = none
-	OnSelect on_click; // optional
+	OnIndex on_click; // optional
 	StepsStyle style;
 	bool compact; // set by layout: the notes did not fit and are not drawn
-	bool hovering;
-	sz hovered;
-	sz held;
-	bool tracking; // a press is in flight on `held`
 }
 
 fn float Steps.step_width(&self, Ui* ui, Step step, StepsStyle s)
@@ -168,13 +166,7 @@ fn void paint_step_icon(Painter* painter, Vec2 center, StepState state, StepsSty
 			painter.circle(center, r, { .border_color = s.dim, .border_width = 1.5f });
 		case DONE:
 			painter.circle(center, r, { .color = s.done });
-			painter.line(center + (Vec2) { -r * 0.5f, 0 }, center + (Vec2) { -r * 0.1f, r * 0.42f }, 1.6f, s.mark);
-			painter.line(
-				center + (Vec2) { -r * 0.1f, r * 0.42f },
-				center + (Vec2) { r * 0.52f, -r * 0.45f },
-				1.6f,
-				s.mark
-			);
+			painter.icon(center, r * 2, icons::CHECK, s.mark);
 		case ATTENTION:
 			painter.circle(center, r, { .color = s.attention });
 			painter.line(center + (Vec2) { 0, -r * 0.55f }, center + (Vec2) { 0, r * 0.12f }, 1.6f, s.mark);
@@ -191,10 +183,7 @@ fn void Steps.paint(&self, Element* elem, Painter* painter) @dynamic
 	{
 		if (i > 0)
 		{
-			float cx = left + s.chevron * 0.5f;
-			float cy = h * 0.5f;
-			painter.line({ cx - 1.5f, cy - 3.5f }, { cx + 1.5f, cy }, 1.2f, s.dim);
-			painter.line({ cx + 1.5f, cy }, { cx - 1.5f, cy + 3.5f }, 1.2f, s.dim);
+			painter.icon({ left + s.chevron * 0.5f, h * 0.5f }, 14, icons::CHEVRON_RIGHT, s.dim);
 			left += s.chevron;
 		}
 		float width = self.step_width(elem.ui, step, s);
@@ -270,43 +259,12 @@ fn void Steps.paint_tip(&self, Element* elem, Painter* painter, StepsStyle s)
 	painter.text(at + (Vec2) { s.pad_x, 4.0f }, detail, { .font = s.font, .size = s.text_size, .color = s.tip_text });
 }
 
-fn void Steps.on_hover(&self, Element* elem, bool entered) @dynamic
-{
-	self.hovering = entered;
-	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
-	elem.request_paint();
-}
+fn void Steps.on_hover(&self, Element* elem, bool entered) @dynamic => self.press.hover(elem, entered);
 
 fn bool Steps.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
-	switch (event.kind)
-	{
-		case MOVE:
-			sz over = self.index_at(elem, event.pos.x);
-			if (!self.hovering || over != self.hovered)
-			{
-				self.hovering = true;
-				self.hovered = over;
-				elem.request_paint();
-			}
-			return false;
-		case PRESS:
-			if (event.button != MouseButton.LEFT) return false;
-			self.held = self.index_at(elem, event.pos.x);
-			if (self.held < 0) return false;
-			self.tracking = true;
-			elem.request_paint();
-			return true;
-		case RELEASE:
-			if (event.button != MouseButton.LEFT || !self.tracking) return false;
-			self.tracking = false;
-			elem.request_paint();
-			bool inside = event.pos.y >= 0 && event.pos.y < elem.size.y;
-			sz chosen = inside ? self.index_at(elem, event.pos.x) : -1;
-			if (chosen < 0 || chosen != self.held) return true;
-			if (self.on_click) self.on_click(elem.ui, (usz)chosen);
-			return true;
-		default:
-			return false;
-	}
+	sz chosen;
+	bool consumed = self.press.mouse(elem, event, self.index_at(elem, event.pos.x), false, &chosen);
+	if (chosen >= 0 && self.on_click) self.on_click(elem.ui, (usz)chosen);
+	return consumed;
 }

@@ -16,14 +16,6 @@ fn void note_click(Ui* ui, usz index) @local
 	clicks++;
 }
 
-fn void click(Ui* ui, Vec2 at) @local
-{
-	cui_tests::frame(ui, at);
-	cui_tests::frame(ui, at, left: true);
-	cui_tests::frame(ui, at);
-	ui.flush();
-}
-
 // One step's width with no note: both paddings, the dot and its gap.
 fn float bare_step() @local
 {
@@ -62,15 +54,15 @@ fn void steps_lay_out_and_report_the_clicked_step() @test
 	test::eq(steps.widget_as(Steps).index_at(steps, second + 1), (sz)1);
 	test::eq(steps.widget_as(Steps).index_at(steps, bare + 1), (sz)-1);
 
-	click(ui, { second + 2, 10 });
+	ui.click({ second + 2, 10 });
 	test::eq(clicks, 1);
 	test::eq(clicked, (usz)1);
-	click(ui, { third + 2, 10 });
+	ui.click({ third + 2, 10 });
 	test::eq(clicks, 2);
 	test::eq(clicked, (usz)2);
 
 	// On a chevron: nothing.
-	click(ui, { bare + s.chevron * 0.5f, 10 });
+	ui.click({ bare + s.chevron * 0.5f, 10 });
 	test::eq(clicks, 2);
 
 	// Press on Model, release on Export: no choice.

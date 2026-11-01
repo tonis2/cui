@@ -11,7 +11,6 @@ module cui::widgets;
 import cui;
 import std::math;
 
-alias OnDisclosureChange = fn void(Ui* ui, bool expanded);
 
 struct DisclosureStyle
 {
@@ -55,7 +54,7 @@ struct Disclosure (Widget)
 	bool expanded;
 	float width;
 	DisclosureStyle style;
-	OnDisclosureChange on_change;
+	OnToggle on_change;
 	bool header_hovered;
 	bool held;
 }
@@ -116,14 +115,7 @@ fn void Disclosure.paint(&self, Element* elem, Painter* painter) @dynamic
 	);
 
 	float text_y = (style.header_height - style.text_size) * 0.5f - 1.0f;
-	painter.text(
-		{ style.padding, text_y },
-		self.expanded ? "v" : ">",
-		{
-			.size = style.text_size,
-			.color = style.mark,
-		}
-	);
+	paint_chevron(painter, { style.padding + 5.0f, style.header_height * 0.5f }, 8, self.expanded, style.mark);
 	painter.text(
 		{ style.padding + 18.0f, text_y },
 		self.label,

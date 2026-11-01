@@ -81,13 +81,6 @@ fn Element* open_dialog(Ui* ui)
 	return elem;
 }
 
-fn void click(Ui* ui, Vec2 at)
-{
-	cui_tests::frame(ui, at, left: true);
-	cui_tests::frame(ui, at);
-	ui.flush();
-}
-
 fn void closed_dialog_is_not_there() @test
 {
 	Ui* ui = dialog_ui();
@@ -138,7 +131,7 @@ fn void close_button_dismisses_it() @test
 	Element* elem = open_dialog(ui);
 
 	Element* close = ui.find_id(widgets::DIALOG_CLOSE_ID)!!;
-	click(ui, close.absolute + close.size * 0.5f);
+	ui.click(close.absolute + close.size * 0.5f);
 
 	test::@check(!elem.widget_as(Dialog).open);
 	test::eq(closes, 1);
@@ -205,7 +198,7 @@ fn void a_plain_dialog_leaves_the_rest_live() @test
 	defer ui.free();
 	Element* elem = open_dialog(ui);
 
-	click(ui, OUTSIDE);
+	ui.click(OUTSIDE);
 	test::eq(behind.presses, 1);
 	test::@check(elem.widget_as(Dialog).open);
 }
@@ -221,7 +214,7 @@ fn void a_modal_blocks_what_is_behind_it() @test
 	cui_tests::eq_vec2(elem.size, DIALOG_WINDOW);
 	test::@check(ui.hit_test(OUTSIDE) == elem);
 
-	click(ui, OUTSIDE);
+	ui.click(OUTSIDE);
 	test::eq(behind.presses, 0);
 	test::@check(elem.widget_as(Dialog).open); // no close_outside: the press is only swallowed
 }
@@ -235,10 +228,10 @@ fn void close_outside_dismisses_from_the_backdrop() @test
 	// Not from the panel, though: the frame eats its own clicks, which is what
 	// keeps a click that lands on the dialog from dismissing it.
 	Element* frame = ui.find(DialogFrame)!!;
-	click(ui, frame.absolute + (Vec2) { 4.0, PANEL_H - 4.0 });
+	ui.click(frame.absolute + (Vec2) { 4.0, PANEL_H - 4.0 });
 	test::@check(elem.widget_as(Dialog).open);
 
-	click(ui, OUTSIDE);
+	ui.click(OUTSIDE);
 	test::@check(!elem.widget_as(Dialog).open);
 	test::eq(closes, 1);
 	test::eq(behind.presses, 0);
@@ -262,9 +255,9 @@ fn void popup_dialog_has_no_window_chrome_or_scrim_and_still_dismisses() @test
 
 	// PopupPanel consumes its surface. The transparent modal catcher covers the
 	// rest of the window only to dismiss; Dialog.paint draws no scrim in popup mode.
-	click(ui, panel.absolute + (Vec2) { 4, 4 });
+	ui.click(panel.absolute + (Vec2) { 4, 4 });
 	test::@check(elem.widget_as(Dialog).open);
-	click(ui, OUTSIDE);
+	ui.click(OUTSIDE);
 	test::@check(!elem.widget_as(Dialog).open);
 	test::eq(behind.presses, 0);
 }
@@ -535,10 +528,10 @@ fn void a_choice_shows_its_children_as_answers() @test
 	test::@check(first.absolute.y >= line.absolute.y + line.size.y + widgets::CHOICE_GAP, "the buttons are not under the question");
 
 	// A button with nothing to do leaves the question up.
-	click(ui, centre(first));
+	ui.click(centre(first));
 	test::eq(choice.asking(elem), true);
 
-	click(ui, centre(second));
+	ui.click(centre(second));
 	test::eq(picks, 1);
 	test::eq(choice.asking(elem), false);
 	test::eq(dismissals, 0);
@@ -591,7 +584,7 @@ fn void a_choice_keeps_its_buttons_across_closing() @test
 	ui.flush();
 	test::@check(ui.find_id("second")!! == second, "re-asking while open built a new button");
 
-	click(ui, centre(second));
+	ui.click(centre(second));
 	test::eq(choice.asking(elem), false);
 
 	choice.ask(elem, "Third?");
@@ -613,6 +606,7 @@ fn void the_answers_sit_at_the_right_edge() @test
 	ui.flush();
 
 	Element* frame   = ui.find(DialogFrame)!!;
-	Element* answers = ui.find(Row)!!.children[0];
-	test::eq(answers.absolute.x + answers.size.x, frame.absolute.x + frame.size.x - 14.0f);
+	Element* row     = ui.find(Row)!!;
+	Element* last    = row.children[row.children.len() - 1];
+	test::eq(last.absolute.x + last.size.x, frame.absolute.x + frame.size.x - 14.0f);
 }

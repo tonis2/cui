@@ -12,7 +12,7 @@ const float ROW_H  = widgets::DEFAULT_TREE_STYLE.row_height;
 const float INDENT = widgets::DEFAULT_TREE_STYLE.indent;
 const float PAD    = widgets::DEFAULT_TREE_STYLE.padding;
 
-// What the callbacks report, since a bare OnRow carries no context back.
+// What the callbacks report, since a bare OnIndex carries no context back.
 int selected_row @local = -1;
 int toggled_row @local  = -1;
 int context_row @local  = -1;

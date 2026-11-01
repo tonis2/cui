@@ -12,6 +12,7 @@ import std::collections::list;
 import std::math;
 
 import cui;
+import cui::icons;
 
 // ---------------------------------------------------------------------------
 
@@ -599,6 +600,10 @@ fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 *>
 alias OnClick = fn void(Ui* ui);
 
+// A click handed the clicked element: one handler for many buttons, which can
+// find where it was pressed (`Element.ancestor`, an id, a parent).
+alias OnPress = fn void(Element* button);
+
 <*
  A clickable rect with hover and press styles.
 
@@ -614,6 +619,7 @@ struct Button (Widget)
 	RectStyle hover_style; // used while hovered, if its color alpha > 0
 	RectStyle press_style; // used while held, if its color alpha > 0
 	OnClick on_click; // optional; called on click-release inside
+	OnPress on_press; // optional; the same, handed the button's element
 	bool hovered;
 	bool held;
 
@@ -725,9 +731,9 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT || !self.held) return false;
 			self.held = false;
 			elem.request_paint();
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (inside && self.on_click) self.on_click(elem.ui);
+			if (inside && self.on_press) self.on_press(elem);
 			return true;
 		default:
 			return false;
@@ -742,6 +748,10 @@ fn bool Button.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
  `fn void rig_toggled(Ui* ui, bool on) { ui.inherit(App)!!.with_rig = on; }`
 *>
 alias OnToggle = fn void(Ui* ui, bool checked);
+// A row, an option or an item, by its index.
+alias OnIndex = fn void(Ui* ui, usz index);
+// Typed text, a submitted line or a chosen path.
+alias OnText = fn void(Ui* ui, String text);
 
 <*
  How a Checkbox is drawn.
@@ -761,7 +771,6 @@ struct CheckboxStyle
 	float text_size;
 	float box; // side of the square; 0 = the whole style defaults
 	float gap; // between the square and the label
-	float thickness; // of the tick's two strokes
 }
 
 const CheckboxStyle DEFAULT_CHECKBOX_STYLE = {
@@ -774,7 +783,6 @@ const CheckboxStyle DEFAULT_CHECKBOX_STYLE = {
 	.text_size = 14.0,
 	.box = 16.0,
 	.gap = 8.0,
-	.thickness = 2.0,
 };
 
 fn CheckboxStyle CheckboxStyle.resolved(self)
@@ -843,23 +851,7 @@ fn void Checkbox.paint(&self, Element* elem, Painter* painter) @dynamic
 	}
 	painter.rect({ 0, top }, { s.box, s.box }, { .color = fill, .border_radius = s.border_radius });
 
-	if (self.checked)
-	{
-		// Two strokes rather than a glyph: a tick is the one mark a widget cannot
-		// assume the loaded font has.
-		painter.line(
-			{ s.box * 0.24f, top + s.box * 0.52f },
-			{ s.box * 0.44f, top + s.box * 0.72f },
-			s.thickness,
-			s.mark
-		);
-		painter.line(
-			{ s.box * 0.44f, top + s.box * 0.72f },
-			{ s.box * 0.78f, top + s.box * 0.26f },
-			s.thickness,
-			s.mark
-		);
-	}
+	if (self.checked) painter.icon({ s.box * 0.5f, top + s.box * 0.5f }, s.box, icons::CHECK, s.mark);
 
 	if (self.label.len == 0) return;
 	Vec2 text = elem.ui.text.measure(s.font, self.label, s.text_size);
@@ -898,8 +890,7 @@ fn bool Checkbox.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT || !self.held) return false;
 			self.held = false;
 
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (!inside) return true;
 
 			self.checked = !self.checked;

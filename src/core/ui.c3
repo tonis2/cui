@@ -205,16 +205,6 @@ typedef Color = Vec4;
 *>
 const Color WHITE = { 1.0, 1.0, 1.0, 1.0 };
 
-<*
- Opaque black.
-*>
-const Color BLACK = { 0.0, 0.0, 0.0, 1.0 };
-
-<*
- Opaque mid grey. Historical name — kept because demos reference it.
-*>
-const Color BLUE = { 0.5, 0.5, 0.5, 1.0 };
-
 
 // Multiplies rgb rather than dropping alpha: over a dark viewport those look
 // alike, but over the lit flank of the model only the first still reads as
@@ -271,6 +261,9 @@ interface Widget
 
 	// Left the tree, a rebuild included. Frees what the widget allocated.
 	fn void unmount(Element* elem) @optional;
+
+	// What it says and holds, for agents and tests (`Ui.describe_tree`).
+	fn void describe(Element* elem, Description* out) @optional;
 }
 
 <*
@@ -303,20 +296,6 @@ macro bool @is_widget_type($Type) @const @builtin
 }
 
 <*
- Free-function spelling of `Constraints.constrain`, with the arguments the other
- way round. The method is the one to reach for in new code; this exists because
- it was the original name and consumers call it.
-
- @param size : `The size the widget wants.`
- @param c : `The constraints handed to layout().`
- @return `The wanted size, clamped to the constraint box.`
-*>
-fn Vec2 clamp_size(Vec2 size, Constraints c)
-{
-	return c.constrain(size);
-}
-
-<*
  Reads a widget's `Vec2 size` field through the type-erased pointer the element
  stores — the runtime half of the size-field convention. The node macros
  instantiate one per widget type that qualifies.
@@ -334,6 +313,7 @@ struct Element
 {
 	Ui* ui;
 	Widget widget;
+	String type_name; // the widget's type, for describe_tree; set by the node macros
 	String id; // optional app-chosen name; find_id / get_widget_id
 	// resolve it. Empty = unkeyed. Borrowed — the string
 	// must outlive the element (a literal is ideal).
@@ -681,6 +661,7 @@ macro Element* Ui.@node(&self, widget, ...)
 	$if @kindof(widget) == POINTER:
 		Element* element = self.attach_node(widget, false, ...$vaarg);
 		@detect_size_field($Typeof(*widget), element);
+		element.type_name = $Typeof(*widget)::name;
 		return element;
 	$else
 		var $Type = $Typeof(widget);
@@ -688,6 +669,7 @@ macro Element* Ui.@node(&self, widget, ...)
 		*copy = widget;
 		Element* element = self.attach_node(copy, true, ...$vaarg);
 		@detect_size_field($Type, element);
+		element.type_name = $Type::name;
 		return element;
 	$endif
 }
@@ -752,6 +734,25 @@ macro Element.widget_as(&self, $Type)
 macro bool Element.is_widget(&self, $Type)
 {
 	return ((any)self.widget).type == $Type;
+}
+
+<*
+ Whether an element-local point is on this element: a press released inside.
+*>
+fn bool Element.contains_local(&self, Vec2 p) => p.x >= 0 && p.y >= 0 && p.x < self.size.x && p.y < self.size.y;
+
+<*
+ The nearest element above this one whose widget is `$Type`, or null.
+
+ @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
+*>
+macro Element* Element.ancestor(&self, $Type)
+{
+	for (Element* e = self.parent; e != null; e = e.parent)
+	{
+		if (e.is_widget($Type)) return e;
+	}
+	return null;
 }
 
 <*
@@ -892,17 +893,19 @@ faultdef WIDGET_NOT_FOUND;
 *>
 macro Ui.find(&self, $Type)
 {
-	Element* elem = self.root ? find_by_type(self.root, $Type) : null;
+	Element* elem = self.root ? find_first(self.root, $Type) : null;
 	if (!elem) return WIDGET_NOT_FOUND~;
 	return elem;
 }
 
-fn Element* find_by_type(Element* elem, typeid type) @private
+// The first element depth first that is of `type` (void: any) and carries `id`
+// (empty: any). The one walk behind find and find_id.
+fn Element* find_first(Element* elem, typeid type, String id = "") @private
 {
-	if (((any)elem.widget).type == type) return elem;
+	if ((type == void || ((any)elem.widget).type == type) && (id.len == 0 || elem.has_id(id))) return elem;
 	foreach (child : elem.children)
 	{
-		Element* hit = find_by_type(child, type);
+		Element* hit = find_first(child, type, id);
 		if (hit) return hit;
 	}
 	return null;
@@ -929,26 +932,14 @@ macro Ui.get_widget(&self, $Type)
 	return WIDGET_NOT_FOUND~;
 }
 
-<*
- One-shot invalidate by type: one tree walk, a no-op if absent. Same caveat — if
- you already hold the element, call `elem.request_paint()` and skip the walk.
-
- @param $Type : `The widget type to repaint.`
- @require @is_widget_type($Type) : `$Type must implement the Widget interface.`
-*>
-macro Ui.request_paint(&self, $Type)
-{
-	if (try elem = self.find($Type)) elem.request_paint();
-}
-
 // ---------------------------------------------------------------------------
 // Query the tree by app-chosen id — the escape hatch for when several widgets
 // of a kind coexist, where a bare type lookup can't say which one you mean (its
 // Flutter analog is a GlobalKey). Stamp a node with .with_id while building,
 // then reach exactly that node by name from anywhere. This mirrors the type
-// family above one-for-one — find_id / get_widget_id / request_paint_id — with
+// family above one-for-one — find_id / get_widget_id — with
 // the same "resolve the element once" rule: the id says *which*, the $Type still
-// says *what*. v1 walks the tree like find_by_type — there is no registry to
+// says *what*. v1 walks the tree like find — there is no registry to
 // keep in sync, so an unmounted node simply stops being found; swap in a map
 // behind these same signatures if lookups ever get hot.
 
@@ -975,7 +966,7 @@ fn Element* Element.with_id(&self, String id)
 *>
 fn Element*? Ui.find_id(&self, String id)
 {
-	Element* elem = self.root ? find_by_id(self.root, id) : null;
+	Element* elem = self.root && id.len ? find_first(self.root, void, id) : null;
 	if (!elem) return WIDGET_NOT_FOUND~;
 	return elem;
 }
@@ -994,7 +985,7 @@ fn Element*? Ui.find_id(&self, String id)
 *>
 fn Element*? Element.find_id(&self, String id)
 {
-	Element* elem = find_by_id(self, id);
+	Element* elem = id.len ? find_first(self, void, id) : null;
 	if (!elem) return WIDGET_NOT_FOUND~;
 	return elem;
 }
@@ -1008,17 +999,6 @@ fn Element*? Element.find_id(&self, String id)
 fn bool Element.has_id(&self, String id)
 {
 	return self.id.len > 0 && equals(self.id, id);
-}
-
-fn Element* find_by_id(Element* elem, String id) @private
-{
-	if (elem.has_id(id)) return elem;
-	foreach (child : elem.children)
-	{
-		Element* hit = find_by_id(child, id);
-		if (hit) return hit;
-	}
-	return null;
 }
 
 <*
@@ -1037,16 +1017,6 @@ macro Ui.get_widget_id(&self, String id, $Type)
 {
 	if (try elem = self.find_id(id)) return elem.widget_as($Type);
 	return WIDGET_NOT_FOUND~;
-}
-
-<*
- One-shot invalidate by id: one tree walk, a no-op if absent.
-
- @param id : `The name given with with_id.`
-*>
-macro Ui.request_paint_id(&self, String id)
-{
-	if (try elem = self.find_id(id)) elem.request_paint();
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,21 +1211,7 @@ tlocal Ui* ambient_ui @private;
 *>
 macro void @canvas(Ui* ui; @body()) @builtin
 {
-	Ui* prev_ui        = ambient_ui;
-	Element* prev_root = ui.scoped_root;
-	sz prev_floor      = ui.scope_floor;
-	ambient_ui = ui;
-	ui.scoped_root = null;
-	ui.scope_floor = ui.build_stack.len();
-	defer
-	{
-		ambient_ui = prev_ui;
-		ui.scoped_root = prev_root;
-		ui.scope_floor = prev_floor;
-	}
-	@body();
-	assert(ui.scoped_root, "@canvas body built no root node");
-	ui.build(ui.scoped_root);
+	ui.build(@subtree(ui) { @body(); });
 }
 
 <*
@@ -1377,8 +1333,7 @@ fn void Ui.build(&self, Element* root)
 	root.parent = null;
 	self.root = root;
 	self.layout_pending = true;
-	self.paint_pending = true;
-	self.frame_requested = true;
+	self.request_frame_paint();
 }
 
 <*
@@ -1412,8 +1367,7 @@ fn void Element.move_child(&self, sz from, sz to)
 	self.children.insert_at(to, child);
 	// The order is read by the emit and by the hit test only; neither the
 	// child's drawings nor anybody's size changed.
-	self.ui.paint_pending = true;
-	self.ui.frame_requested = true;
+	self.ui.request_frame_paint();
 }
 
 <*
@@ -1519,8 +1473,7 @@ fn void Ui.unmount(&self, Element* element)
 		self.root = null;
 	}
 	self.release(element);
-	self.paint_pending = true;
-	self.frame_requested = true;
+	self.request_frame_paint();
 }
 
 <*
@@ -1561,17 +1514,7 @@ fn void Ui.release(&self, Element* element)
 	if (&element.widget.unmount) element.widget.unmount(element);
 	if (element.owns_widget) mem::free(((any)element.widget).ptr);
 	if (element.transform_slot != NO_TRANSFORM) self.free_transform_slots.push(element.transform_slot);
-	if (self.hovered == element) self.hovered = null;
-	if (self.captured == element) self.captured = null;
-
-	// The keyboard moves up to the parent rather than going out. Children are
-	// released first, so a subtree containing the focused element hands it up
-	// one level at a time and it comes to rest on the nearest survivor — the
-	// element whose subtree was replaced, not null. Null would leave the whole
-	// application deaf to keys until the next left press, which is the only
-	// thing that assigns focus: dismissing a dialog that had a text field in it
-	// would silently disable every shortcut in the window.
-	if (self.focused == element) self.focused = element.parent;
+	self.let_go(element);
 	element.children.free();
 	element.local_drawings.free();
 	*element = { };
@@ -1620,6 +1563,18 @@ fn void Ui.forget(&self, Element* element)
 	// on the first element still in the tree — `release`'s rule, and the reason
 	// it is spelled out there.
 	foreach (child : element.children) self.forget(child);
+	self.let_go(element);
+}
+
+<*
+ Stops hovering, capturing or focusing one element. The keyboard moves up to
+ the parent rather than going out: children go first, so focus inside a removed
+ subtree comes to rest on the nearest survivor. Null would leave the app deaf
+ to keys until the next left press — closing a dialog with a text field in it
+ would silently disable every shortcut.
+*>
+fn void Ui.let_go(&self, Element* element)
+{
 	if (self.hovered == element) self.hovered = null;
 	if (self.captured == element) self.captured = null;
 	if (self.focused == element) self.focused = element.parent;
@@ -1633,30 +1588,32 @@ fn void Ui.forget(&self, Element* element)
 *>
 fn Element* Ui.alloc_element(&self)
 {
-	if (try element = self.free_elements.pop())
+	Element* element = self.free_elements.pop() ?? null;
+	if (!element)
 	{
-		// Re-armed, not left as `release` zeroed them: a zeroed List takes the
-		// TEMP allocator on its first push, so a recycled element would hold its
-		// children in memory a host's @pool() takes back — and the dangling
-		// child list only shows up on the third rebuild, when the free list
-		// first has anything in it.
-		element.children.init(mem, 0);
-		element.slots.init(mem, 0);
-		element.local_drawings.init(mem, 0);
-		return element;
+		element = mem::new(Element);
+		self.all_elements.push(element);
 	}
-	Element* element = mem::new(Element);
-	// The heap by name, for `new_ui`'s reason: an element built inside a host's
-	// `@pool()` must not hold its children in memory the pool takes back.
+	// The heap by name: a zeroed List takes the TEMP allocator on its first
+	// push, and an element built inside a host's @pool() must not hold its
+	// children in memory the pool takes back.
 	element.children.init(mem, 0);
 	element.slots.init(mem, 0);
 	element.local_drawings.init(mem, 0);
-	self.all_elements.push(element);
 	return element;
 }
 
 // ---------------------------------------------------------------------------
 // Invalidation — the only way anything gets recomputed.
+
+<*
+ A repaint is due, and so is the frame that does it.
+*>
+fn void Ui.request_frame_paint(&self)
+{
+	self.paint_pending = true;
+	self.frame_requested = true;
+}
 
 <*
  Schedules a frame. An on-demand render loop (one that sleeps when nothing is
@@ -1695,8 +1652,7 @@ fn void Ui.resize(&self, Vec2 size)
 	if (vec2_eq(size, self.size)) return;
 	self.size = size;
 	self.layout_pending = true;
-	self.paint_pending = true;
-	self.frame_requested = true;
+	self.request_frame_paint();
 }
 
 <*
@@ -1710,8 +1666,7 @@ fn void Element.request_layout(&self)
 	self.dirty.paint = true;
 	for (Element* p = self.parent; p != null && !p.dirty.layout; p = p.parent) p.dirty.layout = true;
 	self.ui.layout_pending = true;
-	self.ui.paint_pending = true;
-	self.ui.frame_requested = true;
+	self.ui.request_frame_paint();
 }
 
 <*
@@ -1746,8 +1701,7 @@ fn void Element.request_paint(&self)
 		return;
 	}
 	self.dirty.paint = true;
-	self.ui.paint_pending = true;
-	self.ui.frame_requested = true;
+	self.ui.request_frame_paint();
 }
 
 <*
@@ -1802,8 +1756,7 @@ fn void Ui.invalidate_watchers(&self, Element* element, typeid type)
 fn void Element.set_offset(&self, Vec2 offset)
 {
 	self.offset = offset;
-	self.ui.paint_pending = true;
-	self.ui.frame_requested = true;
+	self.ui.request_frame_paint();
 }
 
 <*

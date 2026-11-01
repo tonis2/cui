@@ -81,16 +81,72 @@ fn void paint_segment_label(
 	painter.text(at + (size - text) * 0.5f, label, { .font = s.font, .size = s.text_size, .color = ink });
 }
 
-struct Segmented (Widget)
+<*
+ The pointer state of a strip of cells: which one is lit, and which one a press
+ is held on. Shared by Segmented and Steps; a click is a press and a release on
+ the same cell.
+*>
+struct CellPress
 {
-	String[] options; // borrowed; must outlive the element
-	sz selected; // -1 = none lit
-	OnSelect on_change; // optional; called after the flip, with the new index
-	SegmentedStyle style;
 	bool hovering;
 	sz hovered;
 	sz held;
 	bool tracking; // a press is in flight on `held`
+}
+
+fn void CellPress.hover(&self, Element* elem, bool entered)
+{
+	self.hovering = entered;
+	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
+	elem.request_paint();
+}
+
+<*
+ Tracks one event over the strip.
+
+ @param over : "The cell under the event, or -1"
+ @param gaps : "Whether a press between cells still tracks"
+ @param [&out] chosen : "The clicked cell, or -1"
+ @return "Whether the event was consumed"
+*>
+fn bool CellPress.mouse(&self, Element* elem, MouseEvent event, sz over, bool gaps, sz* chosen)
+{
+	*chosen = -1;
+	switch (event.kind)
+	{
+		case MOVE:
+			if (!self.hovering || over != self.hovered)
+			{
+				self.hovering = true;
+				self.hovered = over;
+				elem.request_paint();
+			}
+			return false;
+		case PRESS:
+			if (event.button != MouseButton.LEFT || (over < 0 && !gaps)) return false;
+			self.held = over;
+			self.tracking = true;
+			elem.request_paint();
+			return true;
+		case RELEASE:
+			if (event.button != MouseButton.LEFT || !self.tracking) return false;
+			self.tracking = false;
+			elem.request_paint();
+			bool inside = event.pos.y >= 0 && event.pos.y < elem.size.y;
+			if (inside && over >= 0 && over == self.held) *chosen = over;
+			return true;
+		default:
+			return false;
+	}
+}
+
+struct Segmented (Widget)
+{
+	inline CellPress press;
+	String[] options; // borrowed; must outlive the element
+	sz selected; // -1 = none lit
+	OnIndex on_change; // optional; called after the flip, with the new index
+	SegmentedStyle style;
 }
 
 <*
@@ -155,45 +211,18 @@ fn void Segmented.paint(&self, Element* elem, Painter* painter) @dynamic
 	);
 }
 
-fn void Segmented.on_hover(&self, Element* elem, bool entered) @dynamic
-{
-	self.hovering = entered;
-	if (entered) elem.set_cursor(Cursor.POINTING_HAND);
-	elem.request_paint();
-}
+fn void Segmented.on_hover(&self, Element* elem, bool entered) @dynamic => self.press.hover(elem, entered);
 
 fn bool Segmented.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
-	switch (event.kind)
+	sz chosen;
+	bool consumed = self.press.mouse(elem, event, self.index_at(elem, event.pos.x), true, &chosen);
+	if (chosen >= 0)
 	{
-		case MOVE:
-			sz over = self.index_at(elem, event.pos.x);
-			if (!self.hovering || over != self.hovered)
-			{
-				self.hovering = true;
-				self.hovered = over;
-				elem.request_paint();
-			}
-			return false;
-		case PRESS:
-			if (event.button != MouseButton.LEFT) return false;
-			self.held = self.index_at(elem, event.pos.x);
-			self.tracking = true;
-			elem.request_paint();
-			return true;
-		case RELEASE:
-			if (event.button != MouseButton.LEFT || !self.tracking) return false;
-			self.tracking = false;
-			elem.request_paint();
-			bool inside = event.pos.y >= 0 && event.pos.y < elem.size.y;
-			sz chosen = inside ? self.index_at(elem, event.pos.x) : -1;
-			if (chosen < 0 || chosen != self.held) return true;
-			self.selected = chosen;
-			if (self.on_change) self.on_change(elem.ui, (usz)chosen);
-			return true;
-		default:
-			return false;
+		self.selected = chosen;
+		if (self.on_change) self.on_change(elem.ui, (usz)chosen);
 	}
+	return consumed;
 }
 
 struct ToggleButton (Widget)
@@ -255,8 +284,7 @@ fn bool ToggleButton.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			if (event.button != MouseButton.LEFT || !self.held) return false;
 			self.held = false;
 			elem.request_paint();
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (!inside) return true;
 			self.on = !self.on;
 			if (self.on_change) self.on_change(elem.ui, self.on);

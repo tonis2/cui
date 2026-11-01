@@ -58,33 +58,17 @@ fn Ui* area_ui()
 	return ui;
 }
 
-// A press is an edge, so it takes two frames: down then up.
-fn void click(Ui* ui, Vec2 at)
-{
-	cui_tests::frame(ui, at, left: true);
-	cui_tests::frame(ui, at, left: false);
-	ui.flush();
-}
-
-// A right press is an edge too: down then up.
-fn void rclick(Ui* ui, Vec2 at)
-{
-	cui_tests::frame(ui, at, right: true);
-	cui_tests::frame(ui, at);
-	ui.flush();
-}
-
 // Click the center of the named context-menu row.
 fn void pick(Ui* ui, String label)
 {
 	Element* row = ui.find_id(label)!!;
-	click(ui, row.absolute + row.size * 0.5f);
+	ui.click(row.absolute + row.size * 0.5f);
 }
 
 // Split the pane under `at` the only way there is: through the context menu.
 fn void split(Ui* ui, Vec2 at, String how)
 {
-	rclick(ui, at);
+	ui.click(at, RIGHT);
 	pick(ui, how);
 }
 
@@ -121,12 +105,12 @@ fn void tab_click_switches_pane() @test
 	defer ui.free();
 	defer t_layout.free();
 
-	click(ui, TAB_B);
+	ui.click(TAB_B);
 	test::@check(t_layout.root.active == 1);
 	test::@check(count(ui, BView) == 1);
 	test::@error(ui.find(AView), cui::WIDGET_NOT_FOUND);
 
-	click(ui, TAB_A);
+	ui.click(TAB_A);
 	test::@check(count(ui, AView) == 1);
 	test::@error(ui.find(BView), cui::WIDGET_NOT_FOUND);
 }
@@ -138,9 +122,9 @@ fn void tab_switch_releases_old_content() @test
 	defer t_layout.free();
 
 	b_unmounts = 0;
-	click(ui, TAB_B);
+	ui.click(TAB_B);
 	test::eq(b_unmounts, 0);
-	click(ui, TAB_A);
+	ui.click(TAB_A);
 	test::eq(b_unmounts, 1); // B's subtree was released, hooks and all
 }
 
@@ -150,7 +134,7 @@ fn void split_side_makes_two_panes_keeping_view() @test
 	defer ui.free();
 	defer t_layout.free();
 
-	click(ui, TAB_B); // so the split must copy a non-default active
+	ui.click(TAB_B); // so the split must copy a non-default active
 	split(ui, { 400, 300 }, "Split Vertical");
 
 	test::@check(!t_layout.root.is_leaf());
@@ -206,7 +190,7 @@ fn void close_promotes_sibling() @test
 	test::@check(count(ui, AView) == 2);
 
 	// Close the right pane from its own menu; the left takes the whole width.
-	rclick(ui, { 600, 300 });
+	ui.click({ 600, 300 }, RIGHT);
 	pick(ui, "Close");
 	test::@check(t_layout.root.is_leaf());
 	test::@check(count(ui, AView) == 1);
@@ -228,7 +212,7 @@ fn void nested_split_builds_three_leaves() @test
 	test::@check(t_layout.root.first.axis == SplitAxis.VERTICAL);
 
 	// Close the top-left leaf; its sibling takes the whole left side back.
-	rclick(ui, { 200, 150 });
+	ui.click({ 200, 150 }, RIGHT);
 	pick(ui, "Close");
 	test::@check(count(ui, AView) == 2);
 	test::@check(t_layout.root.first.is_leaf());
@@ -241,7 +225,7 @@ fn void strip_swallows_misses() @test
 	defer t_layout.free();
 
 	// A press on the strip's empty middle changes nothing and reaches nothing.
-	click(ui, { 300, STRIP_H * 0.5f });
+	ui.click({ 300, STRIP_H * 0.5f });
 	test::@check(t_layout.root.is_leaf());
 	test::@check(count(ui, AView) == 1);
 }
@@ -255,9 +239,9 @@ fn void right_click_pane_offers_splits() @test
 	defer ui.free();
 	defer t_layout.free();
 
-	rclick(ui, { 400, 300 });
+	ui.click({ 400, 300 }, RIGHT);
 	test::@check(count(ui, AreaMenuRow) == 3);
-	test::@check(count(ui, AreaMenuCatcher) == 1);
+	test::@check(count(ui, OutsideCatcher) == 1);
 	test::@check(@ok(ui.find_id("Split Vertical")));
 	test::@check(@ok(ui.find_id("Split Horizontal")));
 	test::@check(@ok(ui.find_id("Close")));
@@ -275,7 +259,7 @@ fn void context_split_horizontal_stacks() @test
 	defer ui.free();
 	defer t_layout.free();
 
-	rclick(ui, { 400, 300 });
+	ui.click({ 400, 300 }, RIGHT);
 	pick(ui, "Split Horizontal");
 	test::@check(t_layout.root.axis == SplitAxis.VERTICAL);
 	test::@check(count(ui, AView) == 2);
@@ -287,11 +271,11 @@ fn void click_elsewhere_closes_without_acting() @test
 	defer ui.free();
 	defer t_layout.free();
 
-	rclick(ui, { 400, 300 });
+	ui.click({ 400, 300 }, RIGHT);
 	test::@check(count(ui, AreaMenuRow) == 3);
 
 	// Well away from the popup: the catcher takes the press, nothing splits.
-	click(ui, { 700, 550 });
+	ui.click({ 700, 550 });
 	test::@check(count(ui, AreaMenuRow) == 0);
 	test::@check(t_layout.root.is_leaf());
 }
@@ -304,15 +288,15 @@ fn void context_close_is_dead_on_root_and_live_on_a_leaf() @test
 
 	// On the root the row is disabled: the click lands, nothing happens, and
 	// the menu stays up the way a greyed menu item leaves its dropdown open.
-	rclick(ui, { 400, 300 });
+	ui.click({ 400, 300 }, RIGHT);
 	pick(ui, "Close");
 	test::@check(t_layout.root.is_leaf());
 	test::@check(count(ui, AreaMenuRow) == 3);
-	click(ui, { 700, 550 });
+	ui.click({ 700, 550 });
 
 	// Split, and the same row on a leaf retires it.
 	split(ui, { 400, 300 }, "Split Vertical");
-	rclick(ui, { 100, 300 });
+	ui.click({ 100, 300 }, RIGHT);
 	pick(ui, "Close");
 	test::@check(t_layout.root.is_leaf());
 	test::@check(count(ui, AView) == 1);
@@ -326,11 +310,11 @@ fn void divider_menu_merges_keeping_named_side() @test
 
 	split(ui, { 400, 300 }, "Split Vertical"); // left | right
 	float left_w = (AREA_WINDOW.x - 5.0f) * 0.5f;
-	click(ui, { left_w + 5.0f + TAB_W * 1.5f, STRIP_H * 0.5f }); // right pane to B
+	ui.click({ left_w + 5.0f + TAB_W * 1.5f, STRIP_H * 0.5f }); // right pane to B
 	test::@check(count(ui, BView) == 1);
 
 	// A side-by-side divider offers Left/Right, not Up/Down.
-	rclick(ui, { left_w + 2.5f, 300 });
+	ui.click({ left_w + 2.5f, 300 }, RIGHT);
 	test::@check(count(ui, AreaMenuRow) == 2);
 	test::@error(ui.find_id("Merge Up"), cui::WIDGET_NOT_FOUND);
 
@@ -351,7 +335,7 @@ fn void stacked_divider_menu_reads_up_down() @test
 
 	split(ui, { 400, 300 }, "Split Horizontal"); // top / bottom
 	float top_h = (AREA_WINDOW.y - 5.0f) * 0.5f;
-	rclick(ui, { 400, top_h + 2.5f });
+	ui.click({ 400, top_h + 2.5f }, RIGHT);
 	test::@check(@ok(ui.find_id("Merge Up")));
 	test::@error(ui.find_id("Merge Left"), cui::WIDGET_NOT_FOUND);
 
@@ -373,7 +357,7 @@ fn void merge_collapses_a_whole_subtree() @test
 
 	// The root divider's Merge Left swallows the nested right subtree whole.
 	float left_w = (AREA_WINDOW.x - 5.0f) * 0.5f;
-	rclick(ui, { left_w + 2.5f, 300 });
+	ui.click({ left_w + 2.5f, 300 }, RIGHT);
 	pick(ui, "Merge Left");
 	test::@check(t_layout.root.is_leaf());
 	test::@check(count(ui, AView) == 1);
@@ -435,7 +419,7 @@ fn void a_borrowed_view_is_attached_not_built() @test
 	defer t_layout.free();
 	defer ui.unmount(t_content); // the owner's job, and the only thing that frees it
 
-	click(ui, TAB_C);
+	ui.click(TAB_C);
 
 	// The caller's own element, filling the pane under the strip — exactly where
 	// a built view would have gone.
@@ -451,16 +435,16 @@ fn void switching_away_detaches_and_back_reattaches() @test
 	defer t_layout.free();
 	defer ui.unmount(t_content);
 
-	click(ui, TAB_C);
+	ui.click(TAB_C);
 	t_content.widget_as(CView).remembered = 7;
 
-	click(ui, TAB_A);
+	ui.click(TAB_A);
 	test::@error(ui.find(CView), cui::WIDGET_NOT_FOUND);
 	test::eq(t_content.parent == null, true);
 	test::eq(t_content.children.len(), 1);
 	test::eq(c_unmounts, 0);
 
-	click(ui, TAB_C);
+	ui.click(TAB_C);
 
 	// The same element, back in the same place, still remembering — which is the
 	// one thing a built view cannot do.
@@ -482,7 +466,7 @@ fn void one_borrowed_view_hangs_in_one_pane() @test
 	defer t_layout.free();
 	defer ui.unmount(t_content);
 
-	click(ui, TAB_C);
+	ui.click(TAB_C);
 	split(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 }, "Split Vertical");
 
 	test::@check(!t_layout.root.is_leaf());
@@ -503,12 +487,12 @@ fn void merging_the_split_keeps_the_borrowed_element() @test
 	defer t_layout.free();
 	defer ui.unmount(t_content);
 
-	click(ui, TAB_C);
+	ui.click(TAB_C);
 	t_content.widget_as(CView).remembered = 7;
 	split(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 }, "Split Vertical");
 
 	// Right on the divider, which is where the merge entries live.
-	rclick(ui, { AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 });
+	ui.click({ AREA_WINDOW.x * 0.5, AREA_WINDOW.y * 0.5 }, RIGHT);
 	pick(ui, "Merge Left");
 
 	test::@check(t_layout.root.is_leaf());

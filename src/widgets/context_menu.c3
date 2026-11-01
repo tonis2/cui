@@ -41,7 +41,6 @@ struct ContextMenuItem
 <*
  An item was chosen: its index into `ContextMenu.items`.
 *>
-alias OnMenuChoose = fn void(Ui* ui, usz index);
 
 const float CONTEXT_MENU_WIDTH = 260.0;
 const float CONTEXT_MENU_MAX_HEIGHT = 380.0;
@@ -51,7 +50,7 @@ const float CONTEXT_HEADER_RATIO = 0.8;
 struct ContextMenu (Widget)
 {
 	ContextMenuItem[] items; // borrowed
-	OnMenuChoose on_choose;
+	OnIndex on_choose;
 	OnClick on_dismiss;
 	MenuStyle style;
 	float width; // 0 = CONTEXT_MENU_WIDTH
@@ -63,8 +62,7 @@ struct ContextMenu (Widget)
 	// item the keyboard has highlighted (an index into `items`, -1 = none).
 	bool open;
 	Vec2 at;
-	char[SELECT_QUERY_MAX] query_buf;
-	usz query_len;
+	QueryBuffer search;
 	sz active;
 	bool return_held;
 	Element* list; // the open list's element, so a key can repaint it
@@ -73,7 +71,7 @@ struct ContextMenu (Widget)
 <*
  The current search text.
 *>
-fn String ContextMenu.query(&self) => (String)self.query_buf[:self.query_len];
+fn String ContextMenu.query(&self) => self.search.str();
 
 <*
  Opens the menu with its top-left at a point on screen, with an empty search
@@ -86,7 +84,7 @@ fn void ContextMenu.open_at(&self, Element* elem, Vec2 at)
 {
 	self.open = true;
 	self.at = at;
-	self.query_len = 0;
+	self.search.len = 0;
 	self.active = self.next_match(-1, 1);
 	self.return_held = elem.ui.input.key_down(Key.RETURN);
 	elem.request_build();
@@ -172,9 +170,13 @@ fn sz ContextMenu.next_match(&self, sz from, int direction)
 *>
 fn void ContextMenu.set_query(&self, String text)
 {
-	usz n = text.len < SELECT_QUERY_MAX ? text.len : SELECT_QUERY_MAX;
-	foreach (usz i, char c : text[:n]) self.query_buf[i] = c;
-	self.query_len = n;
+	self.search.set(text);
+	self.query_changed();
+}
+
+// After the search text changed: highlight the first match, scroll to the top.
+fn void ContextMenu.query_changed(&self)
+{
 	self.active = self.next_match(-1, 1);
 	if (self.list)
 	{
@@ -196,26 +198,16 @@ fn Element* ContextMenu.build(&self, Element* elem) @dynamic
 	{
 		@tree((Stack) { })
 		{
-			@node((ContextCatcher) { .host = elem });
+			@node((OutsideCatcher) { .host = elem, .on_outside = &context_outside, .swallow_all = true });
 			@tree(
-				(PopupPanel) {
-					.style = {
-						.color = s.panel_color,
-						.border_width = 1.0,
-						.border_color = s.panel_border,
-						.border_radius = { 6.0, 6.0, 6.0, 6.0 },
-					},
-					.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
-					.shadow = POPUP_SHADOW,
-					.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
-				}
+				popup_panel(s.panel_color, s.panel_border, { 6.0, 6.0, 6.0, 6.0 })
 			)
 			{
 				@tree((Column) { })
 				{
 					if (self.searchable)
 					{
-						@node((ContextSearch) { .host = elem, .style = s, .width = w });
+						@node((MenuSearch) { .host = elem, .query = &self.search, .on_change = &context_query_changed, .style = s, .width = w, .placeholder = self.placeholder });
 					}
 					@node((ContextMenuList) { .host = elem, .style = s, .width = w });
 				};
@@ -286,66 +278,8 @@ fn void ContextMenu.update(&self, Element* elem, float dt) @dynamic
 	self.return_held = down;
 }
 
-<*
- The click-anywhere-else surface of an open menu. Internal.
-*>
-struct ContextCatcher (Widget)
-{
-	Element* host;
-}
-
-fn bool ContextCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
-{
-	if (event.kind == MouseEventKind.PRESS) self.host.widget_as(ContextMenu).dismiss(self.host);
-	return event.kind != MouseEventKind.MOVE;
-}
-
-<*
- The search field at the top of a searchable menu. Internal; copies what is
- typed into the menu's query each frame, the SelectSearch arrangement.
-*>
-struct ContextSearch (Widget)
-{
-	Element* host;
-	MenuStyle style;
-	float width;
-	bool focused;
-}
-
-fn Element* ContextSearch.build(&self, Element* elem) @dynamic
-{
-	ContextMenu* menu = self.host.widget_as(ContextMenu);
-	return @subtree(elem.ui)
-	{
-		@node(
-			(TextField) {
-				.placeholder = menu.placeholder.len > 0 ? menu.placeholder : "Search",
-				.style = select_search_style(self.style),
-			}
-		);
-	};
-}
-
-fn Vec2 ContextSearch.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	Vec2 field = elem.layout_child(0, cui::loose({ self.width - 2 * SELECT_SEARCH_MARGIN, cui::UNBOUNDED }));
-	elem.place_child(0, { SELECT_SEARCH_MARGIN, SELECT_SEARCH_MARGIN });
-	return { self.width, field.y + 2 * SELECT_SEARCH_MARGIN };
-}
-
-fn void ContextSearch.update(&self, Element* elem, float dt) @dynamic
-{
-	if (elem.children.len() == 0) return;
-	Element* field_elem = elem.children[0];
-	if (!self.focused)
-	{
-		field_elem.request_focus();
-		self.focused = true;
-	}
-	ContextMenu* menu = self.host.widget_as(ContextMenu);
-	String typed = field_elem.widget_as(TextField).value();
-	if (typed != menu.query()) menu.set_query(typed);
-}
+fn void context_outside(Element* host) @local => host.widget_as(ContextMenu).dismiss(host);
+fn void context_query_changed(Element* host) @local => host.widget_as(ContextMenu).query_changed();
 
 <*
  The rows of an open menu: headers and items, narrowed by the search,
@@ -371,7 +305,7 @@ struct ContextMenuList (Widget)
 macro void ContextMenuList.@rows(&self, ContextMenu* menu; @body(float y, float h, sz item, String label))
 {
 	MenuStyle s = self.style;
-	bool grouped = menu.query_len == 0;
+	bool grouped = menu.search.len == 0;
 	float y = 0;
 	String category = "";
 	bool first = true;
@@ -464,12 +398,12 @@ fn void ContextMenuList.paint_row(&self, Element* elem, Painter* painter, Contex
 			{ .color = s.hover_color, .border_radius = { 4.0, 4.0, 4.0, 4.0 } });
 	}
 	Color ink = it.disabled ? s.dim_color : s.text_color;
-	float indent = menu.query_len == 0 && it.category.len > 0 ? s.pad_x + 8 : s.pad_x;
+	float indent = menu.search.len == 0 && it.category.len > 0 ? s.pad_x + 8 : s.pad_x;
 	Vec2 m = elem.ui.text.measure(s.font, label, s.text_size);
 	float ty = top + (h - m.y) * 0.5f;
 	// The right-hand note: the item's hint, or its category while searching
 	// has taken the headers away.
-	String note = it.hint.len > 0 ? it.hint : (menu.query_len > 0 ? it.category : "");
+	String note = it.hint.len > 0 ? it.hint : (menu.search.len > 0 ? it.category : "");
 	float note_w = note.len > 0 ? elem.ui.text.measure(s.font, note, s.text_size - 1).x + s.pad_x : 0;
 	painter.text_box({ indent, ty }, label, { .font = s.font, .size = s.text_size, .color = ink },
 		elem.size.x - indent - s.pad_x - note_w, ELLIPSIS);
@@ -545,7 +479,7 @@ fn bool ContextMenuList.on_mouse(&self, Element* elem, MouseEvent event) @dynami
 		case RELEASE:
 			if (event.button != MouseButton.LEFT || !self.pressed) return true;
 			self.pressed = false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			sz at = inside ? self.item_at(menu, event.pos) : -1;
 			if (at >= 0) menu.choose(self.host, (usz)at);
 			return true;

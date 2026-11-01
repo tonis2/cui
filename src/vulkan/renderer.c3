@@ -25,7 +25,6 @@ import std::time;
 import cui;
 import vk;
 import c3w;
-import cui::camera;
 import image;
 import image::png;
 
@@ -532,15 +531,7 @@ fn void? Renderer.create_swapchain(&self)
 					.a = COMPONENT_SWIZZLE_IDENTITY,
 				}
 			)
-			.setSubresourceRange(
-				{
-					.aspectMask = IMAGE_ASPECT_COLOR_BIT,
-					.baseMipLevel = 0,
-					.baseArrayLayer = 0,
-					.layerCount = 1,
-					.levelCount = 1,
-				}
-			)
+			.setSubresourceRange(COLOR_RANGE)
 			.setImage(images[i])
 			.build(self.device)!);
 	}
@@ -873,13 +864,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
 		.setNewLayout(IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 		.setImage(self.swapchain_images[next_image])
 		.setSubresourceRange(
-			{
-				.aspectMask = IMAGE_ASPECT_COLOR_BIT,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			}
+			COLOR_RANGE
 		);
 
 	vk::cmdPipelineBarrier(
@@ -936,13 +921,7 @@ fn bool? Renderer.frame(&self, Ui* ui)
 		.setNewLayout(IMAGE_LAYOUT_PRESENT_SRC_KHR)
 		.setImage(self.swapchain_images[next_image])
 		.setSubresourceRange(
-			{
-				.aspectMask = IMAGE_ASPECT_COLOR_BIT,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			}
+			COLOR_RANGE
 		);
 
 	vk::cmdPipelineBarrier(
@@ -1110,13 +1089,7 @@ fn vk::Memory? Renderer.record_screenshot_copy(&self, CommandBuffer command_buff
 	if (!self.screenshot_supported) return SCREENSHOT_UNSUPPORTED~;
 
 	vk::Image source = self.swapchain_images[image_index];
-	ImageSubresourceRange range = {
-		.aspectMask = IMAGE_ASPECT_COLOR_BIT,
-		.baseMipLevel = 0,
-		.levelCount = 1,
-		.baseArrayLayer = 0,
-		.layerCount = 1,
-	};
+	ImageSubresourceRange range = COLOR_RANGE;
 
 	vk::Memory readback = vk::new_buffer(
 		&self.allocator,

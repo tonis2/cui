@@ -88,7 +88,6 @@ struct CanvasPass
 	// for update_atlas_image
 
 	RenderState pipeline;
-	DescriptorSetLayout descriptor_layout;
 	sz pipeline_texture_count; // texture count the pipeline was built for;
 	// 0 = not built yet (see rebuild_pipeline)
 
@@ -158,12 +157,7 @@ fn CanvasPass? new_canvas_pass(
 		.allocator = allocator,
 		.color_format = color_format,
 		.depth_format = depth_format,
-		.camera = camera::new(
-			eye: { 0.0, 0.0, 1.0 },
-			aspect: window_size.x / window_size.y,
-			min_zoom: 0.1,
-			max_zoom: 10
-		),
+		.camera = ui_camera(window_size),
 		.uniform_size = window_size,
 	};
 
@@ -299,12 +293,7 @@ fn void? CanvasPass.upload(&self, Ui* ui, Vec2 window_size)
 
 	if (window_size != self.uniform_size)
 	{
-		self.camera = camera::new(
-			eye: { 0.0, 0.0, 1.0 },
-			aspect: window_size.x / window_size.y,
-			min_zoom: 0.1,
-			max_zoom: 10
-		);
+		self.camera = ui_camera(window_size);
 		self.uniform_size = window_size;
 	}
 	ShaderUniforms uniform_data = { self.camera.perspective, self.camera.ui_view(), window_size };
@@ -315,58 +304,41 @@ fn void? CanvasPass.upload(&self, Ui* ui, Vec2 window_size)
 	// remember who has seen what. Leaving it set would re-count one change once
 	// per slot and re-upload for ever.
 	Canvas* canvas = &ui.canvas;
-	if (canvas.drawings_dirty)
-	{
-		self.drawings_revision++;
-		canvas.drawings_dirty = false;
-	}
-	if (canvas.transforms_dirty)
-	{
-		self.transforms_revision++;
-		canvas.transforms_dirty = false;
-	}
-	if (canvas.clips_dirty)
-	{
-		self.clips_revision++;
-		canvas.clips_dirty = false;
-	}
-
-	// Re-upload only what this slot is behind on, growing its buffers to
-	// whatever the UI actually produced. A slot brought up to the current
-	// revision holds the current lists, so the counts below describe it too.
 	self.draw_count = canvas.drawings.len();
+	self.sync_list(&canvas.drawings_dirty, &self.drawings_revision, &self.drawings_in_slot[self.slot],
+		&self.canvas_buffers[self.slot], canvas.drawings.entries, Drawing::size * self.draw_count)!;
+	self.sync_list(&canvas.transforms_dirty, &self.transforms_revision, &self.transforms_in_slot[self.slot],
+		&self.transform_buffers[self.slot], canvas.transforms.entries, Matrix4f::size * canvas.transforms.len())!;
+	self.sync_list(&canvas.clips_dirty, &self.clips_revision, &self.clips_in_slot[self.slot],
+		&self.clip_buffers[self.slot], canvas.clips.entries, ClipEntry::size * canvas.clips.len())!;
+}
 
-	if (self.drawings_in_slot[self.slot] != self.drawings_revision)
+<*
+ One of the canvas lists into this slot's buffer. A change bumps the revision
+ and clears the flag whether or not this slot is written: the slots remember
+ who has seen what. Only a slot behind on the revision is re-uploaded, its
+ buffer grown to fit.
+*>
+fn void? CanvasPass.sync_list(&self, bool* dirty, uint* revision, uint* in_slot, vk::Memory* buffer, void* data, sz bytes)
+{
+	if (*dirty)
 	{
-		if (self.draw_count > 0)
-		{
-			self.ensure_capacity(&self.canvas_buffers[self.slot], Drawing::size * self.draw_count)!;
-			self.canvas_buffers[self.slot].upload(canvas.drawings.entries, Drawing::size * self.draw_count);
-		}
-		self.drawings_in_slot[self.slot] = self.drawings_revision;
+		(*revision)++;
+		*dirty = false;
 	}
+	if (*in_slot == *revision) return;
+	if (bytes > 0)
+	{
+		self.ensure_capacity(buffer, bytes)!;
+		buffer.upload(data, bytes);
+	}
+	*in_slot = *revision;
+}
 
-	if (self.transforms_in_slot[self.slot] != self.transforms_revision)
-	{
-		sz transform_count = canvas.transforms.len();
-		if (transform_count > 0)
-		{
-			self.ensure_capacity(&self.transform_buffers[self.slot], Matrix4f::size * transform_count)!;
-			self.transform_buffers[self.slot].upload(canvas.transforms.entries, Matrix4f::size * transform_count);
-		}
-		self.transforms_in_slot[self.slot] = self.transforms_revision;
-	}
-
-	if (self.clips_in_slot[self.slot] != self.clips_revision)
-	{
-		sz clip_count = canvas.clips.len();
-		if (clip_count > 0)
-		{
-			self.ensure_capacity(&self.clip_buffers[self.slot], ClipEntry::size * clip_count)!;
-			self.clip_buffers[self.slot].upload(canvas.clips.entries, ClipEntry::size * clip_count);
-		}
-		self.clips_in_slot[self.slot] = self.clips_revision;
-	}
+// The camera that maps canvas pixels one-to-one onto a window of this size.
+fn Camera ui_camera(Vec2 window_size) @local
+{
+	return camera::new(eye: { 0.0, 0.0, 1.0 }, aspect: window_size.x / window_size.y, min_zoom: 0.1, max_zoom: 10);
 }
 
 <*
@@ -542,8 +514,8 @@ fn void CanvasPass.free(&self)
 <*
  Keeps the GPU copy of the Ui's glyph atlas in step with the CPU one.
 
- Before `flush` (with `creating` true): once the Ui has fonts, the atlas texture
- is created up front — paint caches drawings with the texture handle baked in,
+ Before `flush` (with `creating` true): the atlas texture is created up front,
+ since text and icons both draw from it — paint caches drawings with the texture handle baked in,
  so the handle must exist before the first `Painter.text` runs. After `flush`
  (`creating` false): re-upload the pixels whenever glyph baking marked them
  dirty, so glyphs painted this frame are sampled this frame.
@@ -556,7 +528,7 @@ fn void? CanvasPass.sync_text(&self, Ui* ui, bool creating)
 	cui::TextSystem* text = &ui.text;
 	if (creating)
 	{
-		if (text.texture == cui::NO_TEXTURE && text.fonts.len() > 0)
+		if (text.texture == cui::NO_TEXTURE)
 		{
 			self.textures.load_atlas(
 				text.atlas,
@@ -603,7 +575,7 @@ fn void? CanvasPass.rebuild_pipeline(&self)
 		self.pipeline.free(self.device); // also frees the descriptor layout
 	}
 
-	self.descriptor_layout = vk::descriptorSetLayoutCreateInfo()
+	DescriptorSetLayout layout = vk::descriptorSetLayoutCreateInfo()
 		.setFlags(DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT)
 		.setBindings(
 			{
@@ -624,7 +596,7 @@ fn void? CanvasPass.rebuild_pipeline(&self)
 		.build(self.device)!;
 
 	self.pipeline = (RenderState) {
-		.descriptor_layout = self.descriptor_layout,
+		.descriptor_layout = layout,
 		.shaders = {
 			{ .spirv = cui::shader_spirv[..], .entry = cui::SHADER_VERTEX_ENTRY, .stage = SHADER_STAGE_VERTEX_BIT },
 			{

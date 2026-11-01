@@ -42,14 +42,6 @@ import std::collections::list;
 
 
 <*
- Called when the field is submitted with Return.
-
- The string is the field's own buffer, valid only for the duration of the call —
- copy it if it has to outlive the callback.
-*>
-alias OnSubmit = fn void(Ui* ui, String text);
-
-<*
  Called whenever the user changes the text, on every edit rather than on Return.
 
  What a search box is built on: filtering only on submit makes a field the user
@@ -64,7 +56,6 @@ alias OnSubmit = fn void(Ui* ui, String text);
  The string is the field's own buffer, valid only for the duration of the call —
  copy it if it has to outlive the callback.
 *>
-alias OnChange = fn void(Ui* ui, String text);
 
 // How long a key is held before it starts repeating, and how long between the
 // repeats once it does. Close to what a desktop defaults to: the pause is what
@@ -130,8 +121,8 @@ struct TextField (Widget)
 	DString text;
 
 	String placeholder; // borrowed; must outlive the element
-	OnSubmit on_submit; // optional; Return
-	OnChange on_change; // optional; every edit
+	OnText on_submit; // optional; Return
+	OnText on_change; // optional; every edit
 	TextFieldStyle style;
 
 	<*

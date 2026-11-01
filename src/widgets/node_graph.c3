@@ -16,7 +16,7 @@
  **Each node is a `NodeCard` child** naming its node by index, holding that
  node's body: any widgets — fields, sliders, a preview image. The body is laid
  out at the card's width under the header, and works at any zoom, because the
- plane is drawn through a content transform (see `Viewport2D`): a TextField on a
+ plane is drawn through a content transform: a TextField on a
  card is clicked and typed into where it is drawn. Cards paint over the cards
  before them, editors included; pressing a card brings it to the front.
 
@@ -36,7 +36,7 @@
  - drag on empty space for a selection box; click a wire to select it;
  - double-click empty space, or Space or Tab, for `on_add_request`;
  - right-click anything for `on_context`; a right or middle drag pans, the
- wheel zooms (see `Viewport2D` for trackpads).
+ wheel zooms.
 
  **Keys** while the graph has the focus (a click on it gives it): Delete,
  Ctrl+C/X/V/D/A/Z/Y arrive as `GraphCommand`s, F frames the selection (or
@@ -1151,5 +1151,89 @@ fn void NodeGraphOverlay.paint(&self, Element* elem, Painter* painter) @dynamic
 		Vec4 box = cui::box_between(g.box_start, g.pointer);
 		painter.rect({ box.x, box.y }, { box.z - box.x, box.w - box.y },
 			{ .color = s.box_fill, .border_color = s.box_border, .border_width = px });
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The plane behind the graph: its view, background and grid.
+
+<*
+ The view changed: pan or zoom, by the user or by `set_view`.
+*>
+alias OnViewChange = fn void(Ui* ui, View2D view);
+
+<*
+ What a graph paints behind its plane. Pass a complete style or none at all:
+ a zero `grid_step` means "use DEFAULT_VIEWPORT_STYLE wholesale" — the
+ MenuStyle convention. Hide the grid with a transparent `grid` color.
+*>
+struct ViewportStyle
+{
+	Color background;
+	Color grid; // minor lines
+	Color grid_major; // every `major_every`-th line
+	float grid_step; // plane units between minor lines; 0 = the whole style defaults
+	int major_every; // 0 = no major lines
+	float min_spacing; // screen px: closer lines than this skip to every other one
+}
+
+const ViewportStyle DEFAULT_VIEWPORT_STYLE = {
+	.background = { 0.09, 0.10, 0.12, 1.0 },
+	.grid = { 0.14, 0.15, 0.18, 1.0 },
+	.grid_major = { 0.18, 0.19, 0.23, 1.0 },
+	.grid_step = 20.0,
+	.major_every = 5,
+	.min_spacing = 10.0,
+};
+
+fn ViewportStyle ViewportStyle.resolved(self)
+{
+	return self.grid_step > 0 ? self : DEFAULT_VIEWPORT_STYLE;
+}
+
+<*
+ Paints a background and a grid of the plane under a view: minor lines every
+ `grid_step` plane units, a major one every `major_every`, and lines that would
+ crowd closer than `min_spacing` on screen thinned to every other one until
+ they do not — so a far zoom draws a sparse grid rather than a grey sheet.
+
+ @param painter : `The painter of the element the grid fills.`
+ @param size : `The element's size.`
+ @param view : `The view of the plane.`
+ @param style : `Resolved.`
+*>
+fn void paint_plane_grid(Painter* painter, Vec2 size, View2D view, ViewportStyle style)
+{
+	painter.rect({ 0, 0 }, size, { .color = style.background });
+	float step = style.grid_step;
+	int every = style.major_every;
+	float z = view.scale();
+	while (step * z < style.min_spacing)
+	{
+		step *= 2;
+		// A major line stays a major line only while the multiple divides.
+		if (every > 0) every = every % 2 == 0 ? every / 2 : 0;
+	}
+	Vec2 top_left = view.to_plane({ 0, 0 });
+	Vec2 bottom_right = view.to_plane(size);
+	for (int pass = 0; pass < 2; pass++)
+	{
+		// Minor lines first, so the major ones are drawn over the crossings.
+		bool major_pass = pass == 1;
+		if (major_pass && every <= 1) break;
+		for (long i = (long)math::floor(top_left.x / step); (float)i * step <= bottom_right.x; i++)
+		{
+			bool major = every > 1 && i % every == 0;
+			if (major != major_pass && every > 1) continue;
+			float x = math::round(view.to_screen({ (float)i * step, 0 }).x);
+			painter.rect({ x, 0 }, { 1, size.y }, { .color = major ? style.grid_major : style.grid });
+		}
+		for (long i = (long)math::floor(top_left.y / step); (float)i * step <= bottom_right.y; i++)
+		{
+			bool major = every > 1 && i % every == 0;
+			if (major != major_pass && every > 1) continue;
+			float y = math::round(view.to_screen({ 0, (float)i * step }).y);
+			painter.rect({ 0, y }, { size.x, 1 }, { .color = major ? style.grid_major : style.grid });
+		}
 	}
 }

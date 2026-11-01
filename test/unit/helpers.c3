@@ -260,3 +260,26 @@ fn void UnmountProbe.unmount(&self, Element* elem) @dynamic
 {
 	if (self.count) (*self.count)++;
 }
+// ---------------------------------------------------------------------------
+// PlaneProbe: a clipping box whose children sit on a panned and zoomed plane —
+// the content transform a node graph uses, without the graph.
+
+struct PlaneProbe (Widget)
+{
+	View2D view;
+	Vec2 size;
+}
+
+fn Vec2 PlaneProbe.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	elem.clips = true;
+	Vec2 own = constraints.fill(self.size);
+	elem.layout_children(cui::loose({ cui::UNBOUNDED, cui::UNBOUNDED }));
+	elem.set_content_transform(self.view.matrix());
+	return own;
+}
+
+fn void PlaneProbe.paint(&self, Element* elem, Painter* painter) @dynamic
+{
+	painter.rect({ 0, 0 }, elem.size, { .color = { 0.1, 0.1, 0.1, 1 } });
+}

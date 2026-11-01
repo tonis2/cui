@@ -18,7 +18,7 @@ float scrubbed @local;
 int views @local;
 usz[8] boxed @local;
 usz boxed_count @local;
-CurveBox box_mode @local;
+SelectMode box_mode @local;
 int scale_dones @local;
 usz scaled_point @local;
 CurveLock scaled_axis @local;
@@ -27,7 +27,7 @@ float scale_pivot @local;
 int copies @local;
 int pastes @local;
 
-fn void note_box(Ui* ui, usz[] indices, CurveBox mode) @local
+fn void note_box(Ui* ui, usz[] indices, SelectMode mode) @local
 {
 	boxed_count = indices.len;
 	foreach (i, index : indices) boxed[i] = index;

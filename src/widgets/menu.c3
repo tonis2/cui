@@ -19,6 +19,7 @@ module cui::widgets;
 import std::math;
 
 import cui;
+import cui::icons;
 
 <*
  One look shared by MenuBar and Select. Pass a complete style or none at all: a
@@ -107,11 +108,6 @@ bitstruct MenuItemFlags : char
 alias MenuQuery = fn MenuItemFlags(Ui* ui);
 
 <*
- A selection callback for Select: which option was chosen.
-*>
-alias OnSelect = fn void(Ui* ui, usz index);
-
-<*
  One dropdown entry. `on_select` receives the Ui, like Button.on_click — the
  handler reaches the app through `ui.inherit`. When `state` is set it overrides
  the two bools each time the dropdown opens; without it they are read as-is.
@@ -142,6 +138,19 @@ struct Menu
 // PopupPanel — the chrome under any floating list.
 
 <*
+ The usual popup panel: fill, a 1 px border, rounded corners and the popup shadow.
+*>
+fn PopupPanel popup_panel(Color fill, Color border, Vec4 radii)
+{
+	return {
+		.style = { .color = fill, .border_width = 1.0, .border_color = border, .border_radius = radii },
+		.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
+		.shadow = POPUP_SHADOW,
+		.shadow_color = DIALOG_SHADOW_COLOR,
+	};
+}
+
+<*
  A floating panel: background, border, drop shadow, insets around one child,
  sized to that child. MenuBar and Select put their lists on one; a dialog or a
  tooltip would use the same widget.
@@ -160,7 +169,7 @@ struct PopupPanel (Widget)
 
 fn Vec2 PopupPanel.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
-	// Deliberately unconstrained, like SelectCatcher below: a popup floats over
+	// Deliberately unconstrained, like OutsideCatcher below: a popup floats over
 	// the layout rather than participating in it, and the anchor it hangs off —
 	// a Select's head, a menu bar's strip — is usually far smaller than the
 	// list. Clamping to the anchor's constraints is how a dropdown's rows end
@@ -210,61 +219,48 @@ fn Vec2 PopupMenuItem.layout(&self, Element* elem, Constraints constraints) @dyn
 	return constraints.constrain({ self.width > 0 ? self.width : PANEL_MIN_W, s.item_height });
 }
 
-fn void PopupMenuItem.paint(&self, Element* elem, Painter* painter) @dynamic
+<*
+ One menu row: the hover pill, the tick, the label and its dim shortcut. Shared
+ by popup menus and the menu bar's dropdowns.
+*>
+fn void paint_menu_row(Element* elem, Painter* painter, MenuItem item, MenuStyle s, bool hovered)
 {
-	MenuStyle s = self.style.resolved();
-	if (self.hovered && !self.item.disabled)
+	if (hovered && !item.disabled)
 	{
-		painter.rect(
-			{ 2, 0 },
-			{ elem.size.x - 4, elem.size.y },
-			{
-				.color = s.hover_color,
-				.border_radius = { 4.0, 4.0, 4.0, 4.0 },
-			}
-		);
+		painter.rect({ 2, 0 }, { elem.size.x - 4, elem.size.y }, { .color = s.hover_color, .border_radius = { 4.0, 4.0, 4.0, 4.0 } });
 	}
-	Color ink = self.item.disabled ? s.dim_color : s.text_color;
-	if (self.item.checked)
-	{
-		float h = elem.size.y;
-		painter.line({ 8.0, h * 0.52f }, { 11.0, h * 0.68f }, 1.6f, ink);
-		painter.line({ 11.0, h * 0.68f }, { 17.0, h * 0.32f }, 1.6f, ink);
-	}
-	Vec2 measured = elem.ui.text.measure(s.font, self.item.label, s.text_size);
+	Color ink = item.disabled ? s.dim_color : s.text_color;
+	if (item.checked) painter.icon({ 12.5f, elem.size.y * 0.5f }, 14, icons::CHECK, ink);
+	Vec2 measured = elem.ui.text.measure(s.font, item.label, s.text_size);
 	float text_y = (elem.size.y - measured.y) * 0.5f;
-	painter.text(
-		{ CHECK_GUTTER, text_y },
-		self.item.label,
-		{ .font = s.font, .size = s.text_size, .color = ink }
-	);
-
-	// The same dim right-hand reminder a menu bar row carries, so a context menu
-	// can teach the key that does the same thing.
-	if (self.item.shortcut.len > 0)
+	painter.text({ CHECK_GUTTER, text_y }, item.label, { .font = s.font, .size = s.text_size, .color = ink });
+	if (item.shortcut.len > 0)
 	{
-		Vec2 hint = elem.ui.text.measure(s.font, self.item.shortcut, s.text_size);
-		painter.text(
-			{ elem.size.x - s.pad_x - hint.x, text_y },
-			self.item.shortcut,
-			{ .font = s.font, .size = s.text_size, .color = s.dim_color }
-		);
+		Vec2 hint = elem.ui.text.measure(s.font, item.shortcut, s.text_size);
+		painter.text({ elem.size.x - s.pad_x - hint.x, text_y }, item.shortcut, { .font = s.font, .size = s.text_size, .color = s.dim_color });
 	}
 }
 
-fn void PopupMenuItem.on_hover(&self, Element* elem, bool entered) @dynamic
+<*
+ A menu row's hover: lit, with the pointing hand unless disabled — a disabled
+ row asks for nothing, leaving the panel's own arrow.
+*>
+fn void hover_menu_row(Element* elem, MenuItem item, bool* hovered, bool entered)
 {
-	self.hovered = entered;
-	if (entered && !self.item.disabled) elem.set_cursor(Cursor.POINTING_HAND);
+	*hovered = entered;
+	if (entered && !item.disabled) elem.set_cursor(Cursor.POINTING_HAND);
 	elem.request_paint();
 }
+
+fn void PopupMenuItem.paint(&self, Element* elem, Painter* painter) @dynamic => paint_menu_row(elem, painter, self.item, self.style.resolved(), self.hovered);
+fn void PopupMenuItem.on_hover(&self, Element* elem, bool entered) @dynamic => hover_menu_row(elem, self.item, &self.hovered, entered);
 
 fn bool PopupMenuItem.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	if (event.button != MouseButton.LEFT) return false;
 	if (event.kind == MouseEventKind.PRESS) return true;
 	if (event.kind != MouseEventKind.RELEASE) return false;
-	bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x && event.pos.y < elem.size.y;
+	bool inside = elem.contains_local(event.pos);
 	if (inside && !self.item.disabled && self.item.on_select) self.item.on_select(elem.ui);
 	return true;
 }
@@ -385,17 +381,7 @@ fn Element* MenuBar.build(&self, Element* elem) @dynamic
 			build_title_row(ui, elem, self.menus, s);
 
 			@tree(
-				(PopupPanel) {
-					.style = {
-						.color = s.panel_color,
-						.border_width = 1.0,
-						.border_color = s.panel_border,
-						.border_radius = { 0.0, 0.0, 6.0, 6.0 },
-					},
-					.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
-					.shadow = POPUP_SHADOW,
-					.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
-				}
+				popup_panel(s.panel_color, s.panel_border, { 0.0, 0.0, 6.0, 6.0 })
 			)
 			{
 				@tree((Column) { })
@@ -600,65 +586,8 @@ fn Vec2 MenuItemRow.layout(&self, Element* elem, Constraints constraints) @dynam
 	return constraints.constrain({ self.width, self.style.item_height });
 }
 
-fn void MenuItemRow.paint(&self, Element* elem, Painter* painter) @dynamic
-{
-	MenuStyle s = self.style;
-	if (self.hovered && !self.item.disabled)
-	{
-		painter.rect(
-			{ 2, 0 },
-			{ elem.size.x - 4, elem.size.y },
-			{
-				.color = s.hover_color,
-				.border_radius = { 4.0, 4.0, 4.0, 4.0 },
-			}
-		);
-	}
-
-	Color ink = self.item.disabled ? s.dim_color : s.text_color;
-	if (self.item.checked)
-	{
-		float h = elem.size.y;
-		painter.line({ 8.0, h * 0.52f }, { 11.0, h * 0.68f }, 1.6f, ink);
-		painter.line({ 11.0, h * 0.68f }, { 17.0, h * 0.32f }, 1.6f, ink);
-	}
-
-	Vec2 text    = elem.ui.text.measure(s.font, self.item.label, s.text_size);
-	float text_y = (elem.size.y - text.y) * 0.5f;
-	painter.text(
-		{ CHECK_GUTTER, text_y },
-		self.item.label,
-		{
-			.font = s.font,
-			.size = s.text_size,
-			.color = ink,
-		}
-	);
-
-	if (self.item.shortcut.len > 0)
-	{
-		Vec2 hint = elem.ui.text.measure(s.font, self.item.shortcut, s.text_size);
-		painter.text(
-			{ elem.size.x - s.pad_x - hint.x, text_y },
-			self.item.shortcut,
-			{
-				.font = s.font,
-				.size = s.text_size,
-				.color = s.dim_color,
-			}
-		);
-	}
-}
-
-fn void MenuItemRow.on_hover(&self, Element* elem, bool entered) @dynamic
-{
-	self.hovered = entered;
-	// A disabled row asks for nothing rather than for the arrow, leaving the
-	// panel underneath to answer — the arrow is what the panel already wants,
-	// and DEFAULT keeps that one decision in one place.
-	if (entered && !self.item.disabled) elem.set_cursor(Cursor.POINTING_HAND);
-	elem.request_paint();
-}
+fn void MenuItemRow.paint(&self, Element* elem, Painter* painter) @dynamic => paint_menu_row(elem, painter, self.item, self.style, self.hovered);
+fn void MenuItemRow.on_hover(&self, Element* elem, bool entered) @dynamic => hover_menu_row(elem, self.item, &self.hovered, entered);
 
 fn bool MenuItemRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
@@ -681,8 +610,7 @@ fn bool MenuItemRow.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			bar.arming = false;
 			if (arming && math::abs(drift.x) <= MENU_ARM_SLOP && math::abs(drift.y) <= MENU_ARM_SLOP) return true;
 
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (inside && !self.item.disabled)
 			{
 				if (self.item.on_select) self.item.on_select(elem.ui);
@@ -746,7 +674,7 @@ struct Select (Widget)
 {
 	String[] options; // borrowed
 	usz selected;
-	OnSelect on_change;
+	OnIndex on_change;
 	MenuStyle style;
 	float width; // 0 = size to the widest option
 	bool open;
@@ -756,23 +684,17 @@ struct Select (Widget)
 	// list. A fixed buffer rather than a DString so the widget owns no heap to
 	// free when a parent rebuild replaces it — searches are short, and an
 	// overlong one simply stops narrowing.
-	char[SELECT_QUERY_MAX] query_buf;
-	usz query_len;
+	QueryBuffer search;
 }
 
 // The current filter text, as the option list reads it.
-fn String Select.query(&self) => (String)self.query_buf[:self.query_len];
+fn String Select.query(&self) => self.search.str();
 
 // Replace the filter text; anything past the buffer is dropped.
-fn void Select.set_query(&self, String text)
-{
-	usz n = text.len < SELECT_QUERY_MAX ? text.len : SELECT_QUERY_MAX;
-	foreach (usz i, char c : text[:n]) self.query_buf[i] = c;
-	self.query_len = n;
-}
+fn void Select.set_query(&self, String text) => self.search.set(text);
 
 // The height the open list budgets for the search field: one line plus the
-// field's padding and the margin around it. Matches SelectSearch.layout.
+// field's padding and the margin around it. Matches MenuSearch.layout.
 fn float Select.search_row_height(&self, Ui* ui, MenuStyle s)
 {
 	float line = ui.text.measure(s.font, "Mg", s.text_size).y;
@@ -836,7 +758,7 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 	// narrowing it — opening a 40-clip list on the one that is bound beats opening
 	// it at the top every time.
 	float initial_scroll = 0.0f;
-	if (self.query_len == 0 && content_h > list_h)
+	if (self.search.len == 0 && content_h > list_h)
 	{
 		float target = (float)pick * item_h - (list_h - item_h) * 0.5f;
 		initial_scroll = math::clamp(target, 0.0f, content_h - list_h);
@@ -852,28 +774,18 @@ fn Element* Select.build(&self, Element* elem) @dynamic
 			// Seen through any zoom above the Select — one on a node editor's
 			// card still covers the whole window.
 			Vec4 window = elem.window_box();
-			@node((SelectCatcher) { .host = elem, .size = { window.z - window.x, window.w - window.y } })
+			@node((OutsideCatcher) { .host = elem, .on_outside = &select_closed, .size = { window.z - window.x, window.w - window.y } })
 				.set_offset({ window.x, window.y });
 			@node((SelectHead) { .text = current, .style = s, .width = w });
 			@tree(
-				(PopupPanel) {
-					.style = {
-						.color = s.panel_color,
-						.border_width = 1.0,
-						.border_color = s.panel_border,
-						.border_radius = { 0.0, 0.0, 6.0, 6.0 },
-					},
-					.insets = { 0.0, PANEL_PAD_Y, 0.0, PANEL_PAD_Y },
-					.shadow = POPUP_SHADOW,
-					.shadow_color = { 0.0, 0.0, 0.0, 0.45 },
-				}
+				popup_panel(s.panel_color, s.panel_border, { 0.0, 0.0, 6.0, 6.0 })
 			)
 			{
 				@tree((Column) { })
 				{
 					if (self.searchable)
 					{
-						@node((SelectSearch) { .host = elem, .style = s, .width = w });
+						@node((MenuSearch) { .host = elem, .query = &self.search, .style = s, .width = w });
 					}
 					@tree((Scroll) { .size = { w, list_h }, .scroll_offset = initial_scroll })
 					{
@@ -896,7 +808,7 @@ fn bool Select.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
 			self.open = !self.open;
-			if (self.open) self.query_len = 0; // each open starts an unfiltered list
+			if (self.open) self.search.len = 0; // each open starts an unfiltered list
 			elem.request_build();
 			return true;
 		case RELEASE:
@@ -926,13 +838,9 @@ fn void Select.close(&self, Element* elem)
 
 fn bool Select.on_key(&self, Element* elem, KeyEvent event) @dynamic
 {
-	if (self.open && event.down && event.key == Key.ESCAPE)
-	{
-		self.open = false;
-		elem.request_build();
-		return true;
-	}
-	return false;
+	if (!self.open || !event.down || event.key != Key.ESCAPE) return false;
+	self.close(elem);
+	return true;
 }
 
 <*
@@ -976,10 +884,7 @@ fn void SelectHead.paint(&self, Element* elem, Painter* painter) @dynamic
 		}
 	);
 
-	float cx = elem.size.x - s.pad_x - 3.0f;
-	float cy = elem.size.y * 0.5f;
-	painter.line({ cx - 4.0f, cy - 2.0f }, { cx, cy + 2.5f }, 1.4f, s.dim_color);
-	painter.line({ cx, cy + 2.5f }, { cx + 4.0f, cy - 2.0f }, 1.4f, s.dim_color);
+	painter.icon({ elem.size.x - s.pad_x - 3.0f, elem.size.y * 0.5f }, 16, icons::CHEVRON_DOWN, s.dim_color);
 }
 
 fn void SelectHead.on_hover(&self, Element* elem, bool entered) @dynamic
@@ -1053,15 +958,13 @@ fn bool SelectOption.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			return event.button == MouseButton.LEFT;
 		case RELEASE:
 			if (event.button != MouseButton.LEFT) return false;
-			bool inside = event.pos.x >= 0 && event.pos.y >= 0 && event.pos.x < elem.size.x
-				&& event.pos.y < elem.size.y;
+			bool inside = elem.contains_local(event.pos);
 			if (inside)
 			{
 				Select* select = self.host.widget_as(Select);
 				select.selected = self.index;
-				select.open = false;
+				select.close(self.host);
 				if (select.on_change) select.on_change(elem.ui, self.index);
-				self.host.request_build();
 			}
 			return true;
 		default:
@@ -1069,51 +972,69 @@ fn bool SelectOption.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	}
 }
 
-<*
- The click-anywhere-else-closes surface of an open Select. Internal. Its layout
- deliberately answers with the window size, ignoring the constraints it was
- offered — it is an overlay pretending the tree has an overlay layer, and its
- offset (set by Select.build) walks it back to the window origin.
-*>
-struct SelectCatcher (Widget)
-{
-	Element* host; // the Select element
-	Vec2 size; // the window, in the Select's own pixels
-}
-
-fn Vec2 SelectCatcher.layout(&self, Element* elem, Constraints constraints) @dynamic
-{
-	return self.size;
-}
-
-fn bool SelectCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
-{
-	if (event.kind != MouseEventKind.PRESS && event.kind != MouseEventKind.RELEASE) return false;
-	if (event.kind == MouseEventKind.PRESS)
-	{
-		Select* select = self.host.widget_as(Select);
-		select.open = false;
-		self.host.request_build();
-	}
-	return true;
-}
+fn void select_closed(Element* host) @local => host.widget_as(Select).close(host);
 
 <*
- The filter strip at the top of a searchable Select. Internal. It owns a
- TextField and, each frame, copies what has been typed into the host Select's
- query — which the option list below reads to narrow itself.
-
- The field and the list are separate children of the popup on purpose: a
- keystroke rebuilds the list (a composite drops and rebuilds its whole subtree),
- and were the field inside that subtree it would be torn down and rebuilt on
- every character, losing its focus and caret. Kept beside the list, it stays put
- while only the list churns.
+ The click-anywhere-else surface under an open popup: a press on it closes the
+ popup, and the press goes no further. Its layout answers with `size` (or what
+ it is offered, or the window), ignoring the constraints: an overlay pretending
+ the tree has an overlay layer, walked back to the window origin by its host.
 *>
-struct SelectSearch (Widget)
+struct OutsideCatcher (Widget)
 {
-	Element* host; // the Select element
+	Element* host; // the popup's owner
+	OnPress on_outside; // handed `host`, on the press
+	Vec2 size; // zero = the space offered, or the window when that is unbounded
+	bool swallow_all; // also take scrolls and every other event but moves
+}
+
+fn Vec2 OutsideCatcher.layout(&self, Element* elem, Constraints constraints) @dynamic
+{
+	if (self.size.x > 0) return self.size;
+	return constraints.max.x < cui::UNBOUNDED ? constraints.max : elem.ui.size;
+}
+
+fn bool OutsideCatcher.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
+{
+	if (event.kind == MouseEventKind.PRESS && self.on_outside) self.on_outside(self.host);
+	if (event.kind == MouseEventKind.PRESS || event.kind == MouseEventKind.RELEASE) return true;
+	return self.swallow_all && event.kind != MouseEventKind.MOVE;
+}
+
+<*
+ A popup's search text, kept on the widget that owns the popup.
+*>
+struct QueryBuffer
+{
+	char[SELECT_QUERY_MAX] buf;
+	usz len;
+}
+
+fn String QueryBuffer.str(&self) => (String)self.buf[:self.len];
+
+// Replace the text; anything past the buffer is dropped.
+fn void QueryBuffer.set(&self, String text)
+{
+	self.len = text.len < SELECT_QUERY_MAX ? text.len : SELECT_QUERY_MAX;
+	self.buf[:self.len] = text[:self.len];
+}
+
+<*
+ The filter strip at the top of a searchable popup. It owns a TextField and,
+ each frame, copies what has been typed into its host's `query`.
+
+ Kept beside the list rather than inside it on purpose: a keystroke rebuilds the
+ list, and a field inside it would be torn down on every character, losing its
+ focus and caret.
+*>
+struct MenuSearch (Widget)
+{
+	Element* host;
+	QueryBuffer* query; // the host's
+	OnPress on_change; // handed `host` after the query changed; may be null
 	MenuStyle style;
 	float width;
+	String placeholder; // empty = "Search"
 	bool focused; // whether the field has been handed the keyboard yet
 }
 
@@ -1136,43 +1057,35 @@ fn TextFieldStyle select_search_style(MenuStyle s)
 	};
 }
 
-fn Element* SelectSearch.build(&self, Element* elem) @dynamic
+fn Element* MenuSearch.build(&self, Element* elem) @dynamic
 {
 	return @subtree(elem.ui)
 	{
-		@node(
-			(TextField) {
-				.placeholder = "Search",
-				.style = select_search_style(self.style),
-			}
-		);
+		@node((TextField) { .placeholder = self.placeholder.len > 0 ? self.placeholder : "Search", .style = select_search_style(self.style) });
 	};
 }
 
-fn Vec2 SelectSearch.layout(&self, Element* elem, Constraints constraints) @dynamic
+fn Vec2 MenuSearch.layout(&self, Element* elem, Constraints constraints) @dynamic
 {
 	Vec2 field = elem.layout_child(0, cui::loose({ self.width - 2 * SELECT_SEARCH_MARGIN, cui::UNBOUNDED }));
 	elem.place_child(0, { SELECT_SEARCH_MARGIN, SELECT_SEARCH_MARGIN });
 	return { self.width, field.y + 2 * SELECT_SEARCH_MARGIN };
 }
 
-fn void SelectSearch.update(&self, Element* elem, float dt) @dynamic
+fn void MenuSearch.update(&self, Element* elem, float dt) @dynamic
 {
 	if (elem.children.len() == 0) return;
-	Element* field_elem = elem.children[0];
-
-	// Take the keyboard the first time the field is ticked, so an opened list
-	// narrows as soon as the user types — no click into the field first.
+	Element* field = elem.children[0];
+	// Take the keyboard the first tick, so typing narrows at once.
 	if (!self.focused)
 	{
-		field_elem.request_focus();
+		field.request_focus();
 		self.focused = true;
 	}
-
-	TextField* field = field_elem.widget_as(TextField);
-	Select* select   = self.host.widget_as(Select);
-	String typed     = field.value();
-	if (typed != select.query()) select.set_query(typed);
+	String typed = field.widget_as(TextField).value();
+	if (typed == self.query.str()) return;
+	self.query.set(typed);
+	if (self.on_change) self.on_change(self.host);
 }
 
 <*
@@ -1193,8 +1106,8 @@ struct SelectOptions (Widget)
 fn Element* SelectOptions.build(&self, Element* elem) @dynamic
 {
 	Select* select = self.host.widget_as(Select);
-	foreach (usz i, char c : select.query_buf[:select.query_len]) self.shown_query[i] = c;
-	self.shown_len = select.query_len;
+	foreach (usz i, char c : select.search.str()) self.shown_query[i] = c;
+	self.shown_len = select.search.len;
 	self.built = true;
 
 	String q = select.query();

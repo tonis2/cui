@@ -36,14 +36,6 @@ import std::collections::list;
 
 
 <*
- Called with an absolute path when a row is activated (a second click on the
- selected row, or Return) and, if `on_select` is set, when the selection moves.
-
- The path is borrowed for the duration of the call; copy it to keep it.
-*>
-alias OnChoose = fn void(Ui* ui, String path);
-
-<*
  How a FileBrowser draws. Zero takes `DEFAULT_FILE_BROWSER_STYLE` whole — the
  all-or-nothing rule `TextFieldStyle` and `DialogStyle` both follow.
 *>
@@ -135,8 +127,8 @@ struct FileBrowser (Widget)
 	*>
 	String[] mask;
 
-	OnChoose on_choose; // optional; a second click on the selected row, or Return
-	OnChoose on_select; // optional; whenever the selection moves
+	OnText on_choose; // optional; a second click on the selected row, or Return
+	OnText on_select; // optional; whenever the selection moves
 
 	<*
 	 Called with the new directory whenever the listing moves, `go_to` included.
@@ -145,7 +137,7 @@ struct FileBrowser (Widget)
 	 because walking into a folder drops the selection: something has to say
 	 where the browser now is, and "nothing is selected" is not that.
 	*>
-	OnChoose on_directory;
+	OnText on_directory;
 
 	FileBrowserStyle style;
 
@@ -574,27 +566,14 @@ fn void paint_up_icon(Painter* painter, Vec2 center, float size, Color color) @p
  Which row a point is in, or -1 for none. Shared by paint's hover highlight and
  `on_mouse`, so the two cannot disagree about where a row starts.
 *>
-fn int FileBrowser.row_at(&self, Element* elem, Vec2 pos)
-{
-	FileBrowserStyle style = self.style.resolved();
-	if (pos.x < 0 || pos.x >= elem.size.x || pos.y < 0) return -1;
-
-	int row = (int)(pos.y / style.row_height);
-	return row >= 0 && row < (int)self.rows() ? row : -1;
-}
+fn int FileBrowser.row_at(&self, Element* elem, Vec2 pos) => fixed_row_at(elem, pos, self.style.resolved().row_height, self.rows());
 
 fn bool FileBrowser.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 {
 	switch (event.kind)
 	{
 		case MOVE:
-			int row = self.row_at(elem, event.pos);
-			int lit = row < 0 ? 0 : row + 1;
-			if (lit != self.lit)
-			{
-				self.lit = lit;
-				elem.request_paint();
-			}
+			light_row(elem, &self.lit, self.row_at(elem, event.pos));
 			return false; // hover is not a consumed event; a drag through still scrolls
 		case PRESS:
 			if (event.button != MouseButton.LEFT) return false;
@@ -622,9 +601,7 @@ fn bool FileBrowser.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 // the pointer left through.
 fn void FileBrowser.on_hover(&self, Element* elem, bool entered) @dynamic
 {
-	if (entered || self.lit == 0) return;
-	self.lit = 0;
-	elem.request_paint();
+	if (!entered) light_row(elem, &self.lit, -1);
 }
 
 <*

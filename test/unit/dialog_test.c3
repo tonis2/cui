@@ -219,6 +219,56 @@ fn void a_modal_blocks_what_is_behind_it() @test
 	test::@check(elem.widget_as(Dialog).open); // no close_outside: the press is only swallowed
 }
 
+fn void a_modal_keeps_the_keys() @test
+{
+	Ui* ui = dialog_ui(modal: true);
+	defer ui.free();
+	Element* elem = open_dialog(ui);
+
+	test::@check(ui.dispatch_key({ .key = Key.G, .down = true }));
+	test::@check(ui.dispatch_key({ .key = Key.G, .down = false }));
+	test::@check(elem.widget_as(Dialog).open);
+	test::@check(ui.dispatch_key({ .key = Key.ESCAPE, .down = true }));
+	test::@check(!elem.widget_as(Dialog).open);
+	test::@check(!ui.dispatch_key({ .key = Key.G, .down = true })); // closed: the keys go on
+}
+
+fn void a_plain_dialog_passes_keys_on() @test
+{
+	Ui* ui = dialog_ui();
+	defer ui.free();
+	open_dialog(ui);
+	test::@check(!ui.dispatch_key({ .key = Key.G, .down = true }));
+}
+
+fn void closing_a_modal_gives_the_keys_to_the_one_under_it() @test
+{
+	closes = 0;
+	Ui* ui = cui::new_ui(DIALOG_WINDOW);
+	defer ui.free();
+	@canvas(ui)
+	{
+		@tree((Stack) { })
+		{
+			@node((Dialog) { .title = "Under", .body = &build_body, .modal = true }).with_id("under");
+			@node((Dialog) { .title = "Over", .body = &build_body, .modal = true }).with_id("over");
+		};
+	};
+	ui.flush();
+	Element* under = ui.find_id("under")!!;
+	Element* over = ui.find_id("over")!!;
+	under.widget_as(Dialog).set_open(under, true);
+	ui.flush();
+	over.widget_as(Dialog).set_open(over, true);
+	ui.flush();
+	test::@check(ui.focused == over);
+
+	over.widget_as(Dialog).set_open(over, false);
+	ui.flush();
+	test::@check(ui.focused == under);
+	test::@check(ui.dispatch_key({ .key = Key.G, .down = true }));
+}
+
 fn void close_outside_dismisses_from_the_backdrop() @test
 {
 	Ui* ui = dialog_ui(modal: true, close_outside: true);

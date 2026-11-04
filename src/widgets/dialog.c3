@@ -303,9 +303,14 @@ fn bool Dialog.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 
 fn bool Dialog.on_key(&self, Element* elem, KeyEvent event) @dynamic
 {
-	if (!self.open || !event.down || event.key != Key.ESCAPE) return false;
-	self.set_open(elem, false);
-	return true;
+	if (!self.open) return false;
+	if (event.down && event.key == Key.ESCAPE)
+	{
+		self.set_open(elem, false);
+		return true;
+	}
+	// The window behind a modal is out of reach, so its shortcuts are too.
+	return self.modal;
 }
 
 <*
@@ -331,11 +336,24 @@ fn void Dialog.set_open(&self, Element* elem, bool open)
 		// as an answer rather than having to watch for each of the ways.
 		if (self.on_close) self.on_close(elem.ui);
 		if (self.on_close_ctx) self.on_close_ctx(elem.ui, self.ctx);
+		focus_open_modal(elem.ui);
 	}
 
 	// A build, not a paint: this widget paints (the backdrop), so `request_paint`
 	// would stop at the backdrop and leave the panel exactly as it was.
 	elem.request_build();
+}
+
+// A modal left showing under the one that closed takes the keyboard back.
+fn void focus_open_modal(Ui* ui) @local
+{
+	Element* top;
+	ui.@each(Dialog; other)
+	{
+		Dialog* dialog = other.widget_as(Dialog);
+		if (dialog.open && dialog.modal) top = other;
+	};
+	if (top) top.request_focus();
 }
 
 <*

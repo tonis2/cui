@@ -124,6 +124,34 @@ struct TreeToggle
 }
 
 <*
+ This row with its own copies of `label` and `trailing`, for a row that outlives
+ what it was made from. `free_tree_rows` frees them.
+*>
+fn TreeRow TreeRow.owned(self)
+{
+	TreeRow row = self;
+	row.label = self.label.len > 0 ? self.label.copy(mem) : "";
+	row.trailing = self.trailing.len > 0 ? self.trailing.copy(mem) : "";
+	return row;
+}
+
+<*
+ Frees rows made with `TreeRow.owned`, and their array.
+
+ @param [&inout] rows : "Left empty"
+*>
+fn void free_tree_rows(TreeRow[]* rows)
+{
+	foreach (row : *rows)
+	{
+		if (row.label.len > 0) row.label.free(mem);
+		if (row.trailing.len > 0) row.trailing.free(mem);
+	}
+	if (rows.len > 0) alloc::free(mem, *rows);
+	*rows = { };
+}
+
+<*
  An indented list of rows with one selected.
 
  `selected` is a position in `rows`, or past its end for none — which is what a
@@ -463,31 +491,15 @@ struct EmptyStateTree (Widget)
 	TreeRow[] rows; // owned copy of the last build's rows
 }
 
-fn void EmptyStateTree.release(&self)
-{
-	foreach (row : self.rows)
-	{
-		if (row.label.len > 0) row.label.free(mem);
-		if (row.trailing.len > 0) row.trailing.free(mem);
-	}
-	if (self.rows.len > 0) alloc::free(mem, self.rows);
-	self.rows = { };
-}
-
 fn Element* EmptyStateTree.build(&self, Element* elem) @dynamic
 {
 	usz selected    = ~(usz)0; // none, unless the answer says otherwise
 	TreeRow[] given = self.rows_of(elem, &selected);
-	self.release();
+	free_tree_rows(&self.rows);
 	if (given.len > 0)
 	{
 		self.rows = alloc::new_array(mem, TreeRow, (sz)given.len);
-		foreach (usz i, row : given)
-		{
-			self.rows[i] = row;
-			self.rows[i].label = row.label.len > 0 ? row.label.copy(mem) : "";
-			self.rows[i].trailing = row.trailing.len > 0 ? row.trailing.copy(mem) : "";
-		}
+		foreach (usz i, row : given) self.rows[i] = row.owned();
 	}
 
 	return @subtree(elem.ui)
@@ -526,4 +538,4 @@ fn void EmptyStateTree.paint(&self, Element* elem, Painter* painter) @dynamic
 	);
 }
 
-fn void EmptyStateTree.unmount(&self, Element* elem) @dynamic => self.release();
+fn void EmptyStateTree.unmount(&self, Element* elem) @dynamic => free_tree_rows(&self.rows);

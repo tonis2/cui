@@ -76,6 +76,12 @@ fn void Segmented.describe(&self, Element* elem, Description* out) @dynamic
 	}
 }
 
+fn void IconStrip.describe(&self, Element* elem, Description* out) @dynamic
+{
+	IconStripStyle s = self.style.resolved();
+	foreach (usz i, cell : self.cells) out.part(cell.tip, { s.cell.x * (float)i, 0 }, s.cell);
+}
+
 fn void Steps.describe(&self, Element* elem, Description* out) @dynamic
 {
 	StepsStyle s = self.style.resolved();

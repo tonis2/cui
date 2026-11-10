@@ -52,15 +52,17 @@ alias TreePaintIcon = fn void(Painter* painter, Vec2 center, float size, ushort 
 alias OnRowMods = fn void(Ui* ui, usz row, Modifiers mods);
 
 <*
- One entry of a Tree's icon table: an SVG on an 18-unit viewBox, tinted `color`,
- or `dim` when it is a toggle that is off (zero `dim` falls back to `color`).
- `svg` is borrowed for as long as the Ui lives — the icon atlas is keyed by it.
+ One entry of a Tree's icon table: an SVG on an 18-unit viewBox, tinted `color`.
+ A toggle that is off draws `svg_off` instead when there is one (an open eye and
+ a shut one), tinted `dim` (zero `dim` falls back to `color`). The strings are
+ borrowed for as long as the Ui lives — the icon atlas is keyed by them.
 *>
 struct TreeIcon
 {
 	String svg;
 	Color color;
 	Color dim;
+	String svg_off;
 }
 
 // Tree icons are drawn for a 14 px slot on an 18-unit viewBox, so the strokes fit.
@@ -286,7 +288,8 @@ fn void Tree.draw_icon(&self, Painter* painter, Vec2 center, float size, ushort 
 	if (icon == 0 || (usz)icon > self.icons.len) return;
 	TreeIcon entry = self.icons[icon - 1];
 	Color ink = dim && ((Vec4)entry.dim).w > 0.0f ? entry.dim : entry.color;
-	painter.icon(center, size * TREE_ICON_VIEW_SCALE, entry.svg, ink);
+	String svg = dim && entry.svg_off.len > 0 ? entry.svg_off : entry.svg;
+	painter.icon(center, size * TREE_ICON_VIEW_SCALE, svg, ink);
 }
 
 <*
@@ -449,13 +452,20 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 			self.draw_icon(painter, { x + style.icon_size * 0.5f, mid }, style.icon_size, row.icon, false);
 		}
 
-		painter.text(
-			{ self.label_x(style, row), text_y },
+		// A label longer than the room between its icon and what is on the right —
+		// the trailing note, the switches — is cut with an ellipsis rather than
+		// painted over them.
+		float label_at = self.label_x(style, row);
+		float note_w = row.trailing.len > 0 ? elem.ui.text.measure(0, row.trailing, style.text_size).x + 8.0f : 0.0f;
+		painter.text_box(
+			{ label_at, text_y },
 			row.label,
 			{
 				.size = style.text_size,
 				.color = chosen ? style.selected_text : style.text,
-			}
+			},
+			right - note_w - label_at,
+			ELLIPSIS
 		);
 
 		for (usz c = 0; c < columns && self.has_icons(); c++)

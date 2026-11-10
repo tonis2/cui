@@ -464,6 +464,25 @@ struct Scroll (Widget)
 	Vec4 radii; // viewport corner radii (rounded clipping)
 	Color thumb_color; // zero alpha = THUMB_COLOR_DEFAULT
 	float content_extent; // content height, remembered by layout for on_mouse
+	// The viewport and offset the trees below were last painted for, so layout can
+	// tell a resize or a clamp from a pass that moved nothing. See `repaint_trees`.
+	Vec2 painted_viewport;
+	float painted_offset;
+}
+
+<*
+ Asks every Tree under `elem` to paint again.
+
+ A Tree paints only the rows in view, and a wheel tick re-emits cached drawings
+ without painting, so after the content moves under the clip the rows that just
+ came into view have not been drawn. This is the whole cost of that: one walk of
+ the content, and a repaint of each Tree in it, which is itself only the rows on
+ screen.
+*>
+fn void repaint_trees(Element* elem)
+{
+	if (elem.is_widget(Tree)) elem.request_paint();
+	foreach (child : elem.children) repaint_trees(child);
 }
 
 <*
@@ -527,6 +546,14 @@ fn Vec2 Scroll.layout(&self, Element* elem, Constraints constraints) @dynamic
 	elem.clips = true;
 	elem.clip_radii = self.radii;
 
+	if (viewport.x != self.painted_viewport.x || viewport.y != self.painted_viewport.y
+		|| self.scroll_offset != self.painted_offset)
+	{
+		self.painted_viewport = viewport;
+		self.painted_offset = self.scroll_offset;
+		repaint_trees(elem.children[0]);
+	}
+
 	// Thumb: proportional length, shown only on overflow.
 	ScrollThumb* thumb = elem.children[1].widget_as(ScrollThumb);
 	bool show          = max_scroll > 0;
@@ -581,7 +608,9 @@ fn bool Scroll.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	if (target == self.scroll_offset) return false; // at a limit: let ancestors scroll
 
 	self.scroll_offset = target;
+	self.painted_offset = target;
 	elem.children[0].set_offset({ 0, -target }); // offset write + re-emit, no relayout
+	repaint_trees(elem.children[0]);
 	self.place_thumb(elem, elem.size, max_scroll);
 	return true;
 }

@@ -44,6 +44,28 @@ alias OnRowToggle = fn void(Ui* ui, usz row, usz column);
 *>
 alias TreePaintIcon = fn void(Painter* painter, Vec2 center, float size, ushort icon, bool dim);
 
+<*
+ What a left-click on a row reports when the caller wants the modifier keys too:
+ shift to extend a selection, ctrl to toggle one row in or out. Set, it is called
+ *instead of* `on_select`.
+*>
+alias OnRowMods = fn void(Ui* ui, usz row, Modifiers mods);
+
+<*
+ One entry of a Tree's icon table: an SVG on an 18-unit viewBox, tinted `color`,
+ or `dim` when it is a toggle that is off (zero `dim` falls back to `color`).
+ `svg` is borrowed for as long as the Ui lives — the icon atlas is keyed by it.
+*>
+struct TreeIcon
+{
+	String svg;
+	Color color;
+	Color dim;
+}
+
+// Tree icons are drawn for a 14 px slot on an 18-unit viewBox, so the strokes fit.
+const float TREE_ICON_VIEW_SCALE = 18.0f / 14.0f;
+
 // How many toggle columns a row can carry at its right edge — an eye and one more.
 const usz TREE_TOGGLES = 2;
 
@@ -169,8 +191,14 @@ struct Tree (Widget)
 	OnRowAt on_context;
 	// A click on a shown toggle column. Unset, the click selects the row instead.
 	OnRowToggle on_row_toggle;
-	// Paints row and toggle icons. Unset, no icon slot is made.
+	// A left-click with the modifier keys, in place of `on_select` when set.
+	OnRowMods on_pick;
+	// Paints row and toggle icons. Unset, the `icons` table paints them, and with
+	// neither there is no icon slot.
 	TreePaintIcon paint_icon;
+	// Icons by number, `icons[icon - 1]`: how a host that cannot hand over a
+	// function pointer — a script — still draws its own. Borrowed.
+	TreeIcon[] icons;
 	TreeStyle style;
 
 	// The row under the pointer as its index + 1, so the zero default means "none"
@@ -244,6 +272,62 @@ fn usz Tree.lead(&self)
 	return 0;
 }
 
+// Whether icons can be drawn at all: a painter, or a table to draw from.
+fn bool Tree.has_icons(&self) => self.paint_icon != null || self.icons.len > 0;
+
+// One icon, from the caller's painter if it gave one and from the table otherwise.
+fn void Tree.draw_icon(&self, Painter* painter, Vec2 center, float size, ushort icon, bool dim)
+{
+	if (self.paint_icon)
+	{
+		self.paint_icon(painter, center, size, icon, dim);
+		return;
+	}
+	if (icon == 0 || (usz)icon > self.icons.len) return;
+	TreeIcon entry = self.icons[icon - 1];
+	Color ink = dim && ((Vec4)entry.dim).w > 0.0f ? entry.dim : entry.color;
+	painter.icon(center, size * TREE_ICON_VIEW_SCALE, entry.svg, ink);
+}
+
+<*
+ The part of this tree that can be seen, as a range of local y: the element's own
+ extent narrowed by every clipping ancestor — the Scroll it sits in, a dialog's
+ panel. A tree of thousands of rows paints only the rows inside it.
+
+ Valid while painting: emit sets an element's `absolute` before it paints, and an
+ ancestor's before any of its children. What it cannot see is the scroll moving,
+ since a wheel tick re-emits cached drawings without painting; `Scroll` repaints
+ the trees under it for that (`repaint_trees`).
+*>
+fn Vec2 Tree.visible_band(&self, Element* elem)
+{
+	float top    = 0.0f;
+	float bottom = elem.size.y;
+	for (Element* up = elem.parent; up != null; up = up.parent)
+	{
+		if (!up.clips) continue;
+		top    = math::max(top, up.absolute.y - elem.absolute.y);
+		bottom = math::min(bottom, up.absolute.y + up.size.y - elem.absolute.y);
+	}
+	return { top, math::max(bottom, top) };
+}
+
+// A range of rows: `first` up to, not including, `last`.
+struct TreeSpan
+{
+	usz first;
+	usz last;
+}
+
+// The first row a band can touch and one past the last, with a row of slack each
+// side so a half-shown row never pops.
+fn TreeSpan Tree.rows_in(&self, TreeStyle style, Vec2 band)
+{
+	int first = math::max((int)(band.x / style.row_height) - 1, 0);
+	int last  = math::min((int)(band.y / style.row_height) + 2, (int)self.rows.len);
+	return { (usz)first, (usz)math::max(last, first) };
+}
+
 <*
  Whether a point is on a row's disclosure mark rather than on the row itself.
 
@@ -290,7 +374,7 @@ fn int Tree.toggle_at(&self, Element* elem, TreeStyle style, usz row, Vec2 pos)
 fn float Tree.label_x(&self, TreeStyle style, TreeRow row)
 {
 	float x = self.text_x(style, row.depth);
-	if (row.icon != 0 && self.paint_icon && style.icon_size > 0.0f) x += style.icon_size + 5.0f;
+	if (row.icon != 0 && self.has_icons() && style.icon_size > 0.0f) x += style.icon_size + 5.0f;
 	return x;
 }
 
@@ -306,8 +390,10 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 	usz columns     = self.toggle_columns();
 	float right     = elem.size.x - style.padding - (float)columns * style.toggle_width;
 
-	foreach (usz i, row : self.rows)
+	TreeSpan span = self.rows_in(style, self.visible_band(elem));
+	for (usz i = span.first; i < span.last; i++)
 	{
+		TreeRow row  = self.rows[i];
 		float y      = (float)i * style.row_height;
 		bool chosen  = i == self.selected;
 		bool lit     = row.highlighted && !chosen && style.highlighted.w > 0.0f;
@@ -358,9 +444,9 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 			);
 		}
 
-		if (row.icon != 0 && self.paint_icon && style.icon_size > 0.0f)
+		if (row.icon != 0 && self.has_icons() && style.icon_size > 0.0f)
 		{
-			self.paint_icon(painter, { x + style.icon_size * 0.5f, mid }, style.icon_size, row.icon, false);
+			self.draw_icon(painter, { x + style.icon_size * 0.5f, mid }, style.icon_size, row.icon, false);
 		}
 
 		painter.text(
@@ -372,12 +458,12 @@ fn void Tree.paint(&self, Element* elem, Painter* painter) @dynamic
 			}
 		);
 
-		for (usz c = 0; c < columns && self.paint_icon; c++)
+		for (usz c = 0; c < columns && self.has_icons(); c++)
 		{
 			TreeToggle toggle = row.toggles[c];
 			if (!toggle.shown) continue;
 			float cx = elem.size.x - style.padding - ((float)c + 0.5f) * style.toggle_width;
-			self.paint_icon(painter, { cx, mid }, style.icon_size, toggle.icon, !toggle.on);
+			self.draw_icon(painter, { cx, mid }, style.icon_size, toggle.icon, !toggle.on);
 		}
 
 		if (row.trailing.len == 0) continue;
@@ -443,7 +529,15 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 			// set it again anyway, and setting it twice costs nothing.
 			self.selected = (usz)row;
 			elem.request_paint();
-			if (self.on_select) self.on_select(elem.ui, (usz)row);
+			if (self.on_pick)
+			{
+				self.on_pick(elem.ui, (usz)row, event.mods);
+			}
+			else if (self.on_select)
+			{
+				self.on_select(elem.ui, (usz)row);
+			}
+			elem.request_focus();
 			return true;
 
 		default:
@@ -456,6 +550,63 @@ fn bool Tree.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 fn void Tree.on_hover(&self, Element* elem, bool entered) @dynamic
 {
 	if (!entered) light_row(elem, &self.lit, -1);
+}
+
+<*
+ Up and down move the selection by a row, left and right close and open the row
+ that has children (a second left on a closed row is left alone: there is no
+ parent link to climb), and space flips the first toggle of the selected row.
+
+ Everything else is declined, so a dialog's ESC and an application's shortcuts
+ still reach them.
+*>
+fn bool Tree.on_key(&self, Element* elem, KeyEvent event) @dynamic
+{
+	if (!event.down || self.rows.len == 0) return false;
+	usz at = self.selected < self.rows.len ? self.selected : 0;
+
+	switch (event.key)
+	{
+		case Key.UP_ARROW:
+			at = self.selected < self.rows.len && at > 0 ? at - 1 : at;
+		case Key.DOWN_ARROW:
+			at = self.selected < self.rows.len && at + 1 < self.rows.len ? at + 1 : at;
+		case Key.LEFT_ARROW:
+			if (self.selected < self.rows.len && self.rows[at].expandable && self.rows[at].expanded && self.on_toggle)
+			{
+				self.on_toggle(elem.ui, at);
+				return true;
+			}
+			return false;
+		case Key.RIGHT_ARROW:
+			if (self.selected < self.rows.len && self.rows[at].expandable && !self.rows[at].expanded && self.on_toggle)
+			{
+				self.on_toggle(elem.ui, at);
+				return true;
+			}
+			return false;
+		case Key.SPACE:
+			if (self.selected < self.rows.len && self.rows[at].toggles[0].shown && self.on_row_toggle)
+			{
+				self.on_row_toggle(elem.ui, at, 0);
+				return true;
+			}
+			return false;
+		default:
+			return false;
+	}
+
+	self.selected = at;
+	elem.request_paint();
+	if (self.on_pick)
+	{
+		self.on_pick(elem.ui, at, {});
+	}
+	else if (self.on_select)
+	{
+		self.on_select(elem.ui, at);
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

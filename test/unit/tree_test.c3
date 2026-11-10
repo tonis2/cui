@@ -370,3 +370,127 @@ fn void a_highlighted_row_is_not_the_selection() @test
 	test::eq(selected_row, 0);
 	test::eq((int)widget.selected, 0);
 }
+
+// ---------------------------------------------------------------------------
+// Picking with modifiers, the keyboard, and the rows a long tree paints.
+
+bool picked_shift @local;
+bool picked_ctrl @local;
+int picked_row @local = -1;
+
+fn void note_pick(Ui* ui, usz row, Modifiers mods) @local
+{
+	picked_row = (int)row;
+	picked_shift = mods.shift;
+	picked_ctrl = mods.ctrl;
+}
+
+<*
+ `on_pick` takes the click in place of `on_select` and carries the modifier keys,
+ which is what an outliner needs to extend or toggle a selection.
+*>
+fn void a_pick_carries_the_modifier_keys() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	selected_row = -1;
+	picked_row = -1;
+	Element* tree = ui.@node(
+		(Tree) {
+			.rows = rows[..],
+			.selected = rows.len,
+			.on_select = &note_select,
+			.on_pick = &note_pick,
+		}
+	);
+	ui.build(ui.@node((Stack) { }, tree));
+	ui.flush();
+
+	cui_tests::frame(ui, on_label(2), left: true, keys: { Key.LEFT_SHIFT });
+	test::eq(picked_row, 2);
+	test::@check(picked_shift && !picked_ctrl, "shift-click did not report shift alone");
+	test::@check(selected_row == -1, "on_select ran as well as on_pick");
+
+	cui_tests::frame(ui, on_label(2));
+	cui_tests::frame(ui, on_label(3), left: true, keys: { Key.LEFT_CTRL });
+	test::eq(picked_row, 3);
+	test::@check(picked_ctrl && !picked_shift, "ctrl-click did not report ctrl alone");
+}
+
+<*
+ The arrow keys walk the selection a row at a time and stop at the ends, left and
+ right close and open a row that has children, and anything else is declined.
+*>
+fn void the_arrow_keys_walk_the_rows() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* tree = tree_of(ui);
+	Tree* widget  = tree.widget_as(Tree);
+	KeyEvent down = { .key = Key.DOWN_ARROW, .down = true };
+	KeyEvent up   = { .key = Key.UP_ARROW, .down = true };
+
+	test::@check(widget.on_key(tree, down), "down was declined");
+	test::eq((int)widget.selected, 0); // nothing was selected: the first row
+	widget.on_key(tree, down);
+	widget.on_key(tree, down);
+	widget.on_key(tree, down);
+	widget.on_key(tree, down);
+	test::eq((int)widget.selected, 3); // clamped at the last row
+	widget.on_key(tree, up);
+	test::eq((int)widget.selected, 2);
+	test::eq(selected_row, 2);
+
+	widget.selected = 1; // "Animations", open
+	toggled_row = -1;
+	test::@check(widget.on_key(tree, { .key = Key.LEFT_ARROW, .down = true }), "left on an open row was declined");
+	test::eq(toggled_row, 1);
+	toggled_row = -1;
+	test::@check(!widget.on_key(tree, { .key = Key.RIGHT_ARROW, .down = true }), "right on an open row was taken");
+	test::@check(!widget.on_key(tree, { .key = Key.A, .down = true }), "an unrelated key was taken");
+}
+
+// A column of rows tall enough to scroll, in a 100-high viewport.
+TreeRow[100] long_rows @local;
+
+fn Element* long_tree(Ui* ui, Element** out_scroll) @local
+{
+	foreach (i, &row : long_rows) *row = { .label = "row", .depth = 0 };
+	Element* tree = ui.@node((Tree) { .rows = long_rows[..], .selected = long_rows.len });
+	Element* scroll = ui.@node((Scroll) { .size = { 200, 100 } }, tree);
+	*out_scroll = scroll;
+	ui.build(ui.@node((Stack) { }, scroll));
+	ui.flush();
+	return tree;
+}
+
+<*
+ A tree in a Scroll paints the rows in view and a row of slack, not all of them,
+ and follows the scroll: after a wheel tick the band moves with the content.
+*>
+fn void a_long_tree_paints_only_the_rows_in_view() @test
+{
+	Ui* ui = cui::new_ui(cui_tests::WINDOW);
+	defer ui.free();
+
+	Element* scroll;
+	Element* tree = long_tree(ui, &scroll);
+	Tree* widget  = tree.widget_as(Tree);
+	TreeStyle style = widget.style.resolved();
+
+	Vec2 band = widget.visible_band(tree);
+	test::eq(band.x, 0.0f);
+	test::eq(band.y, 100.0f);
+	TreeSpan span = widget.rows_in(style, band);
+	test::eq((int)span.first, 0);
+	test::@check(span.last < 10, "painted %d rows of a 100-high view", (int)span.last);
+
+	cui_tests::frame(ui, { 50, 50 }, scroll: -4);
+	ui.flush();
+	band = widget.visible_band(tree);
+	test::@check(band.x > 0.0f, "the band did not follow the scroll: %.1f", band.x);
+	span = widget.rows_in(style, band);
+	test::@check(span.first > 0 && span.last - span.first < 10, "after scrolling the span was %d..%d", (int)span.first, (int)span.last);
+}

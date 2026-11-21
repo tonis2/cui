@@ -3,6 +3,7 @@
   "dependencies": ["vk", "c3w", "image", "font"],
   "sources": ["src/**"],
   "targets": {
+    "android-aarch64": {},
     "macos-x64": {},
     "macos-aarch64": {},
     "linux-x64": {},

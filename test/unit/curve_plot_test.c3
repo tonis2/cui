@@ -482,3 +482,123 @@ fn void a_curve_plot_copies_and_pastes() @test
 	cui_tests::frame(ui, empty, keys: paste[..]);
 	test::@check(copies == 1 && pastes == 1, "copy %d paste %d", copies, pastes);
 }
+
+int bends @local;
+int bend_dones @local;
+usz bend_series @local;
+float bend_x @local;
+Vec2 bend_to @local;
+
+fn void note_bend(Ui* ui, usz series, float x, Vec2 to, bool done) @local
+{
+	bends++;
+	if (!done) return;
+	bend_dones++;
+	bend_series = series;
+	bend_x = x;
+	bend_to = to;
+}
+
+// Two lines, the second flat at 2, on a plot that bends them.
+Vec2[2] flat_line = { { 0, 2 }, { 2, 2 } };
+CurveSeries[2] bend_lines @local;
+
+fn Element* bend_plot(Ui* ui) @local
+{
+	bends = 0;
+	bend_dones = 0;
+	bend_lines[0] = { .points = line[..] };
+	bend_lines[1] = { .points = flat_line[..] };
+	Element* elem = plot(ui, bend_lines[..], { }, { });
+	elem.widget_as(CurvePlot).on_bend = &note_bend;
+	return elem;
+}
+
+<*
+ A press on a line, off every point, bends it: the grab keeps its x, reports
+ live and once with `done`, and names the series pressed.
+*>
+fn void a_press_on_a_line_bends() @test
+{
+	Ui* ui = cui::new_ui({ 400, 300 });
+	defer ui.free();
+	reset();
+	Element* elem = bend_plot(ui);
+	CurvePlot* widget = elem.widget_as(CurvePlot);
+
+	Vec2 grab = widget.pixel_of(elem, { 1.5f, 2 });
+	Vec2 pull = widget.pixel_of(elem, { 1.6f, 6 });
+	cui_tests::frame(ui, grab);
+	cui_tests::frame(ui, grab, left: true);
+	cui_tests::frame(ui, grab + (Vec2){ 0, -10 }, left: true);
+	cui_tests::frame(ui, pull, left: true);
+	test::@check(widget.bent == 2 && bends >= 2 && bend_dones == 0, "bent %d, %d calls, %d done", widget.bent, bends, bend_dones);
+	cui_tests::frame(ui, pull);
+	test::@check(bend_dones == 1 && bend_series == 1, "%d done on series %d", bend_dones, bend_series);
+	test::@check(math::abs(bend_x - 1.5f) < 0.01f && bend_to.x == bend_x && math::abs(bend_to.y - 6) < 0.05f,
+		"bent at %f to %s", bend_x, bend_to);
+	test::@check(boxed_count == 0 && scrubbed == -1, "the bend also boxed or scrubbed");
+
+	// A click on a line without a drag scrubs, as a click on the plot does.
+	cui_tests::frame(ui, grab, left: true);
+	cui_tests::frame(ui, grab);
+	test::@check(bend_dones == 1 && scrubbed == 1.5f, "a click on the line bent, or scrubbed to %f", scrubbed);
+}
+
+fn void shift_on_a_line_still_boxes() @test
+{
+	Ui* ui = cui::new_ui({ 400, 300 });
+	defer ui.free();
+	reset();
+	CurvePoint[1] points = { { .at = { 1, 10 } } };
+	bend_lines[0] = { .points = line[..] };
+	bend_lines[1] = { .points = flat_line[..] };
+	Element* elem = plot(ui, bend_lines[..], points[..], { });
+	CurvePlot* widget = elem.widget_as(CurvePlot);
+	widget.on_bend = &note_bend;
+	bends = 0;
+
+	Vec2 grab = widget.pixel_of(elem, { 0.25f, 2 });
+	Vec2 over = widget.pixel_of(elem, { 1.2f, 11 });
+	Key[1] shift = { Key.LEFT_SHIFT };
+	cui_tests::frame(ui, grab, keys: shift[..]);
+	cui_tests::frame(ui, grab, left: true, keys: shift[..]);
+	cui_tests::frame(ui, over, left: true, keys: shift[..]);
+	cui_tests::frame(ui, over, keys: shift[..]);
+	test::@check(bends == 0 && boxed_count == 1 && box_mode == ADD, "%d bends, %d boxed", bends, boxed_count);
+}
+
+fn void escape_cancels_a_bend() @test
+{
+	Ui* ui = cui::new_ui({ 400, 300 });
+	defer ui.free();
+	reset();
+	Element* elem = bend_plot(ui);
+	CurvePlot* widget = elem.widget_as(CurvePlot);
+	Vec2 grab = widget.pixel_of(elem, { 1.5f, 2 });
+	Vec2 pull = widget.pixel_of(elem, { 1.5f, 6 });
+	cui_tests::frame(ui, grab);
+	cui_tests::frame(ui, grab, left: true);
+	cui_tests::frame(ui, pull, left: true);
+	cui_tests::frame(ui, pull, left: true, keys: { Key.ESCAPE });
+	cui_tests::frame(ui, pull);
+	test::@check(widget.bent == 0 && bend_dones == 0, "Esc left the bend %d, %d done", widget.bent, bend_dones);
+}
+
+fn void no_on_bend_keeps_the_box() @test
+{
+	Ui* ui = cui::new_ui({ 400, 300 });
+	defer ui.free();
+	reset();
+	CurvePoint[1] points = { { .at = { 1, 10 } } };
+	CurveSeries[1] series = { { .points = line[..] } };
+	Element* elem = plot(ui, series[..], points[..], { });
+	CurvePlot* widget = elem.widget_as(CurvePlot);
+	Vec2 grab = widget.pixel_of(elem, { 0.5f, 5 });
+	Vec2 over = widget.pixel_of(elem, { 1.2f, 11 });
+	cui_tests::frame(ui, grab);
+	cui_tests::frame(ui, grab, left: true);
+	cui_tests::frame(ui, over, left: true);
+	cui_tests::frame(ui, over);
+	test::@check(widget.bent == 0 && boxed_count == 1, "a line without on_bend did not box (%d)", boxed_count);
+}

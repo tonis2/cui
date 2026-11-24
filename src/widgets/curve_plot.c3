@@ -39,6 +39,11 @@
     cursor (sideways). `on_scale` gets the factor and the pivot, live and with
     `done`; the pressed point stays under the pointer.
   - Ctrl+C and Ctrl+V call `on_copy` and `on_paste`.
+  - With `on_bend` set, a plain press on a line, off every point and handle,
+    bends it: the grab keeps its x and follows the pointer up and down, the plot
+    draws a marker there, and `on_bend` gets the series, the x and the pointer,
+    live and once more with `done` on release. A click without a drag scrubs, and
+    Shift or Ctrl on a line boxes as on empty space.
 *>
 module cui::widgets;
 
@@ -123,6 +128,8 @@ alias OnCurveBox = fn void(Ui* ui, usz[] indices, SelectMode mode);
 // A scale of the selection about `pivot` along `axis`, the point `index` pressed; `done` on release.
 alias OnCurveScale = fn void(Ui* ui, usz index, CurveLock axis, float factor, float pivot, bool done);
 alias OnCurveView = fn void(Ui* ui, float zoom, float start);
+// A line pressed and dragged: the series, the x grabbed, and where the pointer is; `done` on release.
+alias OnCurveBend = fn void(Ui* ui, usz series, float x, Vec2 to, bool done);
 // A right press: the point under it or -1, the x it names, and where on screen.
 alias OnCurveContext = fn void(Ui* ui, sz point, float x, Vec2 pixel);
 // F (`all` false) or A (`all` true) was pressed: the caller picks what to frame.
@@ -167,6 +174,7 @@ struct CurvePlot (Widget)
 	OnCurveFrame on_frame; // F and A; unset, F fits the y axis again and A is ignored
 	OnClick on_copy;
 	OnClick on_paste;
+	OnCurveBend on_bend; // a press on a line, off every point: dragging bends it
 
 	CurvePlotStyle style;
 	Vec2 size; // per axis: 0 = fill the width, and the style's height
@@ -177,6 +185,8 @@ struct CurvePlot (Widget)
 	int lit; // hovered point, one-based
 	int held; // point being dragged, one-based
 	int held_handle; // handle being dragged, one-based
+	int bent; // series being bent, one-based
+	Vec2 bend_from; // the grabbed point of the line, in data space
 	Vec2 press;
 	Vec2 drag_to;
 	CurveLock lock;
@@ -341,6 +351,50 @@ fn int CurvePlot.point_at(&self, Element* elem, Vec2 pos)
 	return found;
 }
 
+<*
+ The series whose line passes nearest a pixel, one-based, or 0 past a few
+ pixels. `on` receives the line's point at the pixel's x, in data space.
+*>
+fn int CurvePlot.series_at(&self, Element* elem, Vec2 pos, Vec2* on)
+{
+	CurvePlotStyle s = self.style.resolved();
+	float reach      = s.point_radius + 2.0f;
+	float x_low      = self.data_of(elem, pos - (Vec2){ reach, 0 }).x;
+	float x_high     = self.data_of(elem, pos + (Vec2){ reach, 0 }).x;
+	float x          = self.data_of(elem, pos).x;
+	float closest    = reach;
+	int found        = 0;
+	foreach (usz n, line : self.series)
+	{
+		Vec2[] points = line.points;
+		if (points.len < 2) continue;
+		// The first segment that can reach `x_low`, found by halving: the points are in x order.
+		usz lo = 0;
+		usz hi = points.len - 1;
+		while (lo < hi)
+		{
+			usz mid = (lo + hi) / 2;
+			if (points[mid + 1].x < x_low) { lo = mid + 1; } else { hi = mid; }
+		}
+		for (usz i = lo; i + 1 < points.len && points[i].x <= x_high; i++)
+		{
+			Vec2 a = self.pixel_of(elem, points[i]);
+			Vec2 b = self.pixel_of(elem, points[i + 1]);
+			Vec2 ab = b - a;
+			float length_sq = ab.dot(ab);
+			float t = length_sq > 0 ? math::clamp((pos - a).dot(ab) / length_sq, 0.0f, 1.0f) : 0.0f;
+			float d = (a + ab * t - pos).length();
+			if (d > closest) continue;
+			closest = d;
+			found = (int)n + 1;
+			float run = points[i + 1].x - points[i].x;
+			float u = run > 0 ? math::clamp((x - points[i].x) / run, 0.0f, 1.0f) : 0.0f;
+			*on = { x, points[i].y + (points[i + 1].y - points[i].y) * u };
+		}
+	}
+	return found;
+}
+
 fn int CurvePlot.handle_at(&self, Element* elem, Vec2 pos)
 {
 	CurvePlotStyle s = self.style.resolved();
@@ -498,6 +552,19 @@ fn void CurvePlot.paint(&self, Element* elem, Painter* painter) @dynamic
 		}
 	}
 
+	// A line being bent: a hollow marker where the pointer takes it.
+	if (self.bent != 0 && self.dragged)
+	{
+		Vec2 from = self.pixel_of(elem, self.bend_from);
+		Vec2 to = self.pixel_of(elem, self.drag_to);
+		Vec2 a = from;
+		Vec2 b = to;
+		if (clip_segment(&a, &b, clip)) painter.line(a, b, 1.0f, s.hover);
+		Color hollow = s.hover;
+		hollow.a = 0;
+		painter.circle(to, s.point_radius, { .color = hollow, .border_color = s.hover, .border_width = 1.5f });
+	}
+
 	// Handles: a line from the point, a small dot at the end.
 	foreach (usz i, h : self.handles)
 	{
@@ -649,7 +716,7 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 	switch (event.kind)
 	{
 		case SCROLL:
-			if (self.held != 0 || self.held_handle != 0 || self.scrubbing || self.panning) return false;
+			if (self.held != 0 || self.held_handle != 0 || self.bent != 0 || self.scrubbing || self.panning) return false;
 			float delta = event.scroll_x != 0 ? event.scroll_x : event.scroll;
 			if (elem.ui.input.modifiers().shift)
 			{
@@ -723,6 +790,19 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 				}
 				return true;
 			}
+			Modifiers mods = elem.ui.input.modifiers();
+			if (self.on_bend && event.pos.y >= s.ruler_height && !mods.shift && !mods.ctrl)
+			{
+				Vec2 on;
+				int line = self.series_at(elem, event.pos, &on);
+				if (line != 0)
+				{
+					self.bent = line;
+					self.bend_from = on;
+					self.drag_to = on;
+					return true;
+				}
+			}
 			if (self.on_box && event.pos.y >= s.ruler_height)
 			{
 				self.boxing = true;
@@ -764,6 +844,15 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 				self.drag_to = self.data_of(elem, event.pos);
 				elem.request_paint();
 				if (self.on_handle_drag) self.on_handle_drag(elem.ui, (usz)(self.held_handle - 1), self.drag_to, false);
+				return true;
+			}
+			if (self.bent != 0)
+			{
+				if (!self.dragged && (event.pos - self.press).length() < cui::DRAG_SLOP) return true;
+				self.dragged = true;
+				self.drag_to = { self.bend_from.x, self.data_of(elem, event.pos).y };
+				elem.request_paint();
+				if (self.on_bend) self.on_bend(elem.ui, (usz)(self.bent - 1), self.bend_from.x, self.drag_to, false);
 				return true;
 			}
 			if (self.boxing)
@@ -825,6 +914,18 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 				self.dragged = false;
 				return true;
 			}
+			if (self.bent != 0)
+			{
+				usz which = (usz)(self.bent - 1);
+				bool moved = self.dragged;
+				self.bent = 0;
+				self.dragged = false;
+				elem.request_paint();
+				// A click on a line is a click on the plot: it scrubs.
+				if (!moved) { self.take(elem, event.pos.x); return true; }
+				if (self.on_bend) self.on_bend(elem.ui, which, self.bend_from.x, self.drag_to, true);
+				return true;
+			}
 			if (self.boxing)
 			{
 				self.boxing = false;
@@ -869,10 +970,11 @@ fn bool CurvePlot.on_mouse(&self, Element* elem, MouseEvent event) @dynamic
 fn bool CurvePlot.on_key(&self, Element* elem, KeyEvent event) @dynamic
 {
 	if (!event.down) return false;
-	if (event.key == Key.ESCAPE && (self.held != 0 || self.held_handle != 0 || self.scrubbing || self.boxing))
+	if (event.key == Key.ESCAPE && (self.held != 0 || self.held_handle != 0 || self.bent != 0 || self.scrubbing || self.boxing))
 	{
 		self.held = 0;
 		self.held_handle = 0;
+		self.bent = 0;
 		self.dragged = false;
 		self.scrubbing = false;
 		self.boxing = false;
@@ -880,7 +982,7 @@ fn bool CurvePlot.on_key(&self, Element* elem, KeyEvent event) @dynamic
 		elem.request_paint();
 		return true;
 	}
-	if (self.held != 0 || self.held_handle != 0 || self.scrubbing || self.boxing) return false;
+	if (self.held != 0 || self.held_handle != 0 || self.bent != 0 || self.scrubbing || self.boxing) return false;
 	bool ctrl = elem.ui.input.modifiers().ctrl;
 	if (ctrl)
 	{
